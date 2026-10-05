@@ -1,7 +1,7 @@
 # Rapport de fonctionnement — Amynna Holo Lib
 
-État des sources : commit `7858ebd` (« Interactions possible avec les fenêtres ») plus la capture de contrôles
-(non commitée), 5 octobre 2026.
+État des sources : commit `1bdd5de` (« Fix des captures des contrôles ») plus la capture du clavier et
+`demo_keyboard`, les widgets génériques (non commités), 6 octobre 2026.
 Mod Forge 47.4.10 pour Minecraft 1.20.1 (Java 17, mappings officiels), identifiant `hololib`, package racine
 `com.amynna.hololib`. Les chemins ci-dessous sont relatifs à `src/main/java/com/amynna/hololib/`.
 
@@ -463,10 +463,13 @@ Widgets disponibles ([`holo/widget`](src/main/java/com/amynna/hololib/holo/widge
 - `HoloWidget` : base, position relative au parent (et absolue : `absoluteX/Y`), visibilité, `contains`, `tick` ;
 - `HoloPanel` : conteneur, fond, bordure, `widgetAt` ;
 - `HoloLabel` : texte aligné ;
-- `HoloButton` : fond, bordure, texte, action client `onPress` ; interactible, déclenché par le clic gauche, droit
-  ou molette (`setTrigger`), éclairci au survol et à l'appui.
+- widgets interactifs génériques (boutons, interrupteur, barre de valeur, zone de texte...) : voir
+  [§7.5](#75-widgets-interactifs-génériques).
 
 `HoloCanvas.partialTick()` permet aux widgets d'interpoler leurs animations tenues par `tick()`.
+[`HoloTextMetrics`](src/main/java/com/amynna/hololib/holo/widget/HoloTextMetrics.java) mesure le texte hors du dessin
+(logique d'un widget : retour à la ligne, position d'un curseur) : police du jeu, branchée au setup client
+(`HoloBridges`), estimation de 6 px par caractère ailleurs.
 
 ### 6.4 RenderTypes et règles
 
@@ -507,13 +510,14 @@ Deux systèmes **séparés**, utilisables l'un sans l'autre :
 | `MOUSE_MOVE` | mouvements de la souris : la caméra ne tourne plus, les deltas vont au captor |
 | `ESCAPE`, `ENTER` | touches brutes (Entrée du pavé numérique comprise) ; Échap capturé n'ouvre pas le menu pause |
 | `mapping("key.jump")` | n'importe quel `KeyMapping` des options, vanilla ou moddé, désigné par son nom : il suit la touche choisie par le joueur |
+| `KEYBOARD` | **tout le clavier** : touches brutes (`onKeyPress` / `onKeyRelease`, codes dans `HoloKeys`) et texte tapé (`onCharTyped`, disposition et accents compris) ; aucune touche n'atteint le jeu |
 
 **Captor** ([`HoloCaptor`](src/main/java/com/amynna/hololib/holo/capture/HoloCaptor.java)) : `captures(control)`
 (consulté à chaque input), `onCaptureStart` / `onCaptureEnd`, `onPress` / `onRelease` (le relâchement va au captor qui
 a pris l'appui), `onScroll`, `onMouseMove(dYaw, dPitch)` (chaque frame tant qu'il prend `MOUSE_MOVE`, deltas en degrés
 avec sensibilité et inversion appliquées). Contexte
 ([`HoloCapture`](src/main/java/com/amynna/hololib/holo/capture/HoloCapture.java)) : joueur, durée de frame, regard,
-`setLook(yaw, pitch)`, `release()`.
+`setLook(yaw, pitch)`, `release()`, presse-papiers (`clipboard()` / `setClipboard`).
 
 **Démarrer** : [`HoloCaptures.begin(captor)`](src/main/java/com/amynna/hololib/holo/capture/HoloCaptures.java) /
 `end(captor)`, façade commune (un widget peut capturer sans classe client) branchée au setup client sur le contrôleur,
@@ -539,7 +543,24 @@ Comment chaque contrôle est retenu (vérifié dans les sources Forge 47.4.10) :
 | Échap, Entrée | `InputEvent.Key` ; les mappings liés à la touche sont neutralisés. `KeyboardHandler.keyPress` appelle `pauseGame` **avant** de poster `InputEvent.Key` : l'ouverture du `PauseScreen` est donc annulée dans `ScreenEvent.Opening` quand Échap est capturé et enfoncé |
 | molette | `InputEvent.MouseScrollingEvent`, annulable |
 | attaque / utilisation / pick maintenus | `InteractionKeyMappingTriggered` annulé (sans balancer le bras) si le bouton brut ou le mapping est capturé |
+| clavier entier | écran invisible (voir ci-dessous) |
 | mouvements | sans Mixin : vanilla tourne le joueur (`MouseHandler.turnPlayer`, appelé avant `onRenderTickStart` dans `Minecraft.runTick`), l'écart est lu puis reversé au début de chaque frame **et** de chaque tick (jamais de rotation non verrouillée envoyée au serveur), et livré une fois par frame |
+
+**Clavier entier** : en jeu sans écran, vanilla jette les caractères tapés (`KeyboardHandler.charTyped` ne les donne
+qu'à l'écran ouvert) et Forge ne poste aucun événement ; sans Mixin, seul un `Screen` les reçoit (c'est ce que fait le
+chat). Tant qu'un captor prend `KEYBOARD`, le contrôleur ouvre donc
+[`HoloKeyboardScreen`](src/main/java/com/amynna/hololib/client/capture/HoloKeyboardScreen.java) au début de la frame
+suivante, et le ferme dès que plus personne ne le prend :
+- l'écran ne dessine rien, ne met pas en pause et ne se ferme pas sur Échap (la touche va au captor) ;
+- sous un écran, vanilla ne lit plus aucun `KeyMapping` (`handleKeybinds` exige `screen == null`, `setScreen` fait
+  `KeyMapping.releaseAll()`) : tout le clavier est retiré au jeu ;
+- chaque touche va au captor le plus récent qui prend `KEYBOARD` (touche brute, puis ses caractères) ou un contrôle lié
+  à cette touche (Échap, Entrée, mapping : appui apparié, caractères ignorés). Un pavé qui capture les déplacements
+  au-dessus d'un éditeur reçoit donc ZQSD pendant que les autres touches vont à l'éditeur ;
+- `setScreen` libère la souris, et `MouseHandler.grabMouse` refermerait l'écran : la souris est reprise en posant le
+  drapeau `mouseGrabbed` par réflexion (`ObfuscationReflectionHelper`, noms SRG). La caméra tourne toujours,
+  l'interaction au regard continue (on peut cliquer une autre fenêtre en tapant), la molette arrive par l'écran. Si la
+  réflexion échoue, le curseur reste libre comme sous le chat.
 
 ### 7.2 Interaction au regard : le picking
 
@@ -568,12 +589,15 @@ de chaque frame (après le verrou de rotation) et signale le survol à l'éléme
 prend un contrôle si un élément de la chaîne survolée l'intercepte.
 
 [`HoloInteractible`](src/main/java/com/amynna/hololib/holo/interact/HoloInteractible.java) :
-- `intercepts(HoloControl)` : ce que l'élément prend **tant qu'il est visé** — tout sauf `MOUSE_MOVE`, qui figerait le
-  regard sur lui ;
+- `intercepts(HoloControl)` : ce que l'élément prend **tant qu'il est visé** — tout sauf `MOUSE_MOVE` et `KEYBOARD`,
+  qui retiendraient le joueur. Par défaut, il aiguille vers `interceptsClick`, `interceptsScroll` et `interceptsKey`
+  (Échap, Entrée, mappings), pour que des traits différents se combinent ;
 - un contrôle non intercepté **remonte** : cible → panneaux parents interactibles → objet (fenêtre), puis au jeu.
   `HoloWindow.setInterceptedInputs(...)` permet au fond d'une fenêtre de bloquer les clics ;
 - callbacks : `onLeftClick` / `onLeftClickRelease` (idem droit, molette), `onScroll`, `onControl(control, pressed)`
   pour Échap, Entrée et les mappings. Le relâchement va à l'élément qui a pris l'appui, même si le regard est parti ;
+  entre les deux, `onDrag` est appelé chaque frame avec le regard projeté sur l'objet ;
+- `hoverMargin()` : marge de sortie du survol (voir [§7.5](#75-widgets-interactifs-génériques)) ;
 - contexte ([`HoloInteraction`](src/main/java/com/amynna/hololib/holo/interact/HoloInteraction.java)) : point visé
   dans le repère de l'élément (pixels du widget), regard, direction du centre de l'objet, durée de frame, et
   `capture(captor)` : capture explicite **liée à l'objet**, terminée si l'objet disparaît, n'est plus dessiné ou n'est
@@ -598,6 +622,59 @@ voyage avec l'action). Le serveur ([§3.3](#33-holocontainers--index-et-événem
 l'accès, la visibilité `PUBLIC` pour un non-propriétaire et, pour la mémoire d'un autre joueur, qu'il en est viewer ;
 puis `handleAction(player, source, buf)` du module valide le contenu. Ainsi, un joueur qui inspecte B peut cliquer la
 fenêtre `Local` de B (vue autour de sa tête) si B l'a ouverte à tous.
+
+### 7.5 Widgets interactifs génériques
+
+Package [`holo/widget/control`](src/main/java/com/amynna/hololib/holo/widget/control/package-info.java), code commun.
+Deux niveaux : des **traits** (interfaces à méthodes par défaut) qu'implémente le composant final d'un module, et des
+**widgets prêts à l'emploi** (classes non finales, préfixées `HoloWidget`) qui les combinent.
+
+**Traits** — chacun branche les callbacks d'interaction ou de capture et ne demande que l'état et les réactions propres
+au composant :
+
+| Trait | Étend | Fournit | À implémenter |
+|---|---|---|---|
+| `HoloHoverable` | `HoloInteractible` | `onHover` / `onHoverRelease` → `setHovered` + `onHoverChanged` | `hovered()`, `setHovered` |
+| `HoloClickable` | `HoloInteractible` | interception des boutons de `clickableBy` ; les trois clics → `onClick(ctx, bouton)` / `onClickRelease` | `clickableBy`, `onClick` |
+| `HoloScrollable` | `HoloInteractible` | molette interceptée, convertie en crans entiers | `onScrolled(ctx, crans)` |
+| `HoloToggleable` | `HoloClickable` | clic gauche / droit → `onToggle(ctx, !isOn())` | `isOn`, `setOn`, `onToggle` |
+| `HoloDraggable` | `HoloClickable` | prise au clic, puis chaque frame l'écart regard / point de prise → `onDragMove`, `onDrop` au lâcher | `dragState()`, `onDragMove` |
+| `HoloTextInput` | `HoloClickable`, `HoloHoverable`, `HoloCaptor` | clic → capture du clavier ; édition d'un `HoloTextBuffer` ; sortie par Échap (et Entrée sur une ligne) ou quand le regard s'éloigne au-delà de `hoverMargin()` (24 px) ; `onSubmit` à la fin | `buffer()`, `onSubmit`, survol |
+| `HoloPointerInput` | `HoloClickable`, `HoloHoverable`, `HoloCaptor` | capture de la souris au clic ou au survol (`captureOnHover`), sortie par Échap / Entrée | `onMouseMove`, survol |
+| `HoloDirectionalInput` | `HoloClickable`, `HoloCaptor` | clic → capture des contrôles de déplacement (`HoloDirections`) et d'Échap / Entrée (sortie) | `directions()` |
+
+Les traits se combinent sans conflit grâce à la décomposition de `HoloInteractible.intercepts` en
+`interceptsClick` / `interceptsScroll` / `interceptsKey` : un composant peut être à la fois cliquable, défilable et
+survolable. Si deux traits fournissent le même défaut (deux captures), le composant le redéfinit et appelle
+`Trait.super`. Utilitaires : `HoloTextBuffer` (moteur d'édition sans dessin : retour à la ligne, défilement, curseur,
+bornes, `sanitize` pour le serveur) et `HoloDirections`.
+
+**Deux appuis du framework** pour ces traits ([`HoloInteractions`](src/main/java/com/amynna/hololib/client/interact/HoloInteractions.java),
+[`HoloPicking.project`](src/main/java/com/amynna/hololib/client/render/holo/HoloPicking.java)) :
+- **glisser** : chaque frame, pour chaque clic intercepté encore enfoncé, le regard est projeté sur le plan de l'objet
+  (même hors de l'élément) et livré à `onDrag(ctx, bouton)` dans le repère de l'élément ;
+- **marge de survol** (`hoverMargin()`, widgets d'une fenêtre) : tant que le regard, sur le fond de la fenêtre ou en
+  dehors, reste dans le rectangle de l'élément élargi de la marge, son survol continue ; viser un autre élément y met
+  fin aussitôt.
+
+**Widgets prêts à l'emploi** :
+
+| Widget | Traits | Rôle |
+|---|---|---|
+| `HoloWidgetMultiButton` | clickable, hoverable | une action par clic (`on(bouton, action)`) |
+| `HoloWidgetButton` | (hérite du précédent) | une action, déclenchée par un ou plusieurs clics (`setTriggers`) |
+| `HoloWidgetHoverZone` | hoverable | réagit au regard (fondu, texte, écouteur), ligne de détail |
+| `HoloWidgetScrollZone` | (hérite) + scrollable | crans de molette → écouteur |
+| `HoloWidgetSwitch` | toggleable, hoverable | interrupteur ON / OFF ; prédictif ou non (état confirmé par le serveur) |
+| `HoloWidgetValueBar` | scrollable, clickable, hoverable | valeur 0..1 en pourcentage : molette par pas, clic et glisser |
+| `HoloWidgetTextBox` | text input | zone de texte mono ou multiligne |
+| `HoloWidgetMouseBox` | pointer input | point piloté par la souris, recentrage optionnel |
+| `HoloWidgetDraggable` | draggable, hoverable | pastille à glisser au regard, bornée à son panneau |
+| `HoloWidgetKeyBox` | directional input, hoverable | point piloté au clavier ; hooks `onPointMoved`, `drawContent` |
+
+Leurs écouteurs s'exécutent côté client : un widget envoie une action au module (`sendAction(source, ...)`), le serveur
+valide, puis le module repose l'état synchronisé (`setValue`, `setOn`, `setText`, `setPosition`... ignorés pendant une
+saisie ou un glisser en cours).
 
 ---
 
@@ -683,9 +760,10 @@ d'inspection de la nouvelle mémoire s'appliquent aussitôt. Aucune commande ne 
 ### 8.9 Clic sur un bouton de `demo_interaction`
 
 1. Début de frame : `HoloControlCapture` verrouille éventuellement la rotation, puis `HoloInteractions` lance le rayon :
-   le bouton « Gauche » de la fenêtre est visé → `onHover` (le bouton s'éclaircit).
+   le `HoloWidgetButton` « Gauche » est visé → `onHover` (trait `HoloHoverable` : il s'éclaircit).
 2. Clic gauche : `MouseButton.Pre` → aucune capture explicite ne prend `LEFT_CLICK`, le captor passif de l'interaction
-   oui (le bouton l'intercepte) → l'événement est annulé (pas d'attaque) et `onLeftClick` appelle `onPress`.
+   oui (`interceptsClick` → `clickableBy`) → l'événement est annulé (pas d'attaque) et `onLeftClick` → `onClick` →
+   l'action du bouton.
 3. `onPress` → `sendAction(window, ...)` : `HoloModuleActionPacket` avec la clé `interaction`. Le serveur vérifie
    l'accès de la fenêtre, incrémente le compteur et `markDirty()` ; au `flush`, l'état part au propriétaire et aux
    viewers, `onSync` met le texte à jour.
@@ -693,12 +771,24 @@ d'inspection de la nouvelle mémoire s'appliquent aussitôt. Aucune commande ne 
 
 ### 8.10 Zone de capture de `demo_interaction`
 
-1. Le regard entre dans la zone → `onHover` → `ctx.capture(zone)` : capture explicite liée à la fenêtre, qui prend
-   `MOUSE_MOVE`, `ESCAPE`, `ENTER` et `mapping("key.jump")`.
+1. Le regard entre dans la `HoloWidgetMouseBox` (capture au survol) → `onHoverChanged` → `ctx.capture(box)` : capture
+   explicite liée à la fenêtre, qui prend `MOUSE_MOVE`, `ESCAPE`, `ENTER` et le recentrage `mapping("key.jump")`.
 2. Chaque frame : la rotation est reversée, les deltas déplacent le point de la zone. Saut (quelle que soit sa touche)
    est neutralisé et recentre le point : le joueur ne saute pas.
 3. Échap : `pauseGame` → `ScreenEvent.Opening` annulé ; puis `InputEvent.Key` → `onPress(ESCAPE)` → `release()`. La
    caméra tourne de nouveau ; la zone n'est reprise qu'après l'avoir quittée puis re-survolée.
+
+### 8.11 Édition de texte dans `demo_keyboard`
+
+1. Clic sur la `HoloWidgetTextBox` → `ctx.capture(box)` (trait `HoloTextInput`) : capture explicite de `KEYBOARD`,
+   liée à la fenêtre.
+2. Début de frame suivante : `HoloKeyboardScreen` s'ouvre, la souris est reprise. Chaque touche arrive par l'écran :
+   `onKeyPress` (Retour arrière, flèches, Entrée, Ctrl+V...) puis `onCharTyped` pour le texte. Après chaque
+   modification, le `HoloTextBuffer` recalcule sa mise en page : retour à la ligne automatique à la largeur du widget (par mot,
+   sinon par caractère, mesuré par `HoloTextMetrics`), abscisse du curseur, défilement (8 lignes visibles).
+3. Échap → `release()`, ou le regard s'éloigne au-delà de la marge (24 px) → fin du survol → fin de la capture ;
+   `onCaptureEnd` → `onSubmit` envoie le texte (`sendAction(window, ...)`) ; plus personne ne prend le clavier :
+   l'écran se ferme. Le serveur borne le texte (`HoloTextBuffer.sanitize`), le sauvegarde et le renvoie.
 
 ---
 
@@ -726,10 +816,22 @@ Modules de démonstration (`demo/`) :
 - `hololib:demo_world_pos` : cube qui tourne un bloc au-dessus du marker ;
 - `hololib:demo_player` : fenêtres HUD, caméra (1,8 bloc) et caméra follow (1,5 bloc), plus un cube au-dessus de la
   tête. Ces objets sont publics, sauf le HUD ;
-- `hololib:demo_interaction` (joueur) : une fenêtre caméra à 1,6 bloc, publique, avec trois boutons (clic gauche,
-  droit, molette), une zone qui compte la molette, une zone qui réagit au regard, une petite animation, une zone de
-  capture (souris et Saut, sortie par Échap ou Entrée) et un bouton qui bascule l'accès propriétaire / tous (seul le
-  propriétaire peut le basculer). Les compteurs sont l'état serveur du module.
+- `hololib:demo_interaction` (joueur) : une fenêtre caméra à 1,6 bloc, publique, faite des widgets génériques : un
+  `HoloWidgetButton` (clic gauche) et un `HoloWidgetMultiButton` (droit, molette), une `HoloWidgetScrollZone` qui
+  compte la molette, une `HoloWidgetHoverZone`, une petite animation, une `HoloWidgetMouseBox` (capture au survol,
+  Saut recentre, sortie par Échap ou Entrée), une `HoloWidgetValueBar`, une `HoloWidgetDraggable` à glisser dans sa
+  bande et un `HoloWidgetSwitch` « Ouvert à tous » (seul le propriétaire le bascule). Compteurs, valeur, position de
+  la pastille et accès sont l'état serveur du module.
+
+- `hololib:demo_keyboard` (joueur) : deux fenêtres caméra à 1,6 bloc, chacune avec un `HoloWidgetSwitch` « Ouvert à
+  tous » (seul le propriétaire le bascule). Le **pavé** : un clic capture les contrôles de déplacement
+  des options (avancer, reculer, gauche, droite), qui pilotent **son** point au lieu du joueur ; Échap ou Entrée rend
+  la main (`DemoPad`, une `HoloWidgetKeyBox` multijoueur). Un point par joueur, état serveur synchronisé à tous : un autre joueur qui inspecte le propriétaire et a
+  accès au pavé fait apparaître son propre point en cliquant (prédit localement, position envoyée toutes les 2 ticks,
+  points des autres lissés ; retiré à la déconnexion). L'**éditeur** (`HoloWidgetTextBox`) : un clic capture tout le
+  clavier (retour à la ligne automatique, défilement, curseur, flèches, Début / Fin, Ctrl+V, Ctrl+C, 512 caractères) ;
+  Échap, ou un regard qui s'éloigne de la zone, valide ; le texte est sauvegardé et visible des joueurs qui
+  inspectent.
 
 Un module déjà installé garde ses transforms sauvegardés : réinstaller un module de démo pour voir ses valeurs par
 défaut.
@@ -787,15 +889,25 @@ L'objet fonctionne alors dans les quatre familles, sans renderer de famille à �
 
 ### Rendre un objet interactible
 
-- Une `HoloWindow` l'est déjà : ajouter des widgets qui implémentent `HoloInteractible` (ou des `HoloButton`), régler
-  `setAccess(...)` côté serveur si d'autres joueurs doivent pouvoir l'utiliser.
+- Une `HoloWindow` l'est déjà : y ajouter des widgets de `holo.widget.control` (prêts à l'emploi ou composés de
+  traits), régler `setAccess(...)` côté serveur si d'autres joueurs doivent pouvoir l'utiliser.
 - Un autre objet : implémenter `HoloInteractible` et surcharger `interactibleAt(x, y)` (plan local `z = 0`).
 
+Un composant sur mesure implémente les traits voulus et ne fournit que son état et ses réactions :
+
 ```java
-final class Counter extends HoloWidget implements HoloInteractible
+final class Dial extends HoloWidget implements HoloClickable, HoloScrollable, HoloHoverable
 {
-    @Override public boolean intercepts(HoloControl control) { return control.equals(HoloControl.SCROLL); }
-    @Override public void onScroll(HoloInteraction ctx, double delta) { /* sendAction(window, ...) */ }
+    private boolean hovered;
+    private int value;
+
+    @Override public boolean hovered() { return hovered; }
+    @Override public void setHovered(boolean hovered) { this.hovered = hovered; }
+
+    @Override public boolean clickableBy(HoloControl button) { return button == HoloControl.MIDDLE_CLICK; }
+    @Override public void onClick(HoloInteraction ctx, HoloControl button) { value = 0; /* sendAction(...) */ }
+    @Override public void onScrolled(HoloInteraction ctx, int steps) { value += steps; /* sendAction(...) */ }
+
     @Override protected void draw(HoloCanvas canvas) { /* ... */ }
 }
 ```
@@ -824,6 +936,10 @@ final class Steering implements HoloCaptor
 
 HoloCaptures.begin(new Steering());   // cote client ; ou ctx.capture(...) depuis un callback d'interaction
 ```
+
+Pour du texte, le plus simple est `HoloWidgetTextBox`, ou le trait `HoloTextInput` sur un `HoloTextBuffer`. À la
+main : capturer `HoloControl.KEYBOARD` et implémenter `onCharTyped` (caractères) et `onKeyPress` (touches d'édition,
+codes `HoloKeys`).
 
 ### Renderer bas niveau
 
@@ -856,7 +972,15 @@ public static void onInspect(HoloInspectEvent event)
 ### `holo.window`, `holo.widget`
 - `HoloWindow` : objet plat (largeur et hauteur en pixels, `pixelScale`), racine `HoloPanel`, `widgetAt` ;
   interactible (`interactibleAt`, `setInterceptedInputs`).
-- `HoloWidget`, `HoloPanel`, `HoloLabel`, `HoloButton` : arborescence 2D, dessin via `HoloCanvas`.
+- `HoloWidget`, `HoloPanel`, `HoloLabel` : arborescence 2D, dessin via `HoloCanvas`.
+- `HoloTextMetrics` : mesure du texte hors du dessin.
+
+### `holo.widget.control`
+- Traits : `HoloHoverable`, `HoloClickable`, `HoloScrollable`, `HoloToggleable`, `HoloDraggable` (+ `HoloDragState`),
+  `HoloTextInput` (+ `HoloTextBuffer`), `HoloPointerInput`, `HoloDirectionalInput` (+ `HoloDirections`).
+- Widgets : `HoloWidgetButton`, `HoloWidgetMultiButton`, `HoloWidgetHoverZone`, `HoloWidgetScrollZone`,
+  `HoloWidgetSwitch`, `HoloWidgetValueBar`, `HoloWidgetTextBox`, `HoloWidgetMouseBox`, `HoloWidgetDraggable`,
+  `HoloWidgetKeyBox`.
 
 ### `holo.module`
 - `HoloModule` : état, logique, objets ; hooks de cycle de vie ; `markDirty`, `sendAction`.
@@ -873,7 +997,7 @@ public static void onInspect(HoloInspectEvent event)
 - `HoloInspection` (donnée), `HoloInspections` (autorité serveur), `HoloInspectEvent` (politique).
 
 ### `holo.capture`, `holo.interact`
-- `HoloControl`, `HoloCaptor`, `HoloCapture`, `HoloCaptures` (capture de contrôles, partie commune).
+- `HoloControl`, `HoloKeys`, `HoloCaptor`, `HoloCapture`, `HoloCaptures` (capture de contrôles, partie commune).
 - `HoloInteractible`, `HoloInteraction` (interaction au regard, partie commune).
 
 ### `network`
@@ -886,15 +1010,18 @@ public static void onInspect(HoloInspectEvent event)
 ### `demo`
 - `DemoModules` (enregistrement), `DemoDimensionModule`, `DemoWorldPosModule`, `DemoPlayerModule`, `DemoWindows`
   (fabrique de fenêtres), `DemoCube`.
-- `DemoInteractionModule` et ses widgets : `DemoScrollZone`, `DemoHoverZone`, `DemoAnimation`, `DemoCaptureZone`.
+- `DemoInteractionModule` (widgets génériques + `DemoAnimation`), `DemoKeyboardModule` (+ `DemoPad`, une
+  `HoloWidgetKeyBox` multijoueur).
 
 ### `client.holo`
 - `ClientHoloWorld` (portées connues, tick, oubli), `ClientHoloContainer` (miroirs, origine), `ClientHoloPackets`
   (handlers).
 
 ### `client.capture`, `client.interact`
-- `HoloControlCapture` : seul abonné aux inputs, captures explicites et passives, verrou de rotation.
-- `HoloInteractions` : picking et survol, captor passif de l'interaction, captures liées à un objet.
+- `HoloControlCapture` : seul abonné aux inputs, captures explicites et passives, verrou de rotation, mode clavier.
+- `HoloKeyboardScreen` : écran invisible qui porte la capture de tout le clavier.
+- `HoloInteractions` : picking et survol (marge de sortie), glisser, captor passif de l'interaction, captures liées
+  à un objet.
 
 ### `client.render`
 - `RenderDispatcher`, `HoloRenderers` ; `sky/`, `world/`, `view/`, `hud/` (renderer, contexte, passe) ;
@@ -908,6 +1035,8 @@ public static void onInspect(HoloInspectEvent event)
 
 ## 12. Limites connues et points ouverts
 
+- **Glisser et marge sur le plan seulement** : `onDrag` et la marge de survol projettent le regard sur le plan de
+  l'objet ; vu de dos (ou d'une famille sans regard projetable), le glisser s'interrompt et le survol se termine.
 - **Picking plan seulement** : l'interaction vise le plan `z = 0` local d'un objet. Un objet 3D (ex. `DemoCube`)
   devrait approximer sa surface dans `interactibleAt`. Le bobbing de vue n'est pas pris en compte pour les objets du
   monde (le rayon part de l'œil, pas de la caméra secouée).
@@ -916,6 +1045,9 @@ public static void onInspect(HoloInspectEvent event)
 - **Mappings neutralisés après coup** : sans Mixin, un mapping capturé est remis à zéro juste après que vanilla l'a
   enfoncé. Un mod qui lit l'état brut de la touche (GLFW) ou réagit dans un `InputEvent.Key` posté avant le nôtre
   n'est pas bloqué.
+- **Clavier entier = un écran ouvert** : pendant une capture de `KEYBOARD`, les raccourcis vanilla gérés sans écran
+  (F1, F3, F5...) sont inactifs, un mod qui teste `screen == null` se croit dans un menu, et la reprise de la souris
+  dépend de la réflexion sur `MouseHandler` (noms SRG de la 1.20.1).
 - **Capture sans issue de secours** : une capture explicite ne se termine que par son captor (ou la disparition de son
   objet). Un captor qui ne capture pas Échap et ne se libère jamais bloque ses contrôles jusqu'à la déconnexion.
 - **Pas de commande de mémoire de joueur** : `createMemory`, `deleteMemory` et `selectMemory` existent dans

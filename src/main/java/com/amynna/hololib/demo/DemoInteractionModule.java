@@ -7,8 +7,16 @@ import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloTransform;
 import com.amynna.hololib.holo.object.HoloVisibility;
-import com.amynna.hololib.holo.widget.HoloButton;
 import com.amynna.hololib.holo.widget.HoloLabel;
+import com.amynna.hololib.holo.widget.HoloPanel;
+import com.amynna.hololib.holo.widget.control.HoloWidgetButton;
+import com.amynna.hololib.holo.widget.control.HoloWidgetDraggable;
+import com.amynna.hololib.holo.widget.control.HoloWidgetHoverZone;
+import com.amynna.hololib.holo.widget.control.HoloWidgetMouseBox;
+import com.amynna.hololib.holo.widget.control.HoloWidgetMultiButton;
+import com.amynna.hololib.holo.widget.control.HoloWidgetScrollZone;
+import com.amynna.hololib.holo.widget.control.HoloWidgetSwitch;
+import com.amynna.hololib.holo.widget.control.HoloWidgetValueBar;
 import com.amynna.hololib.holo.window.HoloWindow;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
@@ -19,25 +27,29 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
 
 /**
- * Demonstration de l'interaction au regard (memoire de joueur) : une fenetre en camera normale ({@code Local}
- * relatif), orientee vers le regard au premier tick, publique.
+ * Demonstration de l'interaction au regard (memoire de joueur), construite avec les widgets generiques de
+ * {@code holo.widget.control} : une fenetre en camera normale ({@code Local} relatif), orientee vers le regard au
+ * premier tick, publique.
  * <ul>
- *     <li>trois boutons, declenches par le clic gauche, droit et molette ;</li>
- *     <li>une zone qui compte les crans de molette quand on la regarde ;</li>
- *     <li>une zone qui reagit au regard ;</li>
- *     <li>une petite animation ;</li>
- *     <li>une zone qui, quand le regard y entre, capture la souris (et Saut) jusqu'a Echap ou Entree ;</li>
- *     <li>un bouton qui bascule le droit d'usage : proprietaire seul ou tous les joueurs qui voient la fenetre (les
- *     joueurs qui inspectent le proprietaire la voient autour de sa tete). Seul le proprietaire peut le basculer.</li>
+ *     <li>{@link HoloWidgetButton} (clic gauche) et {@link HoloWidgetMultiButton} (clic droit et molette, une action
+ *     chacun) ;</li>
+ *     <li>{@link HoloWidgetScrollZone} qui compte les crans de molette, {@link HoloWidgetHoverZone} qui reagit au
+ *     regard ;</li>
+ *     <li>une petite animation ({@link DemoAnimation}) et une {@link HoloWidgetMouseBox} qui capture la souris des que
+ *     le regard y entre (Saut recentre, Echap / Entree rend la souris) ;</li>
+ *     <li>une {@link HoloWidgetValueBar} (molette ou clic) et une {@link HoloWidgetDraggable} a glisser au regard,
+ *     toutes deux synchronisees ;</li>
+ *     <li>un {@link HoloWidgetSwitch} "ouvert a tous" (acces de la fenetre), que seul le proprietaire peut
+ *     basculer.</li>
  * </ul>
- * Les compteurs sont l'etat du module, cote serveur : chaque interaction envoie une action au nom de la fenetre
- * ({@code sendAction(window, ...)}), que le serveur verifie (acces, visibilite, inspection) puis renvoie a tous.
- * Le fond de la fenetre intercepte les clics : viser la fenetre ne casse jamais le bloc derriere.
+ * L'etat (compteurs, valeur, position de la pastille, acces) vit cote serveur : chaque widget envoie une action au nom
+ * de la fenetre ({@code sendAction(window, ...)}), que le serveur verifie puis renvoie a tous. Le fond de la fenetre
+ * intercepte les clics : viser la fenetre ne casse jamais le bloc derriere.
  */
 public final class DemoInteractionModule extends HoloModule
 {
     private static final int WIDTH = 240;
-    private static final int HEIGHT = 160;
+    private static final int HEIGHT = 208;
     private static final float DISTANCE = 1.6f;
     private static final int ACCENT = 0xFF40C0FF;
 
@@ -46,6 +58,8 @@ public final class DemoInteractionModule extends HoloModule
     private static final int ACTION_MIDDLE = 2;
     private static final int ACTION_SCROLL = 3;
     private static final int ACTION_ACCESS = 4;
+    private static final int ACTION_VALUE = 5;
+    private static final int ACTION_DRAG = 6;
     /** Crans de molette maximum acceptes par action. */
     private static final int MAX_SCROLL = 10;
 
@@ -53,17 +67,22 @@ public final class DemoInteractionModule extends HoloModule
     private int right;
     private int middle;
     private int scroll;
+    /** Valeur de la barre, en pourcents. */
+    private int value = 50;
+    private float dragX = 4f;
+    private float dragY = 7f;
     /** Vrai : tous les joueurs qui voient la fenetre peuvent l'utiliser. */
     private boolean shared;
     /** Vrai une fois la fenetre orientee vers le regard du joueur (sauvegarde). */
     private boolean oriented;
 
     private HoloWindow window;
-    private HoloButton leftButton;
-    private HoloButton rightButton;
-    private HoloButton middleButton;
-    private HoloButton accessButton;
-    private DemoScrollZone scrollZone;
+    private HoloWidgetButton leftButton;
+    private HoloWidgetMultiButton otherButton;
+    private HoloWidgetScrollZone scrollZone;
+    private HoloWidgetValueBar valueBar;
+    private HoloWidgetDraggable draggable;
+    private HoloWidgetSwitch accessSwitch;
 
     @Override
     public void onLoad()
@@ -73,44 +92,68 @@ public final class DemoInteractionModule extends HoloModule
         window.setVisibility(HoloVisibility.PUBLIC);
         window.setAccess(shared ? HoloAccess.EVERYONE : HoloAccess.OWNER);
         window.setInterceptedInputs(HoloControl.LEFT_CLICK, HoloControl.RIGHT_CLICK, HoloControl.MIDDLE_CLICK);
-        window.root().setBackground(0x8010304A).setBorder(ACCENT, 1f);
+        HoloPanel root = window.root();
+        root.setBackground(0x8010304A).setBorder(ACCENT, 1f);
 
-        window.root().add(new HoloLabel(4, 4, WIDTH - 8, 14, Component.literal("Interaction"))
+        root.add(new HoloLabel(4, 4, WIDTH - 8, 14, Component.literal("Interaction"))
                 .setAlign(HoloLabel.Align.CENTER).setColor(ACCENT));
 
-        leftButton = window.root().add(new HoloButton(6, 22, 72, 20, Component.empty(),
-                button -> send(ACTION_LEFT, 0)));
-        rightButton = window.root().add(new HoloButton(84, 22, 72, 20, Component.empty(),
-                button -> send(ACTION_RIGHT, 0)).setTrigger(HoloControl.RIGHT_CLICK));
-        middleButton = window.root().add(new HoloButton(162, 22, 72, 20, Component.empty(),
-                button -> send(ACTION_MIDDLE, 0)).setTrigger(HoloControl.MIDDLE_CLICK));
+        leftButton = root.add(new HoloWidgetButton(6, 22, 72, 20, Component.empty(), button -> send(ACTION_LEFT)));
+        otherButton = root.add(new HoloWidgetMultiButton(84, 22, 150, 20, Component.empty()));
+        otherButton.on(HoloControl.RIGHT_CLICK, button -> send(ACTION_RIGHT))
+                .on(HoloControl.MIDDLE_CLICK, button -> send(ACTION_MIDDLE));
 
-        scrollZone = window.root().add(new DemoScrollZone(6, 48, 111, 44, steps -> send(ACTION_SCROLL, steps)));
-        window.root().add(new DemoHoverZone(123, 48, 111, 44));
-        window.root().add(new DemoAnimation(6, 98, 111, 36));
-        window.root().add(new DemoCaptureZone(123, 98, 111, 36));
+        // Le centre de la fenetre (120, 104) tombe entre deux zones : la boite a souris n'est pas visee au centre.
+        scrollZone = root.add(new HoloWidgetScrollZone(6, 48, 111, 44, Component.literal("Zone molette"),
+                Component.literal("Molette !"), (zone, steps) -> sendInt(ACTION_SCROLL, steps)));
+        root.add(new HoloWidgetHoverZone(123, 48, 111, 44, Component.literal("Regarde-moi"),
+                Component.literal("Je te vois !")));
+        root.add(new DemoAnimation(6, 98, 111, 36));
+        root.add(new HoloWidgetMouseBox(123, 98, 111, 36)).setCaptureOnHover(true)
+                .setRecenterControl(HoloControl.mapping("key.jump"))
+                .setTexts(Component.literal("Zone de capture"), Component.literal("Souris capturee"),
+                        Component.literal("Echap / Entree"));
 
-        accessButton = window.root().add(new HoloButton(6, 140, 228, 14, Component.empty(),
-                button -> send(ACTION_ACCESS, 0)).setColors(0x40404040, 0xFFA0A0A0, 0xFFFFFFFF));
+        valueBar = root.add(new HoloWidgetValueBar(6, 140, 228, 14, Component.literal("Valeur"),
+                (bar, v) -> sendInt(ACTION_VALUE, Math.round(v * 100f))));
+
+        HoloPanel track = root.add(new HoloPanel(6, 158, 228, 28));
+        track.setBackground(0x30000000).setBorder(0x60D0A0FF, 1f);
+        draggable = track.add(new HoloWidgetDraggable(dragX, dragY, 60, 14, Component.literal("Glisse-moi")));
+        draggable.setOnDrop(widget -> sendAction(window, buf -> {
+            buf.writeByte(ACTION_DRAG);
+            buf.writeFloat(widget.x());
+            buf.writeFloat(widget.y());
+        }));
+
+        accessSwitch = root.add(new HoloWidgetSwitch(6, 190, 228, 14, Component.literal("Ouvert a tous"),
+                (toggle, requested) -> sendAction(window, buf -> {
+                    buf.writeByte(ACTION_ACCESS);
+                    buf.writeBoolean(requested);
+                })));
+        accessSwitch.setPredictive(false);
         refresh();
     }
 
     /** Cote client : action au nom de la fenetre. */
-    private void send(int action, int value)
+    private void send(int action) { sendAction(window, buf -> buf.writeByte(action)); }
+
+    private void sendInt(int action, int argument)
     {
         sendAction(window, buf -> {
             buf.writeByte(action);
-            if (action == ACTION_SCROLL) buf.writeVarInt(value);
+            buf.writeVarInt(argument);
         });
     }
 
     private void refresh()
     {
         leftButton.setText(Component.literal("Gauche : " + left));
-        rightButton.setText(Component.literal("Droit : " + right));
-        middleButton.setText(Component.literal("Molette : " + middle));
-        scrollZone.setText(Component.literal("Crans : " + scroll));
-        accessButton.setText(Component.literal(shared ? "Acces : tout le monde" : "Acces : proprietaire seul"));
+        otherButton.setText(Component.literal("Droit : " + right + " | Molette : " + middle));
+        scrollZone.setDetail(Component.literal("Crans : " + scroll));
+        valueBar.setValue(value / 100f);
+        draggable.setPosition(dragX, dragY);
+        accessSwitch.setOn(shared);
     }
 
     @Override
@@ -132,9 +175,19 @@ public final class DemoInteractionModule extends HoloModule
             case ACTION_RIGHT -> right++;
             case ACTION_MIDDLE -> middle++;
             case ACTION_SCROLL -> scroll += Mth.clamp(buf.readVarInt(), -MAX_SCROLL, MAX_SCROLL);
+            case ACTION_VALUE -> value = Mth.clamp(buf.readVarInt(), 0, 100);
+            case ACTION_DRAG -> {
+                float x = buf.readFloat();
+                float y = buf.readFloat();
+                if (!Float.isFinite(x) || !Float.isFinite(y)) return;
+                // Le widget serveur borne la position a son panneau.
+                draggable.setPosition(x, y);
+                dragX = draggable.x();
+                dragY = draggable.y();
+            }
             case ACTION_ACCESS -> {
                 if (!player.getUUID().equals(owner())) return;
-                shared = !shared;
+                shared = buf.readBoolean();
                 window.setAccess(shared ? HoloAccess.EVERYONE : HoloAccess.OWNER);
             }
             default -> {
@@ -151,6 +204,9 @@ public final class DemoInteractionModule extends HoloModule
         buf.writeVarInt(right);
         buf.writeVarInt(middle);
         buf.writeVarInt(scroll);
+        buf.writeVarInt(value);
+        buf.writeFloat(dragX);
+        buf.writeFloat(dragY);
         buf.writeBoolean(shared);
     }
 
@@ -161,6 +217,9 @@ public final class DemoInteractionModule extends HoloModule
         right = buf.readVarInt();
         middle = buf.readVarInt();
         scroll = buf.readVarInt();
+        value = buf.readVarInt();
+        dragX = buf.readFloat();
+        dragY = buf.readFloat();
         shared = buf.readBoolean();
     }
 
@@ -174,6 +233,9 @@ public final class DemoInteractionModule extends HoloModule
         tag.putInt("right", right);
         tag.putInt("middle", middle);
         tag.putInt("scroll", scroll);
+        tag.putInt("value", value);
+        tag.putFloat("drag_x", dragX);
+        tag.putFloat("drag_y", dragY);
         tag.putBoolean("shared", shared);
         tag.putBoolean("oriented", oriented);
     }
@@ -185,6 +247,11 @@ public final class DemoInteractionModule extends HoloModule
         right = tag.getInt("right");
         middle = tag.getInt("middle");
         scroll = tag.getInt("scroll");
+        value = tag.contains("value") ? Mth.clamp(tag.getInt("value"), 0, 100) : 50;
+        if (tag.contains("drag_x")) {
+            dragX = tag.getFloat("drag_x");
+            dragY = tag.getFloat("drag_y");
+        }
         shared = tag.getBoolean("shared");
         oriented = tag.getBoolean("oriented");
     }

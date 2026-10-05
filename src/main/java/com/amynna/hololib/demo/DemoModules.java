@@ -21,6 +21,8 @@ public final class DemoModules
             "demo_player", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, DemoPlayerModule::new));
     public static final RegistryObject<HoloModuleType<DemoInteractionModule>> DEMO_INTERACTION = REGISTER.register(
             "demo_interaction", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, DemoInteractionModule::new));
+    public static final RegistryObject<HoloModuleType<DemoKeyboardModule>> DEMO_KEYBOARD = REGISTER.register(
+            "demo_keyboard", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, DemoKeyboardModule::new));
 
     private DemoModules() {}
 }

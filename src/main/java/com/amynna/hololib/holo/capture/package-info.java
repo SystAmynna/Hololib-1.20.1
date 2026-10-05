@@ -2,7 +2,8 @@
  * Capture de controles, partie <b>commune</b> (aucune classe client), independante de l'interaction au regard.
  * <ul>
  *     <li>{@link com.amynna.hololib.holo.capture.HoloControl} : controle capturable (boutons de souris bruts,
- *     molette, mouvements de souris, Echap, Entree, n'importe quel {@code KeyMapping} par son nom).</li>
+ *     molette, mouvements de souris, Echap, Entree, n'importe quel {@code KeyMapping} par son nom, tout le clavier
+ *     avec le texte tape) ; {@link com.amynna.hololib.holo.capture.HoloKeys} : codes de touches.</li>
  *     <li>{@link com.amynna.hololib.holo.capture.HoloCaptor} : recoit les controles qu'il capture, a la place du
  *     jeu.</li>
  *     <li>{@link com.amynna.hololib.holo.capture.HoloCapture} : contexte des callbacks (regard, liberation).</li>

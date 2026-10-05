@@ -87,6 +87,10 @@ public final class HoloPicking
     private static float ox, oy, oz, dx, dy, dz;
     // Derniere intersection reussie.
     private static float hitX, hitY, hitT;
+    // Oeil interpole (sceneRay), taille du GUI (hudRay), resultat de project.
+    private static double eyeX, eyeY, eyeZ;
+    private static float guiWidth, guiHeight;
+    private static float projectedX, projectedY;
 
     private HoloPicking() {}
 
@@ -97,31 +101,12 @@ public final class HoloPicking
         if (player == null || mc.level == null) return null;
         UUID local = player.getUUID();
         boolean firstPerson = mc.options.getCameraType().isFirstPerson();
-        float yaw = player.getViewYRot(partialTick);
-        float pitch = player.getViewXRot(partialTick);
-
-        if (firstPerson && pickHud(mc, local, yaw, pitch)) return HIT;
-
-        double eyeX = Mth.lerp(partialTick, player.xo, player.getX());
-        double eyeY = Mth.lerp(partialTick, player.yo, player.getY()) + player.getEyeHeight();
-        double eyeZ = Mth.lerp(partialTick, player.zo, player.getZ());
-        if (firstPerson) {
-            ox = oy = oz = 0f;
-            direction(yaw, pitch);
-        } else {
-            Camera camera = mc.gameRenderer.getMainCamera();
-            Vec3 position = camera.getPosition();
-            ox = (float) (position.x - eyeX);
-            oy = (float) (position.y - eyeY);
-            oz = (float) (position.z - eyeZ);
-            Vector3f look = camera.getLookVector();
-            dx = look.x;
-            dy = look.y;
-            dz = look.z;
+        if (firstPerson && pickHud(mc, local, player.getViewYRot(partialTick), player.getViewXRot(partialTick))) {
+            return HIT;
         }
-
+        sceneRay(mc, player, partialTick);
         if (firstPerson && pickView(local, player, partialTick)) return HIT;
-        if (pickWorld(mc, local, partialTick, eyeX, eyeY, eyeZ)) return HIT;
+        if (pickWorld(mc, local, partialTick)) return HIT;
         HitResult hitResult = mc.hitResult;
         if ((hitResult == null || hitResult.getType() == HitResult.Type.MISS) && pickSky(mc, local, partialTick)) {
             return HIT;
@@ -129,27 +114,52 @@ public final class HoloPicking
         return null;
     }
 
+    /**
+     * Regard projete sur le plan {@code z = 0} d'un objet route, meme hors de ses bords (survol avec marge, glisser) :
+     * {@link #projectedX()}, {@link #projectedY()} dans son repere local. Faux si l'objet n'est pas route, pas
+     * disponible ou vu de dos.
+     */
+    public static boolean project(Minecraft mc, HoloObject object, float partialTick)
+    {
+        LocalPlayer player = mc.player;
+        ResolvedHolo resolved = HoloRouting.resolved(object);
+        if (player == null || mc.level == null || resolved == null) return false;
+        boolean placed;
+        if (resolved.family == HoloAnchor.Family.HUD) {
+            hudRay(mc);
+            placed = hudMatrix(resolved);
+        } else {
+            sceneRay(mc, player, partialTick);
+            placed = switch (resolved.family) {
+                case VIEW -> viewMatrix(resolved, player, partialTick);
+                case WORLD -> worldMatrix(resolved, partialTick);
+                case SKY -> skyMatrix(resolved, mc, partialTick);
+                case HUD -> false;
+            };
+            if (resolved.family == HoloAnchor.Family.SKY) ox = oy = oz = 0f;
+        }
+        if (!placed || !intersect()) return false;
+        projectedX = hitX;
+        projectedY = hitY;
+        return true;
+    }
+
+    /** Resultat de {@link #project}, repere local de l'objet. */
+    public static float projectedX() { return projectedX; }
+
+    public static float projectedY() { return projectedY; }
+
+    // ---------------------------------------------------------------- familles
+
     private static boolean pickHud(Minecraft mc, UUID local, float yaw, float pitch)
     {
         List<ResolvedHolo> objects = HoloRouting.hud();
         if (objects.isEmpty()) return false;
-        float width = mc.getWindow().getGuiScaledWidth();
-        float height = mc.getWindow().getGuiScaledHeight();
-        // Centre de l'ecran, rayon vers l'interieur de l'ecran (+Z vers l'observateur en GUI).
-        ox = 0.5f * width;
-        oy = 0.5f * height;
-        oz = 10000f;
-        dx = 0f;
-        dy = 0f;
-        dz = -1f;
+        hudRay(mc);
         // Trie par z croissant : le dernier est devant.
         for (int i = objects.size() - 1; i >= 0; i--) {
             ResolvedHolo resolved = objects.get(i);
-            if (!candidate(resolved, local) || !(resolved.object.anchor() instanceof HoloAnchor.Hud hud)) continue;
-            HoloTransform transform = resolved.object.transform();
-            MATRIX.translation(hud.alignX() * width + transform.x(), hud.alignY() * height + transform.y(),
-                    transform.z()).scale(1f, -1f, 1f);
-            applyLocal(transform);
+            if (!candidate(resolved, local) || !hudMatrix(resolved)) continue;
             if (accept(resolved, HoloAnchor.Family.HUD)) {
                 HIT.objectYaw = yaw;
                 HIT.objectPitch = pitch;
@@ -166,16 +176,7 @@ public final class HoloPicking
         float best = Float.MAX_VALUE;
         for (int i = 0; i < objects.size(); i++) {
             ResolvedHolo resolved = objects.get(i);
-            if (!candidate(resolved, local) || !(resolved.object.anchor() instanceof HoloAnchor.Local anchor)) continue;
-            HoloTransform transform = resolved.object.transform();
-            if (anchor.follow()) {
-                HoloPlacement.yawPitch(ORIENTATION, player.getViewYRot(partialTick), player.getViewXRot(partialTick));
-            } else {
-                ORIENTATION.identity();
-            }
-            HoloPlacement.onSphere(ORIENTATION, OFFSET, TMP, transform);
-            MATRIX.translation(OFFSET).rotate(ORIENTATION)
-                    .scale(transform.scaleX(), transform.scaleY(), transform.scaleZ());
+            if (!candidate(resolved, local) || !viewMatrix(resolved, player, partialTick)) continue;
             if (accept(resolved, HoloAnchor.Family.VIEW, best)) {
                 best = HIT.distance;
                 found = true;
@@ -184,21 +185,14 @@ public final class HoloPicking
         return found;
     }
 
-    private static boolean pickWorld(Minecraft mc, UUID local, float partialTick, double eyeX, double eyeY,
-                                     double eyeZ)
+    private static boolean pickWorld(Minecraft mc, UUID local, float partialTick)
     {
         List<ResolvedHolo> objects = HoloRouting.world();
         boolean found = false;
         float best = (float) WORLD_REACH;
         for (int i = 0; i < objects.size(); i++) {
             ResolvedHolo resolved = objects.get(i);
-            if (!candidate(resolved, local)) continue;
-            Vec3 position = resolved.position(partialTick);
-            if (!resolved.available()) continue;
-            HoloTransform transform = resolved.object.transform();
-            MATRIX.translation((float) (position.x - eyeX), (float) (position.y - eyeY), (float) (position.z - eyeZ))
-                    .rotate(resolved.orientation())
-                    .scale(transform.scaleX(), transform.scaleY(), transform.scaleZ());
+            if (!candidate(resolved, local) || !worldMatrix(resolved, partialTick)) continue;
             if (accept(resolved, HoloAnchor.Family.WORLD, best)) {
                 best = HIT.distance;
                 found = true;
@@ -220,31 +214,108 @@ public final class HoloPicking
         List<ResolvedHolo> objects = HoloRouting.sky();
         boolean found = false;
         float best = Float.MAX_VALUE;
+        // Le ciel est centre sur la camera : rayon depuis son origine.
+        float sx = ox, sy = oy, sz = oz;
+        ox = oy = oz = 0f;
         for (int i = 0; i < objects.size(); i++) {
             ResolvedHolo resolved = objects.get(i);
-            if (!candidate(resolved, local) || !(resolved.object.anchor() instanceof HoloAnchor.Sky sky)) continue;
-            HoloTransform transform = resolved.object.transform();
-            MATRIX.identity();
-            if (sky.celestial()) {
-                // Comme SkyRenderContext.applyCelestialRotation.
-                MATRIX.rotateY(-90f * Mth.DEG_TO_RAD)
-                        .rotateX(mc.level.getTimeOfDay(partialTick) * 360f * Mth.DEG_TO_RAD);
-            }
-            MATRIX.translate(transform.x(), transform.y(), transform.z());
-            applyLocal(transform);
-            // Le ciel est centre sur la camera : rayon depuis son origine.
-            float sx = ox, sy = oy, sz = oz;
-            ox = oy = oz = 0f;
-            boolean hit = accept(resolved, HoloAnchor.Family.SKY, best);
-            ox = sx;
-            oy = sy;
-            oz = sz;
-            if (hit) {
+            if (!candidate(resolved, local) || !skyMatrix(resolved, mc, partialTick)) continue;
+            if (accept(resolved, HoloAnchor.Family.SKY, best)) {
                 best = HIT.distance;
                 found = true;
             }
         }
+        ox = sx;
+        oy = sy;
+        oz = sz;
         return found;
+    }
+
+    // ---------------------------------------------------------------- rayons et matrices (comme les ponts)
+
+    /** Centre de l'ecran en pixels GUI, rayon vers l'interieur de l'ecran ({@code +Z} vers l'observateur). */
+    private static void hudRay(Minecraft mc)
+    {
+        guiWidth = mc.getWindow().getGuiScaledWidth();
+        guiHeight = mc.getWindow().getGuiScaledHeight();
+        ox = 0.5f * guiWidth;
+        oy = 0.5f * guiHeight;
+        oz = 10000f;
+        dx = 0f;
+        dy = 0f;
+        dz = -1f;
+    }
+
+    /** Oeil interpole ; rayon depuis l'oeil selon le regard (1re personne) ou depuis la camera (F5). */
+    private static void sceneRay(Minecraft mc, LocalPlayer player, float partialTick)
+    {
+        eyeX = Mth.lerp(partialTick, player.xo, player.getX());
+        eyeY = Mth.lerp(partialTick, player.yo, player.getY()) + player.getEyeHeight();
+        eyeZ = Mth.lerp(partialTick, player.zo, player.getZ());
+        if (mc.options.getCameraType().isFirstPerson()) {
+            ox = oy = oz = 0f;
+            direction(player.getViewYRot(partialTick), player.getViewXRot(partialTick));
+        } else {
+            Camera camera = mc.gameRenderer.getMainCamera();
+            Vec3 position = camera.getPosition();
+            ox = (float) (position.x - eyeX);
+            oy = (float) (position.y - eyeY);
+            oz = (float) (position.z - eyeZ);
+            Vector3f look = camera.getLookVector();
+            dx = look.x;
+            dy = look.y;
+            dz = look.z;
+        }
+    }
+
+    private static boolean hudMatrix(ResolvedHolo resolved)
+    {
+        if (!(resolved.object.anchor() instanceof HoloAnchor.Hud hud)) return false;
+        HoloTransform transform = resolved.object.transform();
+        MATRIX.translation(hud.alignX() * guiWidth + transform.x(), hud.alignY() * guiHeight + transform.y(),
+                transform.z()).scale(1f, -1f, 1f);
+        applyLocal(transform);
+        return true;
+    }
+
+    private static boolean viewMatrix(ResolvedHolo resolved, LocalPlayer player, float partialTick)
+    {
+        if (!(resolved.object.anchor() instanceof HoloAnchor.Local anchor)) return false;
+        HoloTransform transform = resolved.object.transform();
+        if (anchor.follow()) {
+            HoloPlacement.yawPitch(ORIENTATION, player.getViewYRot(partialTick), player.getViewXRot(partialTick));
+        } else {
+            ORIENTATION.identity();
+        }
+        HoloPlacement.onSphere(ORIENTATION, OFFSET, TMP, transform);
+        MATRIX.translation(OFFSET).rotate(ORIENTATION)
+                .scale(transform.scaleX(), transform.scaleY(), transform.scaleZ());
+        return true;
+    }
+
+    private static boolean worldMatrix(ResolvedHolo resolved, float partialTick)
+    {
+        Vec3 position = resolved.position(partialTick);
+        if (!resolved.available()) return false;
+        HoloTransform transform = resolved.object.transform();
+        MATRIX.translation((float) (position.x - eyeX), (float) (position.y - eyeY), (float) (position.z - eyeZ))
+                .rotate(resolved.orientation())
+                .scale(transform.scaleX(), transform.scaleY(), transform.scaleZ());
+        return true;
+    }
+
+    private static boolean skyMatrix(ResolvedHolo resolved, Minecraft mc, float partialTick)
+    {
+        if (!(resolved.object.anchor() instanceof HoloAnchor.Sky sky)) return false;
+        HoloTransform transform = resolved.object.transform();
+        MATRIX.identity();
+        if (sky.celestial()) {
+            // Comme SkyRenderContext.applyCelestialRotation.
+            MATRIX.rotateY(-90f * Mth.DEG_TO_RAD).rotateX(mc.level.getTimeOfDay(partialTick) * 360f * Mth.DEG_TO_RAD);
+        }
+        MATRIX.translate(transform.x(), transform.y(), transform.z());
+        applyLocal(transform);
+        return true;
     }
 
     /** Objet dessinable par le joueur local et qu'il a le droit d'utiliser. */
@@ -264,7 +335,7 @@ public final class HoloPicking
         return accept(resolved, family, Float.MAX_VALUE);
     }
 
-    /** Intersecte {@link #MATRIX} avec le rayon ; remplit {@link #HIT} si l'objet vise est plus proche que {@code max}. */
+    /** Intersecte {@link #MATRIX} avec le rayon ; remplit {@link #HIT} si l'objet vise est plus proche que max. */
     private static boolean accept(ResolvedHolo resolved, HoloAnchor.Family family, float max)
     {
         if (!intersect() || hitT >= max) return false;

@@ -55,6 +55,9 @@ public final class HoloRouting
 
     static List<ResolvedHolo> hud() { return HUD_READ_ONLY; }
 
+    /** Objet route au dernier tick, tel que le voit le joueur local ; {@code null} s'il n'est pas dessine. */
+    static ResolvedHolo resolved(HoloObject object) { return CACHE.get(object); }
+
     /** Vrai si l'objet a ete route au dernier tick (donc dessine pour le joueur local). */
     public static boolean isRouted(HoloObject object) { return CACHE.containsKey(object); }
 

@@ -22,9 +22,14 @@ public interface HoloCapture
 
     float pitch();
 
-    /** Oriente le regard (pitch borne a +-90) ; sans effet si ce captor ne prend pas {@link HoloControl#MOUSE_MOVE}. */
+    /** Oriente le regard (pitch borne a +-90) ; sans effet si ce captor ne prend pas {@code MOUSE_MOVE}. */
     void setLook(float yaw, float pitch);
 
     /** Termine la capture explicite de ce captor ; sans effet pour un captor passif. */
     void release();
+
+    /** Contenu texte du presse-papiers ({@code ""} s'il n'y en a pas). */
+    String clipboard();
+
+    void setClipboard(String text);
 }

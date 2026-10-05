@@ -23,16 +23,20 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 /**
  * Controleur client de l'interaction au regard. Fil client uniquement. Il ne lit aucun input lui-meme :
  * <ul>
  *     <li>Debut de chaque frame ({@code RenderTickEvent} START, apres le verrou de rotation de la capture) : rayon
- *     depuis le centre de l'ecran ({@link HoloPicking}) et survol ({@code onHover} / {@code onHoverRelease}).</li>
+ *     depuis le centre de l'ecran ({@link HoloPicking}) et survol ({@code onHover} / {@code onHoverRelease}), avec la
+ *     marge de sortie des elements qui en ont une ; puis {@code onDrag} pour chaque clic intercepte encore enfonce
+ *     (regard projete sur le plan de l'objet).</li>
  *     <li>Interception : un captor <b>passif</b> de {@link HoloControlCapture} prend un controle si un element de la
  *     chaine survolee (cible, panneaux parents, objet) l'intercepte, et le route vers le premier qui l'intercepte
  *     ({@code onLeftClick...}, {@code onScroll}, {@code onControl}). Le relachement va a l'element qui a pris
@@ -58,6 +62,8 @@ public final class HoloInteractions
 
     /** Appuis interceptes au survol, par controle. */
     private static final Map<HoloControl, Pressed> PRESSED = new HashMap<>();
+    /** Copie reutilisee des appuis pendant {@link #drag}. */
+    private static final List<HoloControl> DRAGGING = new ArrayList<>();
     /** Captures explicites liees a un objet. */
     private static final Map<HoloCaptor, HoloObject> BOUND = new IdentityHashMap<>();
 
@@ -88,17 +94,57 @@ public final class HoloInteractions
             setHover(null, null);
             return;
         }
-        HoloPicking.Hit hit = HoloPicking.pick(mc, event.renderTickTime);
-        if (hit == null) {
-            setHover(null, null);
-            return;
+        float partialTick = event.renderTickTime;
+        HoloPicking.Hit hit = HoloPicking.pick(mc, partialTick);
+        if (!keepHover(mc, hit, partialTick)) {
+            if (hit == null) {
+                setHover(null, null);
+            } else if (hit.target() != hoverTarget || hit.object() != hoverObject) {
+                setHover(null, null);
+                storeHit(hit);
+                setHover(hit.object(), hit.target());
+            } else {
+                storeHit(hit);
+            }
         }
-        if (hit.target() != hoverTarget || hit.object() != hoverObject) {
-            setHover(null, null);
-            storeHit(hit);
-            setHover(hit.object(), hit.target());
-        } else {
-            storeHit(hit);
+        drag(mc, partialTick);
+    }
+
+    /**
+     * Survol avec marge ({@link HoloInteractible#hoverMargin()}) : l'element survole le reste tant que le regard, sur
+     * le fond de sa fenetre ou en dehors, est dans son rectangle elargi de la marge. Viser un autre element y met
+     * fin.
+     */
+    private static boolean keepHover(Minecraft mc, HoloPicking.Hit hit, float partialTick)
+    {
+        if (hoverTarget == null || hit != null && hit.target() == hoverTarget && hit.object() == hoverObject) {
+            return false;
+        }
+        float margin = hoverTarget.hoverMargin();
+        if (margin <= 0f || !(hoverTarget instanceof HoloWidget widget)) return false;
+        if (!(hoverObject instanceof HoloWindow window)) return false;
+        if (hit != null && hit.target() != hoverObject) return false;
+        if (!HoloPicking.project(mc, hoverObject, partialTick)) return false;
+        float x = window.pixelX(HoloPicking.projectedX()) - widget.absoluteX();
+        float y = window.pixelY(HoloPicking.projectedY()) - widget.absoluteY();
+        if (x < -margin || y < -margin || x > widget.width() + margin || y > widget.height() + margin) return false;
+        hoverX = HoloPicking.projectedX();
+        hoverY = HoloPicking.projectedY();
+        return true;
+    }
+
+    /** Clics interceptes encore enfonces : regard projete sur leur objet, livre a {@code onDrag}. */
+    private static void drag(Minecraft mc, float partialTick)
+    {
+        if (PRESSED.isEmpty()) return;
+        DRAGGING.clear();
+        DRAGGING.addAll(PRESSED.keySet());
+        for (int i = 0; i < DRAGGING.size(); i++) {
+            HoloControl control = DRAGGING.get(i);
+            Pressed pressed = PRESSED.get(control);
+            if (pressed == null || !HoloPicking.project(mc, pressed.object, partialTick)) continue;
+            pressed.receiver.onDrag(context(pressed.object, pressed.receiver, HoloPicking.projectedX(),
+                    HoloPicking.projectedY(), pressed.object == hoverObject), control);
         }
     }
 
@@ -125,19 +171,17 @@ public final class HoloInteractions
 
     // ---------------------------------------------------------------- interne
 
-    private static boolean active(Minecraft mc)
-    {
-        return mc.player != null && mc.level != null && mc.screen == null && mc.getOverlay() == null
-                && mc.mouseHandler.isMouseGrabbed();
-    }
+    /** Pas d'ecran (ou seulement l'ecran clavier de la capture) et souris capturee. */
+    private static boolean active(Minecraft mc) { return HoloControlCapture.gameInputActive(mc); }
 
     /**
      * Element qui prend {@code control} : la cible si elle l'intercepte, sinon le premier parent interactible
-     * (panneaux, puis l'objet) qui l'intercepte ; {@code null} = personne. {@code MOUSE_MOVE} n'est jamais pris.
+     * (panneaux, puis l'objet) qui l'intercepte ; {@code null} = personne. {@code MOUSE_MOVE} et {@code KEYBOARD}
+     * ne sont jamais pris au survol (ils retiendraient le joueur : capture explicite).
      */
     private static HoloInteractible receiver(HoloInteractible target, HoloObject object, HoloControl control)
     {
-        if (control.kind() == HoloControl.Kind.MOUSE_MOVE) return null;
+        if (control.kind() == HoloControl.Kind.MOUSE_MOVE || control.kind() == HoloControl.Kind.KEYBOARD) return null;
         for (HoloInteractible current = target; current != null; current = parent(current, object)) {
             if (current.intercepts(control)) return current;
         }

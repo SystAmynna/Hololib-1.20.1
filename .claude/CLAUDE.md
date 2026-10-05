@@ -27,17 +27,18 @@ com.amynna.hololib
 ├── HoloLib.java                 classe @Mod (registres, capability, reseau)
 ├── holo/                        modele COMMUN, aucune classe client (voir holo/package-info.java)
 │   ├── object/                  HoloObject, HoloAnchor (Sky/World/Local/Hud), HoloTransform, HoloVisibility, HoloAccess
-│   ├── window/ widget/          HoloWindow ; HoloWidget, HoloPanel, HoloLabel, HoloButton, HoloCanvas
+│   ├── window/ widget/          HoloWindow ; HoloWidget, HoloPanel, HoloLabel, HoloCanvas, HoloTextMetrics
+│   │   └── widget/control/      widgets interactifs generiques : traits (HoloClickable...) + HoloWidgetXxx
 │   ├── module/                  HoloModule (etat + logique + objets, deux cotes), registre Forge HoloModuleTypes
 │   ├── memory/                  HoloMemory, HoloScope, HoloContainer(s) ; player/ dimension/ position/
 │   ├── inspect/                 HoloInspection (qui voit qui), HoloInspections (serveur), HoloInspectEvent
-│   ├── capture/                 HoloControl, HoloCaptor, HoloCapture, HoloCaptures (capture de controles, commune)
+│   ├── capture/                 HoloControl, HoloKeys, HoloCaptor, HoloCapture, HoloCaptures (capture, commune)
 │   └── interact/                HoloInteractible, HoloInteraction (interaction au regard, partie commune)
 ├── network/                     HoloNetwork + paquets (snapshot, module, objet, origine, oubli ; deplacement, action)
 ├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
 └── client/
     ├── holo/                    ClientHoloWorld (miroirs des modules par portee), handlers des paquets
-    ├── capture/                 HoloControlCapture : SEUL abonne aux inputs (captures explicites + passives)
+    ├── capture/                 HoloControlCapture : SEUL abonne aux inputs ; HoloKeyboardScreen (clavier entier)
     ├── interact/                HoloInteractions : picking + survol ; captor passif de la capture
     └── render/                  TOUS les renderers du mod (regle d'architecture)
         ├── package-info.java    doc detaillee : ordre de rendu, regles (source de verite)
@@ -99,10 +100,24 @@ com.amynna.hololib
   locaux ; effet sur le jeu via `sendAction(source, ...)`, verifie par le serveur (acces, `PUBLIC` pour un
   non-proprietaire, et `viewers` pour la memoire d'un autre joueur). Protocole reseau `"3"`.
 
+### Widgets interactifs (`holo/widget/control`)
+
+- **Regle** : un widget interactif se compose de **traits** (interfaces a methodes par defaut) : `HoloHoverable`,
+  `HoloClickable`, `HoloScrollable`, `HoloToggleable`, `HoloDraggable`, `HoloTextInput` (+ `HoloTextBuffer`),
+  `HoloPointerInput`, `HoloDirectionalInput` (+ `HoloDirections`). Le composant ne fournit que son etat et ses
+  reactions. Les traits ne redefinissent jamais `intercepts` mais `interceptsClick` / `interceptsScroll` /
+  `interceptsKey` (pas de conflit de defauts).
+- Widgets prets a l'emploi, prefixes `HoloWidget` (`HoloWidgetButton`, `HoloWidgetMultiButton`, `HoloWidgetHoverZone`,
+  `HoloWidgetScrollZone`, `HoloWidgetSwitch`, `HoloWidgetValueBar`, `HoloWidgetTextBox`, `HoloWidgetMouseBox`,
+  `HoloWidgetDraggable`, `HoloWidgetKeyBox`), non finaux. Les demos les utilisent ; ne plus ecrire de widget ad hoc
+  dans un module si un trait ou un widget existe.
+- Framework : `onDrag` (chaque frame, clic intercepte maintenu, regard projete par `HoloPicking.project`) et
+  `hoverMargin()` (survol conserve sur le fond / hors fenetre dans la marge).
+
 ### Capture de controles (independante de l'interaction)
 
 - `HoloControl` : boutons bruts, `SCROLL`, `MOUSE_MOVE`, `ESCAPE`, `ENTER`, `mapping("key.xxx")` (tout `KeyMapping`,
-  modde compris, par son nom). `HoloCaptor.captures(control)` + callbacks ; `HoloCaptures.begin/end` (facade
+  modde compris, par son nom), `KEYBOARD` (toutes les touches + texte : `onKeyPress`, `onCharTyped`, codes `HoloKeys`). `HoloCaptor.captures(control)` + callbacks ; `HoloCaptures.begin/end` (facade
   commune, backend installe au setup client).
 - `HoloControlCapture` : pile de captures explicites (la plus recente d'abord) puis captors passifs (l'interaction).
   Une capture explicite ne se termine jamais seule et reste active sous un ecran (rien n'est distribue). Boutons
@@ -110,6 +125,12 @@ com.amynna.hololib
   chaque debut de tick ; Echap capture : `ScreenEvent.Opening` du `PauseScreen` annule (poste avant `InputEvent.Key`) ;
   souris : rotation verrouillee sans Mixin (remise a chaque debut de frame et de tick, `turnPlayer` precede
   `onRenderTickStart`). `KeyMapping.setAll()` a la fin d'une capture explicite.
+- `KEYBOARD` : sans Mixin, seul un `Screen` recoit les caracteres (`KeyboardHandler.charTyped`). Tant qu'un captor le
+  prend, `HoloKeyboardScreen` (invisible, sans pause, ne se ferme pas sur Echap) est ouvert ; sous un ecran vanilla ne
+  lit aucun `KeyMapping`. Les touches passent par l'ecran : au captor le plus recent qui prend `KEYBOARD` ou un
+  controle lie a la touche. `setScreen` libere la souris et `MouseHandler.grabMouse` refermerait l'ecran : la souris est
+  reprise en posant `mouseGrabbed` par reflexion (`ObfuscationReflectionHelper`, SRG `f_91520_` / `f_91511_`), donc la
+  camera tourne et l'interaction continue (`HoloControlCapture.gameInputActive`).
 
 ### Les quatre familles de renderers
 

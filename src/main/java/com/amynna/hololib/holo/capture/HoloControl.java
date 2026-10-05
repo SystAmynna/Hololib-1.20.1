@@ -13,13 +13,16 @@ import java.util.Objects;
  *     n'ouvre pas le menu pause.</li>
  *     <li>{@link #mapping(String)} : un controle des options ({@code KeyMapping}), vanilla ou d'un mod, designe par
  *     son nom ({@code "key.jump"}) : le controle suit la touche choisie par le joueur.</li>
+ *     <li>{@link #KEYBOARD} : tout le clavier, touches brutes ({@link HoloKeys}) et texte tape. Porte par un ecran
+ *     invisible du framework (seule source des caracteres sans Mixin) : la camera tourne toujours, mais aucune touche
+ *     n'atteint le jeu.</li>
  * </ul>
  */
 public final class HoloControl
 {
     public enum Kind
     {
-        MOUSE_BUTTON, SCROLL, MOUSE_MOVE, ESCAPE, ENTER, MAPPING
+        MOUSE_BUTTON, SCROLL, MOUSE_MOVE, ESCAPE, ENTER, MAPPING, KEYBOARD
     }
 
     public static final HoloControl LEFT_CLICK = new HoloControl(Kind.MOUSE_BUTTON, "left");
@@ -29,6 +32,7 @@ public final class HoloControl
     public static final HoloControl MOUSE_MOVE = new HoloControl(Kind.MOUSE_MOVE, "mouse_move");
     public static final HoloControl ESCAPE = new HoloControl(Kind.ESCAPE, "escape");
     public static final HoloControl ENTER = new HoloControl(Kind.ENTER, "enter");
+    public static final HoloControl KEYBOARD = new HoloControl(Kind.KEYBOARD, "keyboard");
 
     private static final HoloControl[] MOUSE_BUTTONS = {LEFT_CLICK, RIGHT_CLICK, MIDDLE_CLICK};
 
@@ -66,7 +70,7 @@ public final class HoloControl
     }
 
     /** Vrai pour un controle qui s'appuie et se relache (boutons, touches, mappings). */
-    public boolean pressable() { return kind != Kind.SCROLL && kind != Kind.MOUSE_MOVE; }
+    public boolean pressable() { return kind != Kind.SCROLL && kind != Kind.MOUSE_MOVE && kind != Kind.KEYBOARD; }
 
     @Override
     public boolean equals(Object o)

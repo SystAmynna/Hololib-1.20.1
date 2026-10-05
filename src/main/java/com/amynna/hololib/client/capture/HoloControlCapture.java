@@ -55,6 +55,11 @@ import java.util.Map;
  *     {@code Minecraft.runTick}), puis livre une fois par frame.</li>
  * </ul>
  * A la fin d'une capture explicite, {@code KeyMapping.setAll()} resynchronise les touches encore enfoncees.
+ * <p>
+ * <b>Mode clavier</b> : tant qu'un captor prend {@code HoloControl.KEYBOARD}, l'ecran invisible
+ * {@link HoloKeyboardScreen} est ouvert (au debut de la frame ou du tick suivant) et ferme des qu'aucun captor ne le
+ * prend plus. Les touches arrivent alors par l'ecran ({@code InputEvent.Key} est ignore) et vont au captor le plus
+ * recent qui prend le clavier ou un controle lie a la touche ; la souris reste capturee (camera, clics, molette).
  */
 @Mod.EventBusSubscriber(modid = HoloLib.MODID, value = Dist.CLIENT)
 public final class HoloControlCapture
@@ -67,6 +72,12 @@ public final class HoloControlCapture
     private static final List<HoloCaptor> PASSIVE = new ArrayList<>();
     /** Controle appuye -> captor qui a pris l'appui. */
     private static final Map<HoloControl, HoloCaptor> PRESSED = new HashMap<>();
+    /** Mode clavier : touche brute appuyee -> captor du clavier qui l'a recue. */
+    private static final Map<Integer, HoloCaptor> KEYS_DOWN = new HashMap<>();
+    /** Mode clavier : captor qui recoit les caracteres de la derniere touche ({@code null} = caracteres ignores). */
+    private static HoloCaptor charTarget;
+    /** Moitie haute d'une paire de substitution UTF-16 en attente. */
+    private static char highSurrogate;
     private static final Context CONTEXT = new Context();
 
     // Controles des options : cache reconstruit quand la liste change (mods qui en ajoutent).
@@ -101,8 +112,11 @@ public final class HoloControlCapture
     {
         if (!EXPLICIT.remove(captor)) return;
         PRESSED.values().removeIf(pressed -> pressed == captor);
+        KEYS_DOWN.values().removeIf(down -> down == captor);
+        if (charTarget == captor) charTarget = null;
         if (mouseCaptor == captor) mouseCaptor = null;
         captor.onCaptureEnd(context(captor));
+        closeKeyboardIfUnused(Minecraft.getInstance());
         KeyMapping.setAll();
     }
 
@@ -132,6 +146,16 @@ public final class HoloControlCapture
 
     /** Duree de la frame precedente, en secondes. */
     public static float frameSeconds() { return frameSeconds; }
+
+    /**
+     * Vrai si les controles du joueur vont au jeu ou aux captors : joueur present, souris capturee, et aucun ecran sauf
+     * l'ecran clavier du framework (qui ne masque que le clavier).
+     */
+    public static boolean gameInputActive(Minecraft mc)
+    {
+        return mc.player != null && mc.level != null && mc.getOverlay() == null
+                && (mc.screen == null || mc.screen instanceof HoloKeyboardScreen) && mc.mouseHandler.isMouseGrabbed();
+    }
 
     /** Mise en place au setup client : branche {@link HoloCaptures} sur ce controleur. */
     @Mod.EventBusSubscriber(modid = HoloLib.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
@@ -197,11 +221,17 @@ public final class HoloControlCapture
      */
     private static boolean updateActivity(Minecraft mc)
     {
+        if (mc.screen instanceof HoloKeyboardScreen) {
+            closeKeyboardIfUnused(mc);
+            // Retour du focus : l'ecran clavier reste ouvert, la souris doit etre reprise.
+            if (mc.screen instanceof HoloKeyboardScreen) HoloKeyboardScreen.grabMouse(mc);
+        }
         if (!active(mc)) {
             releaseAll();
             mouseCaptor = null;
             return false;
         }
+        if (mc.screen == null && captorFor(HoloControl.KEYBOARD) != null) mc.setScreen(new HoloKeyboardScreen());
         LocalPlayer player = mc.player;
         HoloCaptor captor = captorFor(HoloControl.MOUSE_MOVE);
         if (captor != mouseCaptor) {
@@ -242,7 +272,7 @@ public final class HoloControlCapture
     @SubscribeEvent
     public static void onMouseButtonPost(InputEvent.MouseButton.Post event)
     {
-        if (event.getAction() == GLFW.GLFW_REPEAT) return;
+        if (event.getAction() == GLFW.GLFW_REPEAT || keyboardMode(Minecraft.getInstance())) return;
         mappings(InputConstants.Type.MOUSE.getOrCreate(event.getButton()), event.getAction() == GLFW.GLFW_PRESS);
     }
 
@@ -250,7 +280,8 @@ public final class HoloControlCapture
     public static void onKey(InputEvent.Key event)
     {
         int action = event.getAction();
-        if (action == GLFW.GLFW_REPEAT) return;
+        // En mode clavier, la touche est passee par l'ecran clavier.
+        if (action == GLFW.GLFW_REPEAT || keyboardMode(Minecraft.getInstance())) return;
         boolean pressed = action == GLFW.GLFW_PRESS;
         InputConstants.Key key = InputConstants.getKey(event.getKey(), event.getScanCode());
         HoloControl raw = switch (event.getKey()) {
@@ -307,13 +338,102 @@ public final class HoloControlCapture
         event.setSwingHand(false);
     }
 
+    // ---------------------------------------------------------------- mode clavier (appele par l'ecran)
+
+    /**
+     * Touche (ou repetition) sous l'ecran clavier : au premier captor, du plus recent au plus ancien, qui prend tout le
+     * clavier (touche brute, puis ses caracteres) ou un controle lie a cette touche (Echap, Entree, mapping : appui
+     * apparie, caracteres ignores). Sans preneur, la touche est perdue (le jeu ne lit rien sous un ecran).
+     */
+    static void screenKeyPressed(int key, int scanCode, int modifiers)
+    {
+        Minecraft mc = Minecraft.getInstance();
+        charTarget = null;
+        highSurrogate = 0;
+        if (!active(mc)) return;
+        List<HoloControl> controls = controlsForKey(mc, key, scanCode);
+        int count = EXPLICIT.size() + PASSIVE.size();
+        for (int i = 0; i < count; i++) {
+            HoloCaptor captor = i < EXPLICIT.size() ? EXPLICIT.get(EXPLICIT.size() - 1 - i)
+                    : PASSIVE.get(i - EXPLICIT.size());
+            if (captor.captures(HoloControl.KEYBOARD)) {
+                charTarget = captor;
+                KEYS_DOWN.put(key, captor);
+                captor.onKeyPress(context(captor), key, scanCode, modifiers);
+                return;
+            }
+            for (int j = 0; j < controls.size(); j++) {
+                HoloControl control = controls.get(j);
+                if (!captor.captures(control)) continue;
+                if (!PRESSED.containsKey(control)) press(captor, control);
+                return;
+            }
+        }
+    }
+
+    static void screenKeyReleased(int key, int scanCode, int modifiers)
+    {
+        Minecraft mc = Minecraft.getInstance();
+        HoloCaptor captor = KEYS_DOWN.remove(key);
+        if (captor != null) captor.onKeyRelease(context(captor), key, scanCode, modifiers);
+        List<HoloControl> controls = controlsForKey(mc, key, scanCode);
+        for (int i = 0; i < controls.size(); i++) {
+            if (PRESSED.containsKey(controls.get(i))) release(controls.get(i));
+        }
+    }
+
+    static void screenCharTyped(char character, int modifiers)
+    {
+        HoloCaptor captor = charTarget;
+        if (captor == null || !active(Minecraft.getInstance()) || !captor.captures(HoloControl.KEYBOARD)) return;
+        if (Character.isHighSurrogate(character)) {
+            highSurrogate = character;
+            return;
+        }
+        int codePoint = character;
+        if (Character.isLowSurrogate(character)) {
+            if (highSurrogate == 0) return;
+            codePoint = Character.toCodePoint(highSurrogate, character);
+            highSurrogate = 0;
+        }
+        captor.onCharTyped(context(captor), codePoint, modifiers);
+    }
+
+    static void screenScrolled(double delta)
+    {
+        if (!active(Minecraft.getInstance())) return;
+        HoloCaptor captor = captorFor(HoloControl.SCROLL);
+        if (captor != null) captor.onScroll(context(captor), delta);
+    }
+
+    /** Controles designant une touche : Echap / Entree bruts et mappings lies a la touche. */
+    private static List<HoloControl> controlsForKey(Minecraft mc, int key, int scanCode)
+    {
+        List<HoloControl> controls = new ArrayList<>(2);
+        if (key == GLFW.GLFW_KEY_ESCAPE) controls.add(HoloControl.ESCAPE);
+        if (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) controls.add(HoloControl.ENTER);
+        refreshMappings(mc);
+        InputConstants.Key input = InputConstants.getKey(key, scanCode);
+        for (Map.Entry<KeyMapping, HoloControl> entry : MAPPING_CONTROLS.entrySet()) {
+            if (entry.getKey().getKey().equals(input)) controls.add(entry.getValue());
+        }
+        return controls;
+    }
+
+    private static boolean keyboardMode(Minecraft mc) { return mc.screen instanceof HoloKeyboardScreen; }
+
+    /** Ferme l'ecran clavier si plus aucun captor ne prend le clavier (la souris reste capturee). */
+    private static void closeKeyboardIfUnused(Minecraft mc)
+    {
+        if (!keyboardMode(mc) || captorFor(HoloControl.KEYBOARD) != null) return;
+        KEYS_DOWN.clear();
+        charTarget = null;
+        mc.setScreen(null);
+    }
+
     // ---------------------------------------------------------------- interne
 
-    private static boolean active(Minecraft mc)
-    {
-        return mc.player != null && mc.level != null && mc.screen == null && mc.getOverlay() == null
-                && mc.mouseHandler.isMouseGrabbed();
-    }
+    private static boolean active(Minecraft mc) { return gameInputActive(mc); }
 
     /** Mappings lies a {@code key} : appui pris par un captor, ou relachement d'un appui pris. */
     private static void mappings(InputConstants.Key key, boolean pressed)
@@ -354,6 +474,12 @@ public final class HoloControlCapture
 
     private static void releaseAll()
     {
+        charTarget = null;
+        while (!KEYS_DOWN.isEmpty()) {
+            Map.Entry<Integer, HoloCaptor> entry = KEYS_DOWN.entrySet().iterator().next();
+            KEYS_DOWN.remove(entry.getKey());
+            entry.getValue().onKeyRelease(context(entry.getValue()), entry.getKey(), 0, 0);
+        }
         if (PRESSED.isEmpty()) return;
         Iterator<Map.Entry<HoloControl, HoloCaptor>> iterator = PRESSED.entrySet().iterator();
         while (iterator.hasNext()) {
@@ -444,5 +570,15 @@ public final class HoloControlCapture
 
         @Override
         public void release() { end(captor); }
+
+        @Override
+        public String clipboard()
+        {
+            String text = Minecraft.getInstance().keyboardHandler.getClipboard();
+            return text != null ? text : "";
+        }
+
+        @Override
+        public void setClipboard(String text) { Minecraft.getInstance().keyboardHandler.setClipboard(text); }
     }
 }

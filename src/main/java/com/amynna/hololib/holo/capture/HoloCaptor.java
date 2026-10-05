@@ -36,4 +36,15 @@ public interface HoloCaptor
      * tourne pas ; {@link HoloCapture#setLook} l'oriente.
      */
     default void onMouseMove(HoloCapture ctx, float dYaw, float dPitch) {}
+
+    /**
+     * Touche du clavier, pour un captor qui prend {@link HoloControl#KEYBOARD} ; aussi appele pour les repetitions
+     * d'une touche maintenue. Codes et modificateurs : {@link HoloKeys}.
+     */
+    default void onKeyPress(HoloCapture ctx, int key, int scanCode, int modifiers) {}
+
+    default void onKeyRelease(HoloCapture ctx, int key, int scanCode, int modifiers) {}
+
+    /** Caractere tape (disposition du clavier et accents compris), pour un captor qui prend le clavier. */
+    default void onCharTyped(HoloCapture ctx, int codePoint, int modifiers) {}
 }
