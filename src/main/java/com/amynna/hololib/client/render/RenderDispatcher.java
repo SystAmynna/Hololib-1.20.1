@@ -1,11 +1,13 @@
 package com.amynna.hololib.client.render;
 
 import com.amynna.hololib.HoloLib;
+import com.amynna.hololib.client.render.hud.HudRenderPass;
 import com.amynna.hololib.client.render.sky.SkyRenderPass;
 import com.amynna.hololib.client.render.view.ViewRenderPass;
 import com.amynna.hololib.client.render.world.WorldRenderPass;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.RegisterGuiOverlaysEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.client.event.ViewportEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
@@ -17,7 +19,8 @@ import org.joml.Matrix4f;
 /**
  * Seul point d'entree du rendu du mod : route les stages de {@link RenderLevelStageEvent} vers les passes (voir
  * l'ordre de rendu dans {@code package-info}). Priorite {@code LOWEST} : les autres mods dessinent avant nous, en
- * particulier avant que la passe de vue ne vide la profondeur.
+ * particulier avant que la passe de vue ne vide la profondeur. Le HUD passe par un overlay Forge enregistre sous tous
+ * les overlays vanilla ({@link ModBus}).
  */
 @Mod.EventBusSubscriber(modid = HoloLib.MODID, value = Dist.CLIENT)
 public final class RenderDispatcher
@@ -58,6 +61,20 @@ public final class RenderDispatcher
         {
             ViewRenderPass.render(HoloRenderers.view(), event.getCamera(), event.getPartialTick(), CAMERA_ROTATION,
                     CAMERA_NORMAL, event.getProjectionMatrix(), fov);
+        }
+    }
+
+    /** Abonnements au bus du mod. */
+    @Mod.EventBusSubscriber(modid = HoloLib.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
+    public static final class ModBus
+    {
+        private ModBus() {}
+
+        @SubscribeEvent
+        public static void onRegisterGuiOverlays(RegisterGuiOverlaysEvent event)
+        {
+            event.registerBelowAll("holo_hud", (gui, graphics, partialTick, width, height) ->
+                    HudRenderPass.render(HoloRenderers.hud(), graphics, partialTick, width, height));
         }
     }
 }

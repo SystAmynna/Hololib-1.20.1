@@ -1,5 +1,6 @@
 package com.amynna.hololib.client.render;
 
+import com.amynna.hololib.client.render.hud.HudRenderer;
 import com.amynna.hololib.client.render.sky.SkyRenderer;
 import com.amynna.hololib.client.render.view.ViewRenderer;
 import com.amynna.hololib.client.render.world.WorldRenderer;
@@ -21,6 +22,8 @@ public final class HoloRenderers
     private static final List<SkyRenderer> SKY_READ_ONLY = Collections.unmodifiableList(SKY);
     private static final List<ViewRenderer> VIEW_READ_ONLY = Collections.unmodifiableList(VIEW);
     private static final List<WorldRenderer<?>> WORLD_READ_ONLY = Collections.unmodifiableList(WORLD);
+    private static final List<HudRenderer> HUD = new ArrayList<>();
+    private static final List<HudRenderer> HUD_READ_ONLY = Collections.unmodifiableList(HUD);
 
     private HoloRenderers() {}
 
@@ -42,6 +45,12 @@ public final class HoloRenderers
         if (!WORLD.contains(renderer)) WORLD.add(renderer);
     }
 
+    public static void register(HudRenderer renderer)
+    {
+        RenderSystem.assertOnRenderThread();
+        if (!HUD.contains(renderer)) HUD.add(renderer);
+    }
+
     public static void unregister(SkyRenderer renderer)
     {
         RenderSystem.assertOnRenderThread();
@@ -60,9 +69,17 @@ public final class HoloRenderers
         WORLD.remove(renderer);
     }
 
+    public static void unregister(HudRenderer renderer)
+    {
+        RenderSystem.assertOnRenderThread();
+        HUD.remove(renderer);
+    }
+
     static List<SkyRenderer> sky() { return SKY_READ_ONLY; }
 
     static List<ViewRenderer> view() { return VIEW_READ_ONLY; }
 
     static List<WorldRenderer<?>> world() { return WORLD_READ_ONLY; }
+
+    static List<HudRenderer> hud() { return HUD_READ_ONLY; }
 }

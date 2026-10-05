@@ -45,29 +45,22 @@ public final class SkyRenderPass
         MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
         try
         {
-            for (int i = 0; i < renderers.size(); i++)
-            {
-                SkyRenderer renderer = renderers.get(i);
+            for (SkyRenderer renderer : renderers) {
                 if (renderer.hiddenWithSky() && !CONTEXT.skyVisible()) continue;
                 if (!renderer.shouldRender(CONTEXT)) continue;
 
-                if (!drawn)
-                {
+                if (!drawn) {
                     drawn = true;
                     RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
                 }
                 PoseStack.Pose last = pose.last();
                 last.pose().set(cameraRotation);
                 last.normal().set(cameraNormal);
-                try
-                {
+                try {
                     renderer.render(pose, buffers, CONTEXT);
-                }
-                finally
-                {
+                } finally {
                     buffers.endBatch();
-                    if (!pose.clear())
-                    {
+                    if (!pose.clear()) {
                         HoloLib.LOGGER.error("SkyRenderer {} a laisse sa PoseStack desequilibree", renderer);
                         pose = new PoseStack();
                     }

@@ -50,17 +50,14 @@ public final class ViewRenderPass
         MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
         try
         {
-            for (int i = 0; i < renderers.size(); i++)
-            {
-                ViewRenderer renderer = renderers.get(i);
+            for (ViewRenderer renderer : renderers) {
                 if (renderer.hiddenWithGui() && mc.options.hideGui) continue;
                 Matrix4f projection = renderer.projection() == ViewRenderer.Projection.STABLE
                         ? stableProjection(mc, fov, aspect) : worldProjection;
                 CONTEXT.projection(projection);
                 if (!renderer.shouldRender(CONTEXT)) continue;
 
-                if (!prepared)
-                {
+                if (!prepared) {
                     prepared = true;
                     fogStart = RenderSystem.getShaderFogStart();
                     fogEnd = RenderSystem.getShaderFogEnd();
@@ -70,15 +67,11 @@ public final class ViewRenderPass
                 PoseStack.Pose last = pose.last();
                 last.pose().identity();
                 last.normal().identity();
-                try
-                {
+                try {
                     renderer.render(pose, buffers, CONTEXT);
-                }
-                finally
-                {
+                } finally {
                     buffers.endBatch();
-                    if (!pose.clear())
-                    {
+                    if (!pose.clear()) {
                         HoloLib.LOGGER.error("ViewRenderer {} a laisse sa PoseStack desequilibree", renderer);
                         pose = new PoseStack();
                     }

@@ -1,0 +1,24 @@
+package com.amynna.hololib.demo;
+
+import com.amynna.hololib.HoloLib;
+import com.amynna.hololib.holo.module.HoloModuleTarget;
+import com.amynna.hololib.holo.module.HoloModuleType;
+import com.amynna.hololib.holo.module.HoloModuleTypes;
+import net.minecraftforge.registries.DeferredRegister;
+import net.minecraftforge.registries.RegistryObject;
+
+/** Enregistrement des modules de demonstration, un par compatibilite, comme le ferait un mod tiers. */
+public final class DemoModules
+{
+    public static final DeferredRegister<HoloModuleType<?>> REGISTER =
+            DeferredRegister.create(HoloModuleTypes.REGISTRY_NAME, HoloLib.MODID);
+
+    public static final RegistryObject<HoloModuleType<DemoDimensionModule>> DEMO_DIMENSION = REGISTER.register(
+            "demo_dimension", () -> new HoloModuleType<>(HoloModuleTarget.DIMENSION, DemoDimensionModule::new));
+    public static final RegistryObject<HoloModuleType<DemoWorldPosModule>> DEMO_WORLD_POS = REGISTER.register(
+            "demo_world_pos", () -> new HoloModuleType<>(HoloModuleTarget.POSITION, DemoWorldPosModule::new));
+    public static final RegistryObject<HoloModuleType<DemoPlayerModule>> DEMO_PLAYER = REGISTER.register(
+            "demo_player", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, DemoPlayerModule::new));
+
+    private DemoModules() {}
+}

@@ -10,8 +10,12 @@
  *     de rendu, <b>par-dessus le monde</b> mais sous la main et le GUI.</li>
  *     <li>{@link com.amynna.hololib.client.render.world.WorldRenderer} : objet ancre dans le monde, dessine comme une
  *     entite : <b>cache par les blocs et les entites</b> places devant.</li>
+ *     <li>{@link com.amynna.hololib.client.render.hud.HudRenderer} : a l'ecran, en orthographique, comme un HUD,
+ *     <b>sous tous les elements du HUD vanilla</b> (overlay Forge enregistre sous tous les autres).</li>
  *     <li>Objet qui existe cote serveur (synchronisation, collisions) : une vraie {@code Entity} et son
  *     {@code EntityRenderer} ({@code EntityRenderersEvent.RegisterRenderers}), pas un {@code WorldRenderer}.</li>
+ *     <li>Objet holographique ({@code HoloObject}, fenetre...) : pas de renderer a ecrire pour une famille, un
+ *     {@code HoloObjectRenderer} suffit ; les ponts de {@code holo} le dessinent dans la famille de son ancrage.</li>
  * </ul>
  *
  * <h2>Ordre de rendu d'une frame (Forge 1.20.1)</h2>
@@ -33,7 +37,9 @@
  *     <li><b>{@code AFTER_LEVEL}</b> (emis par {@code GameRenderer}) : monde entierement compose dans la cible principale.
  *     Attention : Forge y passe la pile de <i>projection</i> comme PoseStack, pas la rotation camera. On y passe les
  *     {@code ViewRenderer}.</li>
- *     <li>Vidage de la profondeur, puis main du joueur, puis GUI.</li>
+ *     <li>Vidage de la profondeur, puis main du joueur.</li>
+ *     <li><b>GUI</b> (masque en F1) : notre overlay, enregistre sous tous les overlays vanilla, passe les
+ *     {@code HudRenderer} puis vide la profondeur ; le HUD vanilla est dessine ensuite, toujours devant.</li>
  * </ol>
  *
  * <h2>Regles</h2>

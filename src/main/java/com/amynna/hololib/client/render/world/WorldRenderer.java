@@ -57,9 +57,7 @@ public abstract class WorldRenderer<T extends WorldRenderable>
     {
         List<? extends T> objects = instances();
         Vec3 camera = ctx.cameraPosition();
-        for (int i = 0; i < objects.size(); i++)
-        {
-            T object = objects.get(i);
+        for (T object : objects) {
             Vec3 p = object.position(ctx.partialTick());
             if (!shouldRender(object, p, ctx)) continue;
             pose.pushPose();

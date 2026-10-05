@@ -1,0 +1,23 @@
+package com.amynna.hololib.demo;
+
+import com.amynna.hololib.holo.module.HoloModule;
+import com.amynna.hololib.holo.object.HoloAnchor;
+import com.amynna.hololib.holo.object.HoloTransform;
+import com.amynna.hololib.holo.object.HoloVisibility;
+import com.amynna.hololib.holo.window.HoloWindow;
+
+/** Demonstration de memoire de dimension : une fenetre dans le ciel, visible de toute la dimension. */
+public final class DemoDimensionModule extends HoloModule
+{
+    /** Distance des astres vanilla ({@code SkyRenderContext.SKY_RADIUS}), sous le plan lointain. */
+    private static final float SKY_DISTANCE = 100f;
+
+    @Override
+    public void onLoad()
+    {
+        HoloWindow window = addObject(DemoWindows.labeled("sky", new HoloAnchor.Sky(false),
+                new HoloTransform().setLookingAtOrigin(0f, -35f, SKY_DISTANCE).setScale(20f), 1f / 100f,
+                "Holo Lib", "Memoire de dimension", 0xFFFFC040));
+        window.setVisibility(HoloVisibility.PUBLIC);
+    }
+}

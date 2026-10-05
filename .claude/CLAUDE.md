@@ -24,29 +24,74 @@ Pour verifier le comportement de Minecraft/Forge, lire les sources mappees pluto
 
 ```
 com.amynna.hololib
-├── HoloLib.java                 classe @Mod
-└── client/render/               TOUS les renderers du mod (regle d'architecture)
-    ├── package-info.java        doc detaillee : ordre de rendu, regles (source de verite)
-    ├── RenderDispatcher.java    seul abonne aux evenements de rendu, route vers les passes
-    ├── HoloRenderers.java       registre des renderers (register/unregister, fil de rendu)
-    ├── sky/                     SkyRenderer, SkyRenderContext, SkyRenderPass
-    ├── world/                   WorldRenderer<T>, WorldRenderable, WorldRenderContext, WorldRenderPass
-    ├── view/                    ViewRenderer, ViewRenderContext, ViewRenderPass
-    └── type/HoloRenderTypes     RenderTypes du mod (POSITION_COLOR_LIGHTMAP, opaque / translucide)
+├── HoloLib.java                 classe @Mod (registres, capability, reseau)
+├── holo/                        modele COMMUN, aucune classe client (voir holo/package-info.java)
+│   ├── object/                  HoloObject, HoloAnchor (Sky/World/Local/Hud), HoloTransform, HoloVisibility
+│   ├── window/ widget/          HoloWindow ; HoloWidget, HoloPanel, HoloLabel, HoloButton, HoloCanvas
+│   ├── module/                  HoloModule (etat + logique + objets, deux cotes), registre Forge HoloModuleTypes
+│   ├── memory/                  HoloMemory, HoloScope, HoloContainer(s) ; player/ dimension/ position/
+│   └── inspect/                 HoloInspection (qui voit qui), HoloInspections (serveur), HoloInspectEvent
+├── network/                     HoloNetwork + paquets (snapshot, module, objet, origine, oubli ; deplacement, action)
+├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite)
+└── client/
+    ├── holo/                    ClientHoloWorld (miroirs des modules par portee), handlers des paquets
+    └── render/                  TOUS les renderers du mod (regle d'architecture)
+        ├── package-info.java    doc detaillee : ordre de rendu, regles (source de verite)
+        ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
+        ├── HoloRenderers.java   registre des renderers (register/unregister, fil de rendu)
+        ├── sky/                 SkyRenderer, SkyRenderContext, SkyRenderPass
+        ├── world/               WorldRenderer<T>, WorldRenderable, WorldRenderContext, WorldRenderPass
+        ├── view/                ViewRenderer, ViewRenderContext, ViewRenderPass
+        ├── hud/                 HudRenderer, HudRenderContext, HudRenderPass
+        ├── demo/                DemoCubeRenderer (objets des demos)
+        ├── holo/                ponts objets -> familles (HoloRouting, 4 bridges), HoloObjectRenderer(s), fenetres
+        └── type/HoloRenderTypes RenderTypes du mod (POSITION_COLOR_LIGHTMAP, opaque / translucide)
 ```
 
-### Les trois familles de renderers
+### Objets holographiques
+
+- Separation modele / rendu (comme `Entity` / `EntityRenderer`) : `HoloObject` est commun, son dessin est un
+  `HoloObjectRenderer` client enregistre par classe dans `HoloObjectRenderers`.
+- Un objet choisit un **ancrage**, pas un renderer : `Sky` (celeste) et `World` (monde) ancres dans le monde ;
+  `Local` sur une sphere autour de l'oeil, relatif (orientation du monde, on peut detourner le regard) ou follow
+  (tourne avec la camera) ; `Hud` a plat sur l'ecran. `HoloRouting` le resout par observateur : le `Local` d'un autre
+  joueur (ou le sien en F5) est dessine dans le monde autour de son oeil selon son regard ; le `Hud` n'est dessine que
+  pour son proprietaire en premiere personne (masque en F5).
+- Le placement est le **`HoloTransform`** de l'objet (translation, rotation yaw/pitch/roll, echelle), **mutable** (un
+  module deplace un objet en le modifiant ; synchronise au tick suivant), interprete selon l'ancrage : `Sky` tel quel
+  autour de l'oeil ; `World` depuis l'hote (joueur proprietaire, marker dont la position est envoyee au client,
+  origine du monde pour une dimension) ; `Local` : `x`/`y` = yaw/pitch sur la sphere, `z` = distance, puis rotation et
+  echelle ; `Hud` : `x`/`y` pixels GUI depuis le point d'alignement, `z` = ordre de dessin. Bornes des demandes
+  clients : `HoloAnchor.acceptable(transform)`.
+- On replique l'**etat des modules**, jamais les widgets : chaque client recree le module depuis son type, `onLoad`
+  reconstruit les objets (meme code, memes cles des deux cotes). Ancrage, transform et visibilite sont synchronises
+  par le framework ; seuls les modules ayant un objet `PUBLIC` sont envoyes aux observateurs.
+- Trois memoires (`HoloScope`) : **joueur** (capability, plusieurs dont une active ; observateurs = joueurs qui
+  suivent son entite **et l'inspectent**), **dimension** (`SavedData` ; tous les joueurs de la dimension), **position** (portee par un
+  marker `hololib`, registre global `HoloMarkers` ; chargee avec l'entite ; joueurs qui suivent son chunk). Sans
+  proprietaire, `PRIVATE` = invisible de tous.
+- Chaque type de module a **une** compatibilite (`HoloModuleTarget` : DIMENSION, POSITION, PLAYER) et au plus une
+  instance par memoire. Gestion en jeu : `/hololib_marker create|remove`, `/hololib_module add|remove
+  dimension|world|player ...` (op 2).
+- **Inspection** : par defaut personne ne voit les affichages d'un autre joueur. A voit B si A suit l'entite de B et
+  que la memoire active de A l'autorise (`HoloInspection` : drapeau "tous", liste, exclusions). Serveur autoritaire
+  (`HoloInspections`, ensemble `viewers` de chaque `PlayerHoloContainer`). `/hololib_inspect <on|off> [<joueurs>
+  [<cibles>]]` (tous ; chaque activation poste `HoloInspectEvent`, annulable) et `/hololib_force_inspect` (op 2,
+  ignore l'evenement).
+
+### Les quatre familles de renderers
 
 | Famille | Stage Forge | Resultat | Gestion de la profondeur |
 |---|---|---|---|
 | `SkyRenderer` | `AFTER_SKY` | dans la skybox, derriere tout le monde | profondeur entre objets du ciel, **videe apres** la passe |
 | `WorldRenderer<T>` | `AFTER_ENTITIES` | ancre dans le monde, cache par blocs et entites | profondeur du monde ; buffers **vides par vanilla** avec les entites |
 | `ViewRenderer` | `AFTER_LEVEL` | dans la vue, au-dessus du monde, sous main et GUI | profondeur **videe avant** ; projection `STABLE` (sans bobbing) ou `WORLD` |
+| `HudRenderer` | overlay GUI sous tous les autres | a l'ecran, orthographique, sous le HUD vanilla | profondeur **videe apres** la passe |
 
 Chaque famille suit le meme schema dans son sous-package : `XxxRenderer` (API publique), `XxxRenderContext` (donnees
 de la frame, objet reutilise, setters package-private) et `XxxRenderPass` (interne, appelee par `RenderDispatcher`).
 
-**Ajouter un renderer** : implementer `SkyRenderer` / `ViewRenderer` ou etendre `WorldRenderer<T>`, puis
+**Ajouter un renderer** : implementer `SkyRenderer` / `ViewRenderer` / `HudRenderer` ou etendre `WorldRenderer<T>`, puis
 `HoloRenderers.register(...)` sur le fil de rendu. Ne jamais abonner un renderer aux evenements Forge lui-meme.
 Un objet qui existe cote serveur doit plutot etre une vraie `Entity` + `EntityRenderer`.
 

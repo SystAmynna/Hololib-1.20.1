@@ -26,6 +26,6 @@ public final class WorldRenderPass
         if (renderers.isEmpty() || level == null) return;
         CONTEXT.set(level, camera, frustum, partialTick);
         var buffers = Minecraft.getInstance().renderBuffers().bufferSource();
-        for (int i = 0; i < renderers.size(); i++) renderers.get(i).renderAll(pose, buffers, CONTEXT);
+        for (WorldRenderer<?> renderer : renderers) renderer.renderAll(pose, buffers, CONTEXT);
     }
 }

@@ -86,6 +86,19 @@ minecraft {
             property 'forge.enabledGameTestNamespaces', mod_id
         }
 
+        // Clients supplementaires pour tester le multijoueur (pseudo et dossier de jeu distincts)
+        client2 {
+            parent runs.client
+            workingDirectory project.file('run-client2')
+            args '--username', 'Dev2'
+        }
+
+        client3 {
+            parent runs.client
+            workingDirectory project.file('run-client3')
+            args '--username', 'Dev3'
+        }
+
         server {
             property 'forge.enabledGameTestNamespaces', mod_id
             args '--nogui'
