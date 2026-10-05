@@ -24,7 +24,7 @@ public final class HoloWindowRenderer implements HoloObjectRenderer<HoloWindow>
         pose.pushPose();
         pose.translate(-0.5f * window.width() * s, 0.5f * window.height() * s, 0f);
         pose.scale(s, -s, s);
-        canvas.begin(pose.last(), buffers, packedLight);
+        canvas.begin(pose.last(), buffers, packedLight, ctx.partialTick());
         try {
             window.root().render(canvas);
         } finally {

@@ -19,5 +19,9 @@
  * </ul>
  * Les fenetres sont dessinees par {@link com.amynna.hololib.client.render.holo.HoloWindowRenderer} via un
  * {@code HoloCanvas} sur {@code MultiBufferSource}.
+ * <p>
+ * Exception a la regle "que des renderers" : {@link com.amynna.hololib.client.render.holo.HoloPicking} (objet sous le
+ * reticule, pour {@code client.interact}) vit ici parce qu'il reconstruit les memes placements que les ponts ; il ne
+ * dessine rien et n'est jamais appele pendant le rendu.
  */
 package com.amynna.hololib.client.render.holo;

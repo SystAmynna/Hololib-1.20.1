@@ -32,13 +32,15 @@ final class BufferHoloCanvas implements HoloCanvas
     private MultiBufferSource buffers;
     private Font font;
     private int light;
+    private float partialTick;
     private float ox;
     private float oy;
     private float z;
 
-    void begin(PoseStack.Pose pose, MultiBufferSource buffers, int light)
+    void begin(PoseStack.Pose pose, MultiBufferSource buffers, int light, float partialTick)
     {
         this.pose = pose;
+        this.partialTick = partialTick;
         this.buffers = buffers;
         this.light = light;
         this.font = Minecraft.getInstance().font;
@@ -53,6 +55,9 @@ final class BufferHoloCanvas implements HoloCanvas
         pose = null;
         buffers = null;
     }
+
+    @Override
+    public float partialTick() { return partialTick; }
 
     @Override
     public void push(float dx, float dy)

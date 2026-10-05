@@ -12,6 +12,9 @@ import net.minecraft.resources.ResourceLocation;
  */
 public interface HoloCanvas
 {
+    /** Fraction du tick client ecoulee (0..1), pour interpoler les animations tenues par {@code tick()}. */
+    float partialTick();
+
     /** Decale l'origine ; a equilibrer par {@link #pop()}. */
     void push(float dx, float dy);
 

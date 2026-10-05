@@ -10,6 +10,7 @@ import com.amynna.hololib.holo.memory.position.HoloMarkers;
 import com.amynna.hololib.holo.memory.position.PositionHoloContainer;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloObject;
+import com.amynna.hololib.holo.object.HoloVisibility;
 import com.amynna.hololib.network.HoloForgetPacket;
 import com.amynna.hololib.network.HoloModuleActionPacket;
 import com.amynna.hololib.network.HoloMoveObjectPacket;
@@ -179,12 +180,18 @@ public final class HoloContainers
 
     public static void handleAction(ServerPlayer player, HoloModuleActionPacket packet)
     {
-        HoloContainer container = actionTarget(player, packet.scope());
+        boolean sourced = packet.source() != null;
+        HoloContainer container = actionTarget(player, packet.scope(), sourced);
         HoloModule module = container != null ? container.module(packet.module()) : null;
         if (module == null) return;
+        HoloObject source = null;
+        if (sourced) {
+            source = module.object(packet.source());
+            if (source == null || !mayUse(player, source)) return;
+        }
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(packet.payload()));
         try {
-            module.handleAction(player, buf);
+            module.handleAction(player, source, buf);
         } catch (RuntimeException e) {
             HoloLib.LOGGER.warn("Action invalide de {} pour le module {}", player.getGameProfile().getName(),
                     module.type().id(), e);
@@ -193,11 +200,16 @@ public final class HoloContainers
         }
     }
 
-    /** Conteneur vise par une action, si le joueur a le droit d'y agir. */
-    private static HoloContainer actionTarget(ServerPlayer player, HoloScope scope)
+    /**
+     * Conteneur vise par une action, si le joueur a le droit d'y agir. Memoire de joueur : son proprietaire ; avec un
+     * objet source, aussi un joueur qui la recoit (viewer : il suit et inspecte le proprietaire).
+     */
+    private static HoloContainer actionTarget(ServerPlayer player, HoloScope scope, boolean sourced)
     {
         if (scope instanceof HoloScope.Player owned) {
-            return player.getUUID().equals(owned.owner()) ? player(player) : null;
+            if (player.getUUID().equals(owned.owner())) return player(player);
+            PlayerHoloContainer container = sourced ? PLAYERS.get(owned.owner()) : null;
+            return container != null && container.viewers().contains(player.getUUID()) ? container : null;
         }
         if (scope instanceof HoloScope.Dimension) return dimension(player.serverLevel());
         if (scope instanceof HoloScope.Position position) {
@@ -207,6 +219,14 @@ public final class HoloContainers
             return container.entity().distanceToSqr(player) <= reach * reach ? container : null;
         }
         return null;
+    }
+
+    /** Vrai si le joueur peut utiliser l'objet : acces accorde, et objet visible pour lui. */
+    private static boolean mayUse(ServerPlayer player, HoloObject object)
+    {
+        UUID owner = object.module().owner();
+        if (player.getUUID().equals(owner)) return true;
+        return object.visibility() == HoloVisibility.PUBLIC && object.access().allows(player.getUUID(), owner);
     }
 
     // ---------------------------------------------------------------- joueurs

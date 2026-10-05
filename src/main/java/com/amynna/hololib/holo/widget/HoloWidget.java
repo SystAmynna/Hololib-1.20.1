@@ -5,7 +5,8 @@ import com.amynna.hololib.holo.window.HoloWindow;
 /**
  * Composant d'une {@link HoloWindow}, dans l'espace 2D de la fenetre (pixels, {@code y} vers le bas). Position
  * relative au parent. Code commun : le dessin passe par {@link HoloCanvas}, l'etat ne transite jamais sur le reseau
- * (il decoule de l'etat du module).
+ * (il decoule de l'etat du module). Un widget interactif implemente
+ * {@link com.amynna.hololib.holo.interact.HoloInteractible}.
  */
 public abstract class HoloWidget
 {
@@ -58,6 +59,22 @@ public abstract class HoloWidget
         return widget instanceof HoloPanel panel ? panel.ownerWindow() : null;
     }
 
+    /** Abscisse du coin haut gauche dans le repere de la fenetre (somme des positions des parents). */
+    public final float absoluteX()
+    {
+        float ax = 0f;
+        for (HoloWidget widget = this; widget != null; widget = widget.parent) ax += widget.x;
+        return ax;
+    }
+
+    /** Ordonnee du coin haut gauche dans le repere de la fenetre. */
+    public final float absoluteY()
+    {
+        float ay = 0f;
+        for (HoloWidget widget = this; widget != null; widget = widget.parent) ay += widget.y;
+        return ay;
+    }
+
     /** Vrai si le point, exprime dans le repere du parent, est dans le widget. */
     public boolean contains(float px, float py)
     {
@@ -78,12 +95,6 @@ public abstract class HoloWidget
 
     /** Dessin dans le repere du widget : {@code (0, 0)} en haut a gauche, {@code (width, height)} en bas a droite. */
     protected abstract void draw(HoloCanvas canvas);
-
-    /**
-     * Clic dans le widget, coordonnees dans son repere ; vrai si consomme. Appele cote client par le futur systeme
-     * d'interaction.
-     */
-    public boolean onClick(float localX, float localY) { return false; }
 
     /** Appele chaque tick client (animations d'etat). */
     public void tick() {}

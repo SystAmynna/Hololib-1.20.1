@@ -2,6 +2,7 @@ package com.amynna.hololib.holo.module;
 
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.holo.memory.HoloScope;
+import com.amynna.hololib.holo.object.HoloAccess;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloTransform;
@@ -91,13 +92,31 @@ public abstract class HoloModule
      */
     protected final void sendAction(Consumer<FriendlyByteBuf> writer)
     {
-        if (!host.canAct()) return;
+        if (host.canAct()) send(null, writer);
+    }
+
+    /**
+     * Cote client : envoie une action au module serveur ({@link #handleAction(ServerPlayer, HoloObject,
+     * FriendlyByteBuf)}) au nom d'un objet du module, typiquement depuis un callback d'interaction. Le serveur
+     * l'accepte si le joueur peut utiliser l'objet ({@link HoloObject#access()}) et le voit (objet {@code PUBLIC}
+     * pour un non-proprietaire ; pour la memoire d'un autre joueur, il doit l'inspecter). Permet donc a d'autres
+     * joueurs que le proprietaire d'agir sur un module de joueur.
+     */
+    protected final void sendAction(HoloObject source, Consumer<FriendlyByteBuf> writer)
+    {
+        if (source.module() != this) throw new IllegalArgumentException("Objet d'un autre module : " + source.key());
+        if (host.clientSide()) send(source.key(), writer);
+    }
+
+    private void send(String sourceKey, Consumer<FriendlyByteBuf> writer)
+    {
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
         try {
             writer.accept(buf);
             byte[] payload = new byte[buf.readableBytes()];
             buf.readBytes(payload);
-            HoloNetwork.CHANNEL.sendToServer(new HoloModuleActionPacket(host.scope(), instanceId, payload));
+            HoloNetwork.CHANNEL.sendToServer(new HoloModuleActionPacket(host.scope(), instanceId, sourceKey,
+                    payload));
         } finally {
             buf.release();
         }
@@ -142,6 +161,17 @@ public abstract class HoloModule
      */
     public void handleAction(ServerPlayer player, FriendlyByteBuf buf) {}
 
+    /**
+     * Cote serveur : action envoyee par un client. {@code source} est l'objet au nom duquel elle a ete envoyee
+     * ({@link #sendAction(HoloObject, Consumer)}), deja verifie (acces, visibilite) ; {@code null} pour une action sans
+     * source, verifiee comme {@link #handleAction(ServerPlayer, FriendlyByteBuf)}. Par defaut, delegue a cette
+     * derniere. Le contenu reste a valider.
+     */
+    public void handleAction(ServerPlayer player, HoloObject source, FriendlyByteBuf buf)
+    {
+        handleAction(player, buf);
+    }
+
     // ---------------------------------------------------------------- interne
 
     @ApiStatus.Internal
@@ -163,7 +193,7 @@ public abstract class HoloModule
         for (HoloObject object : objects.values()) object.clearSyncDirty();
     }
 
-    /** Usage interne : etat complet sauvegarde (etat du module + ancrage, transform et visibilite de chaque objet). */
+    /** Usage interne : etat complet sauvegarde (etat du module + ancrage, transform, visibilite, acces des objets). */
     @ApiStatus.Internal
     public final CompoundTag saveAll()
     {
@@ -175,6 +205,7 @@ public abstract class HoloModule
             objectTag.put("anchor", object.anchor().save());
             objectTag.put("transform", object.transform().save());
             objectTag.putString("visibility", object.visibility().name());
+            objectTag.put("access", object.access().save());
             objectTags.put(object.key(), objectTag);
         }
         CompoundTag tag = new CompoundTag();
@@ -200,7 +231,9 @@ public abstract class HoloModule
             } catch (IllegalArgumentException e) {
                 HoloLib.LOGGER.warn("Visibilite invalide pour l'objet {} du module {}", object.key(), type);
             }
-            object.restore(visibility, anchor, HoloTransform.load(objectTag.getCompound("transform")));
+            HoloAccess access = objectTag.contains("access", Tag.TAG_COMPOUND)
+                    ? HoloAccess.load(objectTag.getCompound("access")) : null;
+            object.restore(visibility, access, anchor, HoloTransform.load(objectTag.getCompound("transform")));
         }
     }
 

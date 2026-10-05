@@ -107,6 +107,6 @@ public final class ClientHoloContainer
     private static void apply(HoloModule module, ObjectData data)
     {
         HoloObject object = module.object(data.key());
-        if (object != null) object.restore(data.visibility(), data.anchor(), data.transform());
+        if (object != null) object.restore(data.visibility(), data.access(), data.anchor(), data.transform());
     }
 }

@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.object;
 
+import com.amynna.hololib.holo.interact.HoloInteractible;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.network.HoloMoveObjectPacket;
 import com.amynna.hololib.network.HoloNetwork;
@@ -19,6 +20,9 @@ import java.util.Objects;
  * <p>
  * Pour deplacer l'objet, un module modifie directement son transform ({@code transform().setTranslation(...)}) : cote
  * serveur, le changement est envoye au tick suivant ; cote client, il reste local (voir {@link #requestTransform()}).
+ * <p>
+ * Un objet interactible surcharge {@link #interactibleAt} ; qui peut l'utiliser est son {@linkplain #access() acces},
+ * synchronise par le framework.
  */
 public abstract class HoloObject
 {
@@ -27,6 +31,7 @@ public abstract class HoloObject
     private HoloAnchor anchor;
     private final HoloTransform transform;
     private HoloVisibility visibility = HoloVisibility.PRIVATE;
+    private HoloAccess access = HoloAccess.OWNER;
     private boolean syncDirty = true;
     private boolean replicated;
 
@@ -53,11 +58,21 @@ public abstract class HoloObject
 
     public final HoloVisibility visibility() { return visibility; }
 
+    /** Joueurs qui peuvent interagir avec l'objet. */
+    public final HoloAccess access() { return access; }
+
     /** Rayon d'une sphere centree sur l'origine locale contenant tout le dessin, en blocs (culling). */
     public abstract float boundingRadius();
 
     /** Appele chaque tick client (animations d'etat) ; jamais pendant le rendu. */
     public void tick() {}
+
+    /**
+     * Element interactible sous un point du plan {@code z = 0} du repere local (blocs, {@code y} vers le haut), vu de
+     * face ({@code +Z}) ; {@code null} = l'objet n'arrete pas le regard en ce point. Par defaut {@code null} : l'objet
+     * n'est pas interactible. Appele cote client, a chaque frame quand le regard croise le plan.
+     */
+    public HoloInteractible interactibleAt(float localX, float localY) { return null; }
 
     /** Change l'ancrage. Cote serveur, synchronise au tick suivant ; cote client, effet local seulement. */
     public final void setAnchor(HoloAnchor anchor)
@@ -74,6 +89,15 @@ public abstract class HoloObject
         Objects.requireNonNull(visibility);
         if (visibility == this.visibility) return;
         this.visibility = visibility;
+        syncDirty = true;
+    }
+
+    /** Change qui peut interagir avec l'objet. Cote serveur, synchronise au tick suivant. */
+    public final void setAccess(HoloAccess access)
+    {
+        Objects.requireNonNull(access);
+        if (access.equals(this.access)) return;
+        this.access = access;
         syncDirty = true;
     }
 
@@ -124,19 +148,21 @@ public abstract class HoloObject
     }
 
     /**
-     * Usage interne : etat recu du serveur ou relu d'une sauvegarde ; {@code anchor} ou {@code transform} nul =
-     * inchange. Le transform est copie dans l'instance de l'objet.
+     * Usage interne : etat recu du serveur ou relu d'une sauvegarde ; {@code access}, {@code anchor} ou
+     * {@code transform} nul = inchange. Le transform est copie dans l'instance de l'objet.
      */
     @ApiStatus.Internal
-    public final void restore(HoloVisibility visibility, HoloAnchor anchor, HoloTransform transform)
+    public final void restore(HoloVisibility visibility, HoloAccess access, HoloAnchor anchor,
+                              HoloTransform transform)
     {
         this.visibility = visibility;
+        if (access != null) this.access = access;
         if (anchor != null) this.anchor = anchor;
         if (transform != null) this.transform.set(transform);
         replicated = true;
     }
 
-    /** Usage interne : vrai quand l'ancrage, le transform ou la visibilite doivent etre envoyes aux clients. */
+    /** Usage interne : vrai quand l'ancrage, le transform, la visibilite ou l'acces doivent etre envoyes. */
     @ApiStatus.Internal
     public final boolean syncDirty() { return syncDirty || transform.dirty(); }
 

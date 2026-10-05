@@ -1,6 +1,7 @@
 package com.amynna.hololib.network;
 
 import com.amynna.hololib.holo.module.HoloModule;
+import com.amynna.hololib.holo.object.HoloAccess;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloTransform;
@@ -23,18 +24,22 @@ public final class HoloSyncData
     private HoloSyncData() {}
 
     /**
-     * Placement (ancrage + transform) et visibilite d'un objet. Le transform est une copie prise a l'envoi.
+     * Placement (ancrage + transform), visibilite et acces d'un objet. Le transform est une copie prise a l'envoi.
      *
-     * @param anchor    {@code null} quand le destinataire n'a pas le droit de le connaitre (objet prive)
+     * @param access    {@code null} quand le destinataire n'a pas le droit de le connaitre (objet prive)
+     * @param anchor    {@code null} dans le meme cas
      * @param transform {@code null} dans le meme cas
      */
-    public record ObjectData(String key, HoloVisibility visibility, HoloAnchor anchor, HoloTransform transform)
+    public record ObjectData(String key, HoloVisibility visibility, HoloAccess access, HoloAnchor anchor,
+                             HoloTransform transform)
     {
         public static ObjectData of(HoloObject object, boolean forOwner)
         {
-            boolean visible = forOwner || object.visibility() == HoloVisibility.PUBLIC;
-            return new ObjectData(object.key(), object.visibility(), visible ? object.anchor() : null,
-                    visible ? object.transform().copy() : null);
+            if (!forOwner && object.visibility() != HoloVisibility.PUBLIC) {
+                return new ObjectData(object.key(), object.visibility(), null, null, null);
+            }
+            return new ObjectData(object.key(), object.visibility(), object.access(), object.anchor(),
+                    object.transform().copy());
         }
 
         void write(FriendlyByteBuf buf)
@@ -43,6 +48,7 @@ public final class HoloSyncData
             buf.writeByte(visibility.ordinal());
             buf.writeBoolean(anchor != null);
             if (anchor != null) {
+                access.write(buf);
                 anchor.write(buf);
                 transform.write(buf);
             }
@@ -52,9 +58,10 @@ public final class HoloSyncData
         {
             String key = buf.readUtf();
             HoloVisibility visibility = HoloVisibility.byOrdinal(buf.readByte());
-            if (!buf.readBoolean()) return new ObjectData(key, visibility, null, null);
+            if (!buf.readBoolean()) return new ObjectData(key, visibility, null, null, null);
+            HoloAccess access = HoloAccess.read(buf);
             HoloAnchor anchor = HoloAnchor.read(buf);
-            return new ObjectData(key, visibility, anchor, HoloTransform.read(buf));
+            return new ObjectData(key, visibility, access, anchor, HoloTransform.read(buf));
         }
     }
 

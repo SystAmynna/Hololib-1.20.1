@@ -1,22 +1,32 @@
 package com.amynna.hololib.holo.window;
 
+import com.amynna.hololib.holo.interact.HoloInput;
+import com.amynna.hololib.holo.interact.HoloInteractible;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloTransform;
 import com.amynna.hololib.holo.widget.HoloPanel;
 import com.amynna.hololib.holo.widget.HoloWidget;
 
+import java.util.EnumSet;
+import java.util.Set;
+
 /**
  * Fenetre holographique : un {@link HoloObject} plat contenant une arborescence de widgets, a partir d'un
  * {@link HoloPanel} racine. Taille en pixels ; {@link #pixelScale()} donne la taille d'un pixel en blocs. La fenetre
  * est centree sur l'origine de l'objet.
+ * <p>
+ * La fenetre est interactible : elle arrete le regard sur toute sa surface (vue de face) et y cherche le widget
+ * {@link HoloInteractible} le plus profond ; les controles qu'aucun widget n'intercepte remontent a la fenetre, qui
+ * n'en intercepte aucun par defaut ({@link #setInterceptedInputs}). Son droit d'usage est {@code access()}.
  */
-public class HoloWindow extends HoloObject
+public class HoloWindow extends HoloObject implements HoloInteractible
 {
     private final HoloPanel root;
     private final int width;
     private final int height;
     private final float pixelScale;
+    private final Set<HoloInput> intercepted = EnumSet.noneOf(HoloInput.class);
 
     /**
      * @param transform  placement initial dans le repere de l'ancrage (copie)
@@ -45,6 +55,38 @@ public class HoloWindow extends HoloObject
 
     /** Widget le plus en avant sous le point (pixels de la fenetre), ou {@code null} hors de la fenetre. */
     public HoloWidget widgetAt(float px, float py) { return root.widgetAt(px, py); }
+
+    /**
+     * Controles pris par la fenetre elle-meme quand aucun widget vise ne les prend (ex. les clics, pour que viser le
+     * fond ne casse pas le bloc derriere). Remplace les precedents.
+     */
+    public HoloWindow setInterceptedInputs(HoloInput... inputs)
+    {
+        intercepted.clear();
+        for (HoloInput input : inputs) intercepted.add(input);
+        return this;
+    }
+
+    @Override
+    public boolean intercepts(HoloInput input) { return intercepted.contains(input); }
+
+    /** Convertit vers les pixels de la fenetre (meme convention que son renderer), puis widget interactible vise. */
+    @Override
+    public HoloInteractible interactibleAt(float localX, float localY)
+    {
+        HoloWidget widget = widgetAt(pixelX(localX), pixelY(localY));
+        if (widget == null) return null;
+        for (; widget != null; widget = widget.parent()) {
+            if (widget instanceof HoloInteractible interactible) return interactible;
+        }
+        return this;
+    }
+
+    /** Abscisse en pixels de la fenetre d'un point du plan local de l'objet. */
+    public final float pixelX(float localX) { return localX / pixelScale + 0.5f * width; }
+
+    /** Ordonnee en pixels de la fenetre ({@code y} vers le bas) d'un point du plan local de l'objet. */
+    public final float pixelY(float localY) { return 0.5f * height - localY / pixelScale; }
 
     @Override
     public float boundingRadius()

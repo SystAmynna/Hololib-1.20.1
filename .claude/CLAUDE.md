@@ -26,15 +26,17 @@ Pour verifier le comportement de Minecraft/Forge, lire les sources mappees pluto
 com.amynna.hololib
 ├── HoloLib.java                 classe @Mod (registres, capability, reseau)
 ├── holo/                        modele COMMUN, aucune classe client (voir holo/package-info.java)
-│   ├── object/                  HoloObject, HoloAnchor (Sky/World/Local/Hud), HoloTransform, HoloVisibility
+│   ├── object/                  HoloObject, HoloAnchor (Sky/World/Local/Hud), HoloTransform, HoloVisibility, HoloAccess
 │   ├── window/ widget/          HoloWindow ; HoloWidget, HoloPanel, HoloLabel, HoloButton, HoloCanvas
 │   ├── module/                  HoloModule (etat + logique + objets, deux cotes), registre Forge HoloModuleTypes
 │   ├── memory/                  HoloMemory, HoloScope, HoloContainer(s) ; player/ dimension/ position/
-│   └── inspect/                 HoloInspection (qui voit qui), HoloInspections (serveur), HoloInspectEvent
+│   ├── inspect/                 HoloInspection (qui voit qui), HoloInspections (serveur), HoloInspectEvent
+│   └── interact/                HoloInteractible, HoloInput, HoloInteraction (interaction au regard, partie commune)
 ├── network/                     HoloNetwork + paquets (snapshot, module, objet, origine, oubli ; deplacement, action)
-├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite)
+├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
 └── client/
     ├── holo/                    ClientHoloWorld (miroirs des modules par portee), handlers des paquets
+    ├── interact/                HoloInteractions : seul abonne aux inputs souris (survol, clics, molette, capture)
     └── render/                  TOUS les renderers du mod (regle d'architecture)
         ├── package-info.java    doc detaillee : ordre de rendu, regles (source de verite)
         ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
@@ -44,7 +46,8 @@ com.amynna.hololib
         ├── view/                ViewRenderer, ViewRenderContext, ViewRenderPass
         ├── hud/                 HudRenderer, HudRenderContext, HudRenderPass
         ├── demo/                DemoCubeRenderer (objets des demos)
-        ├── holo/                ponts objets -> familles (HoloRouting, 4 bridges), HoloObjectRenderer(s), fenetres
+        ├── holo/                ponts objets -> familles (HoloRouting, 4 bridges), HoloObjectRenderer(s), fenetres,
+        │                        HoloPicking (objet sous le reticule ; pas un renderer, partage les placements)
         └── type/HoloRenderTypes RenderTypes du mod (POSITION_COLOR_LIGHTMAP, opaque / translucide)
 ```
 
@@ -78,6 +81,23 @@ com.amynna.hololib
   (`HoloInspections`, ensemble `viewers` de chaque `PlayerHoloContainer`). `/hololib_inspect <on|off> [<joueurs>
   [<cibles>]]` (tous ; chaque activation poste `HoloInspectEvent`, annulable) et `/hololib_force_inspect` (op 2,
   ignore l'evenement).
+
+### Interaction au regard
+
+- Le point vise est le **centre de l'ecran**. `HoloPicking` reconstruit le placement de chaque objet route (comme son
+  pont), intersecte le rayon avec le plan `z = 0` local (vu de face) et demande `HoloObject.interactibleAt(x, y)`
+  (`HoloWindow` : widget `HoloInteractible` le plus profond, sinon la fenetre). Priorite HUD > vue > monde (16 blocs,
+  occulte par les blocs) > ciel (seulement si le regard ne touche rien).
+- `HoloInteractible.intercepts(HoloInput)` choisit controle par controle (clic gauche / droit / molette, `SCROLL`,
+  `MOUSE_MOVE`) ; un input non pris remonte aux parents (panneaux, fenetre), puis au jeu. Intercepte = annule cote
+  vanilla (`MouseButton.Pre`, `MouseScrollingEvent`, `InteractionKeyMappingTriggered`). Le relachement va a qui a pris
+  l'appui. `MOUSE_MOVE` = capture au survol : rotation du joueur verrouillee (sans Mixin : remise a chaque debut de
+  frame et de tick, `turnPlayer` precede `onRenderTickStart`), deltas a `onMouseMove`, `setLook` / `releaseMouse`.
+  Ecran ouvert (Echap) = tout est relache.
+- Droit d'usage : `HoloObject.access()` (`HoloAccess` : `OWNER` par defaut, liste de joueurs, `EVERYONE` ; le
+  proprietaire toujours ; sans proprietaire `OWNER` = personne), synchronise et sauvegarde par le framework. Callbacks
+  locaux ; effet sur le jeu via `sendAction(source, ...)`, verifie par le serveur (acces, `PUBLIC` pour un
+  non-proprietaire, et `viewers` pour la memoire d'un autre joueur). Protocole reseau `"3"`.
 
 ### Les quatre familles de renderers
 

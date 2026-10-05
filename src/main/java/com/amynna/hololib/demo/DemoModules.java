@@ -7,7 +7,7 @@ import com.amynna.hololib.holo.module.HoloModuleTypes;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.RegistryObject;
 
-/** Enregistrement des modules de demonstration, un par compatibilite, comme le ferait un mod tiers. */
+/** Enregistrement des modules de demonstration, comme le ferait un mod tiers. */
 public final class DemoModules
 {
     public static final DeferredRegister<HoloModuleType<?>> REGISTER =
@@ -19,6 +19,8 @@ public final class DemoModules
             "demo_world_pos", () -> new HoloModuleType<>(HoloModuleTarget.POSITION, DemoWorldPosModule::new));
     public static final RegistryObject<HoloModuleType<DemoPlayerModule>> DEMO_PLAYER = REGISTER.register(
             "demo_player", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, DemoPlayerModule::new));
+    public static final RegistryObject<HoloModuleType<DemoInteractionModule>> DEMO_INTERACTION = REGISTER.register(
+            "demo_interaction", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, DemoInteractionModule::new));
 
     private DemoModules() {}
 }

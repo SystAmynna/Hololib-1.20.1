@@ -55,6 +55,9 @@ public final class HoloRouting
 
     static List<ResolvedHolo> hud() { return HUD_READ_ONLY; }
 
+    /** Vrai si l'objet a ete route au dernier tick (donc dessine pour le joueur local). */
+    public static boolean isRouted(HoloObject object) { return CACHE.containsKey(object); }
+
     /** Appele par {@code ClientHoloWorld} en fin de tick client. */
     public static void refresh(Minecraft mc)
     {
