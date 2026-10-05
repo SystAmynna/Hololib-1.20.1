@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.interact;
 
+import com.amynna.hololib.holo.capture.HoloCaptor;
 import com.amynna.hololib.holo.object.HoloObject;
 import net.minecraft.world.entity.player.Player;
 
@@ -39,12 +40,10 @@ public interface HoloInteraction
 
     float objectPitch();
 
-    /** Vrai si la souris est capturee par un element ({@link HoloInput#MOUSE_MOVE}). */
-    boolean mouseCaptured();
-
-    /** Pendant une capture : oriente le regard du joueur (pitch borne a +-90). Sans effet sinon. */
-    void setLook(float yaw, float pitch);
-
-    /** Termine la capture de la souris ; l'element ne la reprendra qu'apres avoir ete quitte puis re-survole. */
-    void releaseMouse();
+    /**
+     * Commence une capture explicite ({@code HoloCaptures.begin}) <b>liee a cet objet</b> : comme une capture
+     * ordinaire elle dure jusqu'a sa liberation, mais elle est aussi terminee si l'objet disparait, n'est plus
+     * dessine ou n'est plus utilisable par le joueur. Faux si le captor capture deja.
+     */
+    boolean capture(HoloCaptor captor);
 }

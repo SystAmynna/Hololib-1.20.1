@@ -23,7 +23,7 @@ import net.minecraft.world.entity.player.Player;
  */
 public final class DemoPlayerModule extends HoloModule
 {
-    private static final float LOCAL_DISTANCE = 2.5f;
+    private static final float LOCAL_DISTANCE = 1.8f;
 
     /** Vrai une fois la fenetre {@code local} orientee vers le regard du joueur (sauvegarde). */
     private boolean oriented;
@@ -42,7 +42,7 @@ public final class DemoPlayerModule extends HoloModule
         local.setVisibility(HoloVisibility.PUBLIC);
 
         HoloWindow follow = addObject(DemoWindows.labeled("follow", new HoloAnchor.Local(true),
-                HoloTransform.translation(22f, 12f, 2f), 1f / 200f, "Camera follow", "Suit le regard",
+                HoloTransform.translation(22f, 12f, 1.5f), 1f / 200f, "Camera follow", "Suit le regard",
                 0xFFFF80C0));
         follow.setVisibility(HoloVisibility.PUBLIC);
 

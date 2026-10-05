@@ -1,9 +1,13 @@
 package com.amynna.hololib.client.interact;
 
 import com.amynna.hololib.HoloLib;
+import com.amynna.hololib.client.capture.HoloControlCapture;
 import com.amynna.hololib.client.render.holo.HoloPicking;
 import com.amynna.hololib.client.render.holo.HoloRouting;
-import com.amynna.hololib.holo.interact.HoloInput;
+import com.amynna.hololib.holo.capture.HoloCapture;
+import com.amynna.hololib.holo.capture.HoloCaptor;
+import com.amynna.hololib.holo.capture.HoloCaptures;
+import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.interact.HoloInteractible;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.module.HoloModule;
@@ -12,42 +16,37 @@ import com.amynna.hololib.holo.widget.HoloPanel;
 import com.amynna.hololib.holo.widget.HoloWidget;
 import com.amynna.hololib.holo.window.HoloWindow;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import org.lwjgl.glfw.GLFW;
+import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
+
+import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.Map;
 
 /**
- * Controleur client de l'interaction au regard : seul abonne du mod aux inputs souris. Fil client uniquement.
+ * Controleur client de l'interaction au regard. Fil client uniquement. Il ne lit aucun input lui-meme :
  * <ul>
- *     <li>Debut de chaque frame ({@code RenderTickEvent} START, apres {@code MouseHandler.turnPlayer} : verifie dans
- *     {@code Minecraft.runTick}) : rayon depuis le centre de l'ecran ({@link HoloPicking}), survol
- *     ({@code onHover} / {@code onHoverRelease}), capture de la souris.</li>
- *     <li>Clics ({@code InputEvent.MouseButton.Pre}, avant la mise a jour des {@code KeyMapping}) et molette
- *     ({@code MouseScrollingEvent}) : annules s'ils sont interceptes, et livres a l'element qui les prend (l'element
- *     vise, sinon le premier parent interactible qui les intercepte). Le relachement va a l'element qui a pris
- *     l'appui. Les attaques, utilisations et pick continus ({@code InteractionKeyMappingTriggered}) sont annules
- *     pendant le survol d'un element qui intercepte ce clic.</li>
- *     <li>Capture ({@link HoloInput#MOUSE_MOVE}) : la rotation du joueur est verrouillee (au debut de chaque frame et
- *     de chaque tick, pour ne jamais envoyer au serveur une rotation non verrouillee) et l'ecart est livre a
- *     {@code onMouseMove}. Sans Mixin : vanilla tourne le joueur, on lit l'ecart et on le reverse.</li>
+ *     <li>Debut de chaque frame ({@code RenderTickEvent} START, apres le verrou de rotation de la capture) : rayon
+ *     depuis le centre de l'ecran ({@link HoloPicking}) et survol ({@code onHover} / {@code onHoverRelease}).</li>
+ *     <li>Interception : un captor <b>passif</b> de {@link HoloControlCapture} prend un controle si un element de la
+ *     chaine survolee (cible, panneaux parents, objet) l'intercepte, et le route vers le premier qui l'intercepte
+ *     ({@code onLeftClick...}, {@code onScroll}, {@code onControl}). Le relachement va a l'element qui a pris
+ *     l'appui. Les captures explicites passent avant.</li>
+ *     <li>Captures liees a un objet ({@link HoloInteraction#capture}) : terminees si l'objet disparait, n'est plus
+ *     dessine ou n'est plus utilisable par le joueur.</li>
  * </ul>
- * Tout est suspendu (survol relache, capture terminee, appuis relaches) quand un ecran est ouvert ou que la souris
- * n'est pas capturee par le jeu : Echap libere toujours la souris.
+ * Le survol est relache quand un ecran est ouvert ou que la souris n'est pas capturee par le jeu.
  */
 @Mod.EventBusSubscriber(modid = HoloLib.MODID, value = Dist.CLIENT)
 public final class HoloInteractions
 {
-    private static final HoloInput[] BUTTONS = {HoloInput.LEFT_CLICK, HoloInput.RIGHT_CLICK, HoloInput.MIDDLE_CLICK};
-    /** Duree de frame maximale transmise, en secondes (apres un gel). */
-    private static final float MAX_FRAME_SECONDS = 0.25f;
-
     private static final Context CONTEXT = new Context();
+    private static final HoverCaptor HOVER = new HoverCaptor();
 
     // Survol courant.
     private static HoloObject hoverObject;
@@ -57,81 +56,49 @@ public final class HoloInteractions
     private static float hoverYaw;
     private static float hoverPitch;
 
-    // Appuis interceptes, par bouton (0 gauche, 1 droit, 2 molette).
-    private static final HoloInteractible[] PRESSED = new HoloInteractible[3];
-    private static final HoloObject[] PRESSED_OBJECT = new HoloObject[3];
-    private static final float[] PRESSED_X = new float[3];
-    private static final float[] PRESSED_Y = new float[3];
-
-    // Capture de la souris.
-    private static HoloInteractible capture;
-    private static HoloObject captureObject;
-    private static float captureX;
-    private static float captureY;
-    private static float captureYaw;
-    private static float capturePitch;
-    private static float lockYaw;
-    private static float lockPitch;
-    private static float pendingYaw;
-    private static float pendingPitch;
-    /** Element qui a rendu la souris : pas de nouvelle capture tant qu'il reste celui qui la prendrait. */
-    private static HoloInteractible released;
-
-    private static long lastFrameNanos;
-    private static float frameSeconds;
+    /** Appuis interceptes au survol, par controle. */
+    private static final Map<HoloControl, Pressed> PRESSED = new HashMap<>();
+    /** Captures explicites liees a un objet. */
+    private static final Map<HoloCaptor, HoloObject> BOUND = new IdentityHashMap<>();
 
     private HoloInteractions() {}
 
-    // ---------------------------------------------------------------- frame et tick
+    /** Mise en place au setup client : l'interaction devient un captor passif. */
+    @Mod.EventBusSubscriber(modid = HoloLib.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
+    public static final class Setup
+    {
+        private Setup() {}
+
+        @SubscribeEvent
+        public static void onClientSetup(FMLClientSetupEvent event)
+        {
+            event.enqueueWork(() -> HoloControlCapture.addPassive(HOVER));
+        }
+    }
+
+    // ---------------------------------------------------------------- frame
 
     @SubscribeEvent
     public static void onRenderTick(TickEvent.RenderTickEvent event)
     {
         if (event.phase != TickEvent.Phase.START) return;
-        long now = System.nanoTime();
-        frameSeconds = lastFrameNanos == 0L ? 0f : Math.min(MAX_FRAME_SECONDS, (now - lastFrameNanos) * 1e-9f);
-        lastFrameNanos = now;
-
         Minecraft mc = Minecraft.getInstance();
+        dropInvalid(mc.player);
         if (!active(mc)) {
-            suspend();
+            setHover(null, null);
             return;
         }
-        lockRotation(mc.player);
-        dropInvalid(mc.player);
-
         HoloPicking.Hit hit = HoloPicking.pick(mc, event.renderTickTime);
-        HoloObject object = hit != null ? hit.object() : null;
-        HoloInteractible target = hit != null ? hit.target() : null;
-        if (target != hoverTarget || object != hoverObject) {
-            HoloInteractible previous = hoverTarget;
-            HoloObject previousObject = hoverObject;
-            hoverTarget = null;
-            hoverObject = null;
-            if (previous != null) previous.onHoverRelease(context(previousObject, previous, hoverX, hoverY, false));
-            hoverTarget = target;
-            hoverObject = object;
-            if (hit != null) storeHit(hit);
-            if (target != null) target.onHover(context(object, target, hoverX, hoverY, true));
-        } else if (hit != null) {
+        if (hit == null) {
+            setHover(null, null);
+            return;
+        }
+        if (hit.target() != hoverTarget || hit.object() != hoverObject) {
+            setHover(null, null);
             storeHit(hit);
-        }
-
-        if (capture == null) {
-            HoloInteractible receiver = hoverTarget != null
-                    ? receiver(hoverTarget, hoverObject, HoloInput.MOUSE_MOVE) : null;
-            if (receiver != released) {
-                released = null;
-                if (receiver != null) startCapture(mc.player, receiver);
-            }
-        }
-        if (capture != null) {
-            float dYaw = pendingYaw;
-            float dPitch = pendingPitch;
-            pendingYaw = 0f;
-            pendingPitch = 0f;
-            capture.onMouseMove(context(captureObject, capture, captureX, captureY, hoverObject == captureObject),
-                    dYaw, dPitch);
+            setHover(hit.object(), hit.target());
+        } else {
+            storeHit(hit);
         }
     }
 
@@ -141,70 +108,19 @@ public final class HoloInteractions
         hoverY = hit.localY();
         hoverYaw = hit.objectYaw();
         hoverPitch = hit.objectPitch();
-        if (hit.object() == captureObject) {
-            captureX = hoverX;
-            captureY = hoverY;
-            captureYaw = hoverYaw;
-            capturePitch = hoverPitch;
-        }
     }
 
-    @SubscribeEvent
-    public static void onClientTick(TickEvent.ClientTickEvent event)
+    private static void setHover(HoloObject object, HoloInteractible target)
     {
-        if (event.phase != TickEvent.Phase.START) return;
-        Minecraft mc = Minecraft.getInstance();
-        if (capture != null && active(mc)) lockRotation(mc.player);
-    }
-
-    // ---------------------------------------------------------------- inputs
-
-    @SubscribeEvent
-    public static void onMouseButton(InputEvent.MouseButton.Pre event)
-    {
-        int button = event.getButton();
-        if (button < 0 || button >= BUTTONS.length) return;
-        if (event.getAction() == GLFW.GLFW_PRESS) {
-            if (!active(Minecraft.getInstance()) || hoverTarget == null || PRESSED[button] != null) return;
-            HoloInteractible receiver = receiver(hoverTarget, hoverObject, BUTTONS[button]);
-            if (receiver == null) return;
-            event.setCanceled(true);
-            PRESSED[button] = receiver;
-            PRESSED_OBJECT[button] = hoverObject;
-            PRESSED_X[button] = hoverX;
-            PRESSED_Y[button] = hoverY;
-            HoloInteraction ctx = context(hoverObject, receiver, hoverX, hoverY, true);
-            switch (button) {
-                case 0 -> receiver.onLeftClick(ctx);
-                case 1 -> receiver.onRightClick(ctx);
-                default -> receiver.onMiddleClick(ctx);
-            }
-        } else if (event.getAction() == GLFW.GLFW_RELEASE && PRESSED[button] != null) {
-            event.setCanceled(true);
-            release(button);
-        }
-    }
-
-    @SubscribeEvent
-    public static void onScroll(InputEvent.MouseScrollingEvent event)
-    {
-        if (!active(Minecraft.getInstance()) || hoverTarget == null) return;
-        HoloInteractible receiver = receiver(hoverTarget, hoverObject, HoloInput.SCROLL);
-        if (receiver == null) return;
-        event.setCanceled(true);
-        receiver.onScroll(context(hoverObject, receiver, hoverX, hoverY, true), event.getScrollDelta());
-    }
-
-    /** Attaque, utilisation ou pick continus (bouton maintenu avant de viser l'hologramme). */
-    @SubscribeEvent
-    public static void onInteractionKey(InputEvent.InteractionKeyMappingTriggered event)
-    {
-        if (hoverTarget == null || !active(Minecraft.getInstance())) return;
-        HoloInput input = event.isAttack() ? HoloInput.LEFT_CLICK
-                : event.isUseItem() ? HoloInput.RIGHT_CLICK : HoloInput.MIDDLE_CLICK;
-        if (receiver(hoverTarget, hoverObject, input) == null) return;
-        event.setCanceled(true);
-        event.setSwingHand(false);
+        if (target == hoverTarget && object == hoverObject) return;
+        HoloInteractible previous = hoverTarget;
+        HoloObject previousObject = hoverObject;
+        hoverTarget = null;
+        hoverObject = null;
+        if (previous != null) previous.onHoverRelease(context(previousObject, previous, hoverX, hoverY, false));
+        hoverTarget = target;
+        hoverObject = object;
+        if (target != null) target.onHover(context(object, target, hoverX, hoverY, true));
     }
 
     // ---------------------------------------------------------------- interne
@@ -216,13 +132,14 @@ public final class HoloInteractions
     }
 
     /**
-     * Element qui prend {@code input} : la cible si elle l'intercepte, sinon le premier parent interactible (panneaux,
-     * puis l'objet) qui l'intercepte ; {@code null} = l'input va au jeu.
+     * Element qui prend {@code control} : la cible si elle l'intercepte, sinon le premier parent interactible
+     * (panneaux, puis l'objet) qui l'intercepte ; {@code null} = personne. {@code MOUSE_MOVE} n'est jamais pris.
      */
-    private static HoloInteractible receiver(HoloInteractible target, HoloObject object, HoloInput input)
+    private static HoloInteractible receiver(HoloInteractible target, HoloObject object, HoloControl control)
     {
+        if (control.kind() == HoloControl.Kind.MOUSE_MOVE) return null;
         for (HoloInteractible current = target; current != null; current = parent(current, object)) {
-            if (current.intercepts(input)) return current;
+            if (current.intercepts(control)) return current;
         }
         return null;
     }
@@ -238,94 +155,51 @@ public final class HoloInteractions
         return object instanceof HoloInteractible interactible ? interactible : null;
     }
 
-    private static void startCapture(LocalPlayer player, HoloInteractible receiver)
+    /** Relache les appuis et termine les captures liees dont l'objet a disparu, n'est plus dessine ou autorise. */
+    private static void dropInvalid(Player player)
     {
-        capture = receiver;
-        captureObject = hoverObject;
-        captureX = hoverX;
-        captureY = hoverY;
-        captureYaw = hoverYaw;
-        capturePitch = hoverPitch;
-        lockYaw = player.getYRot();
-        lockPitch = player.getXRot();
-        pendingYaw = 0f;
-        pendingPitch = 0f;
-        receiver.onCaptureStart(context(captureObject, receiver, captureX, captureY, true));
-    }
-
-    private static void endCapture()
-    {
-        HoloInteractible ended = capture;
-        if (ended == null) return;
-        HoloObject object = captureObject;
-        capture = null;
-        captureObject = null;
-        released = ended;
-        ended.onCaptureEnd(context(object, ended, captureX, captureY, hoverObject == object));
-    }
-
-    /** Pendant une capture : accumule l'ecart de rotation produit par vanilla et remet la rotation verrouillee. */
-    private static void lockRotation(LocalPlayer player)
-    {
-        if (capture == null) return;
-        pendingYaw += player.getYRot() - lockYaw;
-        pendingPitch += player.getXRot() - lockPitch;
-        applyLock(player);
-    }
-
-    private static void applyLock(Player player)
-    {
-        player.setYRot(lockYaw);
-        player.setXRot(lockPitch);
-        player.yRotO = lockYaw;
-        player.xRotO = lockPitch;
-    }
-
-    private static void release(int button)
-    {
-        HoloInteractible receiver = PRESSED[button];
-        HoloObject object = PRESSED_OBJECT[button];
-        PRESSED[button] = null;
-        PRESSED_OBJECT[button] = null;
-        boolean hovering = object == hoverObject;
-        HoloInteraction ctx = context(object, receiver, hovering ? hoverX : PRESSED_X[button],
-                hovering ? hoverY : PRESSED_Y[button], hovering);
-        switch (button) {
-            case 0 -> receiver.onLeftClickRelease(ctx);
-            case 1 -> receiver.onRightClickRelease(ctx);
-            default -> receiver.onMiddleClickRelease(ctx);
+        if (!PRESSED.isEmpty()) {
+            Iterator<Map.Entry<HoloControl, Pressed>> iterator = PRESSED.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<HoloControl, Pressed> entry = iterator.next();
+                if (valid(entry.getValue().object, player)) continue;
+                iterator.remove();
+                deliverRelease(entry.getKey(), entry.getValue());
+                iterator = PRESSED.entrySet().iterator();
+            }
         }
-    }
-
-    /** Termine la capture et relache les appuis dont l'objet a disparu, n'est plus dessine ou plus autorise. */
-    private static void dropInvalid(LocalPlayer player)
-    {
-        if (capture != null && !valid(captureObject, player)) endCapture();
-        for (int button = 0; button < PRESSED.length; button++) {
-            if (PRESSED[button] != null && !valid(PRESSED_OBJECT[button], player)) release(button);
+        if (!BOUND.isEmpty()) {
+            Iterator<Map.Entry<HoloCaptor, HoloObject>> iterator = BOUND.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<HoloCaptor, HoloObject> entry = iterator.next();
+                if (!HoloCaptures.isCapturing(entry.getKey())) {
+                    iterator.remove();
+                } else if (!valid(entry.getValue(), player)) {
+                    iterator.remove();
+                    HoloCaptures.end(entry.getKey());
+                    iterator = BOUND.entrySet().iterator();
+                }
+            }
         }
     }
 
     private static boolean valid(HoloObject object, Player player)
     {
         HoloModule module = object.module();
-        return module != null && module.object(object.key()) == object && HoloRouting.isRouted(object)
-                && object.access().allows(player.getUUID(), module.owner());
+        return player != null && module != null && module.object(object.key()) == object
+                && HoloRouting.isRouted(object) && object.access().allows(player.getUUID(), module.owner());
     }
 
-    /** Ecran ouvert ou souris liberee : relache tout. */
-    private static void suspend()
+    private static void deliverRelease(HoloControl control, Pressed pressed)
     {
-        endCapture();
-        for (int button = 0; button < PRESSED.length; button++) {
-            if (PRESSED[button] != null) release(button);
-        }
-        if (hoverTarget != null) {
-            HoloInteractible previous = hoverTarget;
-            HoloObject previousObject = hoverObject;
-            hoverTarget = null;
-            hoverObject = null;
-            previous.onHoverRelease(context(previousObject, previous, hoverX, hoverY, false));
+        boolean hovering = pressed.object == hoverObject;
+        HoloInteraction ctx = context(pressed.object, pressed.receiver, hovering ? hoverX : pressed.x,
+                hovering ? hoverY : pressed.y, hovering);
+        switch (control.mouseButton()) {
+            case 0 -> pressed.receiver.onLeftClickRelease(ctx);
+            case 1 -> pressed.receiver.onRightClickRelease(ctx);
+            case 2 -> pressed.receiver.onMiddleClickRelease(ctx);
+            default -> pressed.receiver.onControl(ctx, control, false);
         }
     }
 
@@ -347,10 +221,66 @@ public final class HoloInteractions
         CONTEXT.x = x;
         CONTEXT.y = y;
         CONTEXT.hovering = hovering;
-        boolean captured = capture != null && object == captureObject;
-        CONTEXT.objectYaw = captured ? captureYaw : hoverYaw;
-        CONTEXT.objectPitch = captured ? capturePitch : hoverPitch;
+        CONTEXT.objectYaw = hoverYaw;
+        CONTEXT.objectPitch = hoverPitch;
         return CONTEXT;
+    }
+
+    /** Appui intercepte au survol. */
+    private static final class Pressed
+    {
+        private final HoloInteractible receiver;
+        private final HoloObject object;
+        private final float x;
+        private final float y;
+
+        private Pressed(HoloInteractible receiver, HoloObject object, float x, float y)
+        {
+            this.receiver = receiver;
+            this.object = object;
+            this.x = x;
+            this.y = y;
+        }
+    }
+
+    /** Captor passif : les controles interceptes par l'element survole. */
+    private static final class HoverCaptor implements HoloCaptor
+    {
+        @Override
+        public boolean captures(HoloControl control)
+        {
+            return hoverTarget != null && receiver(hoverTarget, hoverObject, control) != null;
+        }
+
+        @Override
+        public void onPress(HoloCapture capture, HoloControl control)
+        {
+            HoloInteractible receiver = hoverTarget != null ? receiver(hoverTarget, hoverObject, control) : null;
+            if (receiver == null) return;
+            PRESSED.put(control, new Pressed(receiver, hoverObject, hoverX, hoverY));
+            HoloInteraction ctx = context(hoverObject, receiver, hoverX, hoverY, true);
+            switch (control.mouseButton()) {
+                case 0 -> receiver.onLeftClick(ctx);
+                case 1 -> receiver.onRightClick(ctx);
+                case 2 -> receiver.onMiddleClick(ctx);
+                default -> receiver.onControl(ctx, control, true);
+            }
+        }
+
+        @Override
+        public void onRelease(HoloCapture capture, HoloControl control)
+        {
+            Pressed pressed = PRESSED.remove(control);
+            if (pressed != null) deliverRelease(control, pressed);
+        }
+
+        @Override
+        public void onScroll(HoloCapture capture, double delta)
+        {
+            HoloInteractible receiver = hoverTarget != null
+                    ? receiver(hoverTarget, hoverObject, HoloControl.SCROLL) : null;
+            if (receiver != null) receiver.onScroll(context(hoverObject, receiver, hoverX, hoverY, true), delta);
+        }
     }
 
     /** Implementation partagee de {@link HoloInteraction}. */
@@ -379,20 +309,20 @@ public final class HoloInteractions
         public float y() { return y; }
 
         @Override
-        public float frameSeconds() { return frameSeconds; }
+        public float frameSeconds() { return HoloControlCapture.frameSeconds(); }
 
         @Override
         public float yaw()
         {
             Player player = player();
-            return capture != null ? lockYaw : player != null ? player.getYRot() : 0f;
+            return player != null ? player.getYRot() : 0f;
         }
 
         @Override
         public float pitch()
         {
             Player player = player();
-            return capture != null ? lockPitch : player != null ? player.getXRot() : 0f;
+            return player != null ? player.getXRot() : 0f;
         }
 
         @Override
@@ -402,19 +332,12 @@ public final class HoloInteractions
         public float objectPitch() { return objectPitch; }
 
         @Override
-        public boolean mouseCaptured() { return capture != null; }
-
-        @Override
-        public void setLook(float yaw, float pitch)
+        public boolean capture(HoloCaptor captor)
         {
-            Player player = player();
-            if (capture == null || player == null) return;
-            lockYaw = yaw;
-            lockPitch = Mth.clamp(pitch, -90f, 90f);
-            applyLock(player);
+            HoloObject bound = object;
+            if (bound == null || !HoloCaptures.begin(captor)) return false;
+            BOUND.put(captor, bound);
+            return true;
         }
-
-        @Override
-        public void releaseMouse() { endCapture(); }
     }
 }

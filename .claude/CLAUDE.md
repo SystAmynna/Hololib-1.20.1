@@ -31,12 +31,14 @@ com.amynna.hololib
 │   ├── module/                  HoloModule (etat + logique + objets, deux cotes), registre Forge HoloModuleTypes
 │   ├── memory/                  HoloMemory, HoloScope, HoloContainer(s) ; player/ dimension/ position/
 │   ├── inspect/                 HoloInspection (qui voit qui), HoloInspections (serveur), HoloInspectEvent
-│   └── interact/                HoloInteractible, HoloInput, HoloInteraction (interaction au regard, partie commune)
+│   ├── capture/                 HoloControl, HoloCaptor, HoloCapture, HoloCaptures (capture de controles, commune)
+│   └── interact/                HoloInteractible, HoloInteraction (interaction au regard, partie commune)
 ├── network/                     HoloNetwork + paquets (snapshot, module, objet, origine, oubli ; deplacement, action)
 ├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
 └── client/
     ├── holo/                    ClientHoloWorld (miroirs des modules par portee), handlers des paquets
-    ├── interact/                HoloInteractions : seul abonne aux inputs souris (survol, clics, molette, capture)
+    ├── capture/                 HoloControlCapture : SEUL abonne aux inputs (captures explicites + passives)
+    ├── interact/                HoloInteractions : picking + survol ; captor passif de la capture
     └── render/                  TOUS les renderers du mod (regle d'architecture)
         ├── package-info.java    doc detaillee : ordre de rendu, regles (source de verite)
         ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
@@ -88,16 +90,26 @@ com.amynna.hololib
   pont), intersecte le rayon avec le plan `z = 0` local (vu de face) et demande `HoloObject.interactibleAt(x, y)`
   (`HoloWindow` : widget `HoloInteractible` le plus profond, sinon la fenetre). Priorite HUD > vue > monde (16 blocs,
   occulte par les blocs) > ciel (seulement si le regard ne touche rien).
-- `HoloInteractible.intercepts(HoloInput)` choisit controle par controle (clic gauche / droit / molette, `SCROLL`,
-  `MOUSE_MOVE`) ; un input non pris remonte aux parents (panneaux, fenetre), puis au jeu. Intercepte = annule cote
-  vanilla (`MouseButton.Pre`, `MouseScrollingEvent`, `InteractionKeyMappingTriggered`). Le relachement va a qui a pris
-  l'appui. `MOUSE_MOVE` = capture au survol : rotation du joueur verrouillee (sans Mixin : remise a chaque debut de
-  frame et de tick, `turnPlayer` precede `onRenderTickStart`), deltas a `onMouseMove`, `setLook` / `releaseMouse`.
-  Ecran ouvert (Echap) = tout est relache.
+- `HoloInteractible.intercepts(HoloControl)` choisit controle par controle ce que l'element prend **tant qu'il est
+  vise** (tout sauf `MOUSE_MOVE`) ; un controle non pris remonte aux parents (panneaux, fenetre), puis au jeu. Le
+  relachement va a qui a pris l'appui. Pour aller au-dela du survol : `ctx.capture(captor)` (capture explicite liee a
+  l'objet, terminee s'il disparait).
 - Droit d'usage : `HoloObject.access()` (`HoloAccess` : `OWNER` par defaut, liste de joueurs, `EVERYONE` ; le
   proprietaire toujours ; sans proprietaire `OWNER` = personne), synchronise et sauvegarde par le framework. Callbacks
   locaux ; effet sur le jeu via `sendAction(source, ...)`, verifie par le serveur (acces, `PUBLIC` pour un
   non-proprietaire, et `viewers` pour la memoire d'un autre joueur). Protocole reseau `"3"`.
+
+### Capture de controles (independante de l'interaction)
+
+- `HoloControl` : boutons bruts, `SCROLL`, `MOUSE_MOVE`, `ESCAPE`, `ENTER`, `mapping("key.xxx")` (tout `KeyMapping`,
+  modde compris, par son nom). `HoloCaptor.captures(control)` + callbacks ; `HoloCaptures.begin/end` (facade
+  commune, backend installe au setup client).
+- `HoloControlCapture` : pile de captures explicites (la plus recente d'abord) puis captors passifs (l'interaction).
+  Une capture explicite ne se termine jamais seule et reste active sous un ecran (rien n'est distribue). Boutons
+  bruts : `MouseButton.Pre` annule ; mappings : neutralises juste apres `KeyMapping.set/click` (`MouseButton.Post`, `InputEvent.Key`) et a
+  chaque debut de tick ; Echap capture : `ScreenEvent.Opening` du `PauseScreen` annule (poste avant `InputEvent.Key`) ;
+  souris : rotation verrouillee sans Mixin (remise a chaque debut de frame et de tick, `turnPlayer` precede
+  `onRenderTickStart`). `KeyMapping.setAll()` a la fin d'une capture explicite.
 
 ### Les quatre familles de renderers
 

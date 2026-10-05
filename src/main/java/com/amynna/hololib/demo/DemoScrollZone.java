@@ -1,6 +1,6 @@
 package com.amynna.hololib.demo;
 
-import com.amynna.hololib.holo.interact.HoloInput;
+import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.interact.HoloInteractible;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.widget.HoloCanvas;
@@ -25,7 +25,7 @@ final class DemoScrollZone extends HoloWidget implements HoloInteractible
     void setText(Component text) { this.text = text; }
 
     @Override
-    public boolean intercepts(HoloInput input) { return input == HoloInput.SCROLL; }
+    public boolean intercepts(HoloControl control) { return control.equals(HoloControl.SCROLL); }
 
     @Override
     public void onHover(HoloInteraction ctx) { hovered = true; }

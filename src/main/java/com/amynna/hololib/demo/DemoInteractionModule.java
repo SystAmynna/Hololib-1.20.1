@@ -1,6 +1,6 @@
 package com.amynna.hololib.demo;
 
-import com.amynna.hololib.holo.interact.HoloInput;
+import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAccess;
 import com.amynna.hololib.holo.object.HoloAnchor;
@@ -26,7 +26,7 @@ import net.minecraft.world.entity.player.Player;
  *     <li>une zone qui compte les crans de molette quand on la regarde ;</li>
  *     <li>une zone qui reagit au regard ;</li>
  *     <li>une petite animation ;</li>
- *     <li>une zone qui capture la souris, ramene le regard au centre de la fenetre puis la rend ;</li>
+ *     <li>une zone qui, quand le regard y entre, capture la souris (et Saut) jusqu'a Echap ou Entree ;</li>
  *     <li>un bouton qui bascule le droit d'usage : proprietaire seul ou tous les joueurs qui voient la fenetre (les
  *     joueurs qui inspectent le proprietaire la voient autour de sa tete). Seul le proprietaire peut le basculer.</li>
  * </ul>
@@ -38,7 +38,7 @@ public final class DemoInteractionModule extends HoloModule
 {
     private static final int WIDTH = 240;
     private static final int HEIGHT = 160;
-    private static final float DISTANCE = 2.2f;
+    private static final float DISTANCE = 1.6f;
     private static final int ACCENT = 0xFF40C0FF;
 
     private static final int ACTION_LEFT = 0;
@@ -72,7 +72,7 @@ public final class DemoInteractionModule extends HoloModule
                 HoloTransform.translation(0f, 0f, DISTANCE), WIDTH, HEIGHT, 1f / 160f));
         window.setVisibility(HoloVisibility.PUBLIC);
         window.setAccess(shared ? HoloAccess.EVERYONE : HoloAccess.OWNER);
-        window.setInterceptedInputs(HoloInput.LEFT_CLICK, HoloInput.RIGHT_CLICK, HoloInput.MIDDLE_CLICK);
+        window.setInterceptedInputs(HoloControl.LEFT_CLICK, HoloControl.RIGHT_CLICK, HoloControl.MIDDLE_CLICK);
         window.root().setBackground(0x8010304A).setBorder(ACCENT, 1f);
 
         window.root().add(new HoloLabel(4, 4, WIDTH - 8, 14, Component.literal("Interaction"))
@@ -81,11 +81,10 @@ public final class DemoInteractionModule extends HoloModule
         leftButton = window.root().add(new HoloButton(6, 22, 72, 20, Component.empty(),
                 button -> send(ACTION_LEFT, 0)));
         rightButton = window.root().add(new HoloButton(84, 22, 72, 20, Component.empty(),
-                button -> send(ACTION_RIGHT, 0)).setTrigger(HoloInput.RIGHT_CLICK));
+                button -> send(ACTION_RIGHT, 0)).setTrigger(HoloControl.RIGHT_CLICK));
         middleButton = window.root().add(new HoloButton(162, 22, 72, 20, Component.empty(),
-                button -> send(ACTION_MIDDLE, 0)).setTrigger(HoloInput.MIDDLE_CLICK));
+                button -> send(ACTION_MIDDLE, 0)).setTrigger(HoloControl.MIDDLE_CLICK));
 
-        // Le centre de la fenetre (120, 80) tombe entre deux zones : le regard ramene au centre n'est pas recapture.
         scrollZone = window.root().add(new DemoScrollZone(6, 48, 111, 44, steps -> send(ACTION_SCROLL, steps)));
         window.root().add(new DemoHoverZone(123, 48, 111, 44));
         window.root().add(new DemoAnimation(6, 98, 111, 36));

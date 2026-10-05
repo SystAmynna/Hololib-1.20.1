@@ -7,7 +7,8 @@
  *     <li>{@code hololib:demo_player} : trois fenetres (HUD, camera normale, camera follow) et un cube au-dessus de
  *     la tete du joueur, visibles des autres joueurs qui l'inspectent ({@code /hololib_inspect}) ;</li>
  *     <li>{@code hololib:demo_interaction} : une fenetre interactive au regard (boutons gauche / droit / molette,
- *     zones molette, survol et capture de la souris, animation, bascule du droit d'usage), voir
+ *     zones molette et survol, zone de capture des controles jusqu'a Echap / Entree, animation, bascule du droit
+ *     d'usage), voir
  *     {@link com.amynna.hololib.demo.DemoInteractionModule}.</li>
  * </ul>
  * A installer avec {@code /hololib_module}.

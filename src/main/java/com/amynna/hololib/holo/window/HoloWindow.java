@@ -1,6 +1,6 @@
 package com.amynna.hololib.holo.window;
 
-import com.amynna.hololib.holo.interact.HoloInput;
+import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.interact.HoloInteractible;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloObject;
@@ -8,7 +8,7 @@ import com.amynna.hololib.holo.object.HoloTransform;
 import com.amynna.hololib.holo.widget.HoloPanel;
 import com.amynna.hololib.holo.widget.HoloWidget;
 
-import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.Set;
 
 /**
@@ -26,7 +26,7 @@ public class HoloWindow extends HoloObject implements HoloInteractible
     private final int width;
     private final int height;
     private final float pixelScale;
-    private final Set<HoloInput> intercepted = EnumSet.noneOf(HoloInput.class);
+    private final Set<HoloControl> intercepted = new HashSet<>();
 
     /**
      * @param transform  placement initial dans le repere de l'ancrage (copie)
@@ -60,15 +60,15 @@ public class HoloWindow extends HoloObject implements HoloInteractible
      * Controles pris par la fenetre elle-meme quand aucun widget vise ne les prend (ex. les clics, pour que viser le
      * fond ne casse pas le bloc derriere). Remplace les precedents.
      */
-    public HoloWindow setInterceptedInputs(HoloInput... inputs)
+    public HoloWindow setInterceptedInputs(HoloControl... controls)
     {
         intercepted.clear();
-        for (HoloInput input : inputs) intercepted.add(input);
+        for (HoloControl control : controls) intercepted.add(control);
         return this;
     }
 
     @Override
-    public boolean intercepts(HoloInput input) { return intercepted.contains(input); }
+    public boolean intercepts(HoloControl control) { return intercepted.contains(control); }
 
     /** Convertit vers les pixels de la fenetre (meme convention que son renderer), puis widget interactible vise. */
     @Override

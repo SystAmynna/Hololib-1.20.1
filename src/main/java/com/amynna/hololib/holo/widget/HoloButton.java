@@ -1,6 +1,6 @@
 package com.amynna.hololib.holo.widget;
 
-import com.amynna.hololib.holo.interact.HoloInput;
+import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.interact.HoloInteractible;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import net.minecraft.network.chat.Component;
@@ -21,7 +21,7 @@ public class HoloButton extends HoloWidget implements HoloInteractible
 
     private Component text;
     private Consumer<HoloButton> onPress;
-    private HoloInput trigger = HoloInput.LEFT_CLICK;
+    private HoloControl trigger = HoloControl.LEFT_CLICK;
     private int background = 0x6020A0FF;
     private int border = 0xFF40C0FF;
     private int textColor = 0xFFFFFFFF;
@@ -57,12 +57,12 @@ public class HoloButton extends HoloWidget implements HoloInteractible
         return this;
     }
 
-    public HoloInput trigger() { return trigger; }
+    public HoloControl trigger() { return trigger; }
 
     /** Clic qui declenche le bouton : {@code LEFT_CLICK}, {@code RIGHT_CLICK} ou {@code MIDDLE_CLICK}. */
-    public HoloButton setTrigger(HoloInput trigger)
+    public HoloButton setTrigger(HoloControl trigger)
     {
-        if (trigger != HoloInput.LEFT_CLICK && trigger != HoloInput.RIGHT_CLICK && trigger != HoloInput.MIDDLE_CLICK) {
+        if (trigger.mouseButton() < 0) {
             throw new IllegalArgumentException("Declencheur de bouton invalide : " + trigger);
         }
         this.trigger = trigger;
@@ -76,7 +76,7 @@ public class HoloButton extends HoloWidget implements HoloInteractible
     public void press() { onPress.accept(this); }
 
     @Override
-    public boolean intercepts(HoloInput input) { return input == trigger; }
+    public boolean intercepts(HoloControl control) { return control.equals(trigger); }
 
     @Override
     public void onHover(HoloInteraction ctx) { hovered = true; }
@@ -85,33 +85,33 @@ public class HoloButton extends HoloWidget implements HoloInteractible
     public void onHoverRelease(HoloInteraction ctx) { hovered = false; }
 
     @Override
-    public void onLeftClick(HoloInteraction ctx) { pressStart(HoloInput.LEFT_CLICK); }
+    public void onLeftClick(HoloInteraction ctx) { pressStart(HoloControl.LEFT_CLICK); }
 
     @Override
-    public void onLeftClickRelease(HoloInteraction ctx) { pressEnd(HoloInput.LEFT_CLICK); }
+    public void onLeftClickRelease(HoloInteraction ctx) { pressEnd(HoloControl.LEFT_CLICK); }
 
     @Override
-    public void onRightClick(HoloInteraction ctx) { pressStart(HoloInput.RIGHT_CLICK); }
+    public void onRightClick(HoloInteraction ctx) { pressStart(HoloControl.RIGHT_CLICK); }
 
     @Override
-    public void onRightClickRelease(HoloInteraction ctx) { pressEnd(HoloInput.RIGHT_CLICK); }
+    public void onRightClickRelease(HoloInteraction ctx) { pressEnd(HoloControl.RIGHT_CLICK); }
 
     @Override
-    public void onMiddleClick(HoloInteraction ctx) { pressStart(HoloInput.MIDDLE_CLICK); }
+    public void onMiddleClick(HoloInteraction ctx) { pressStart(HoloControl.MIDDLE_CLICK); }
 
     @Override
-    public void onMiddleClickRelease(HoloInteraction ctx) { pressEnd(HoloInput.MIDDLE_CLICK); }
+    public void onMiddleClickRelease(HoloInteraction ctx) { pressEnd(HoloControl.MIDDLE_CLICK); }
 
-    private void pressStart(HoloInput input)
+    private void pressStart(HoloControl control)
     {
-        if (input != trigger) return;
+        if (control != trigger) return;
         pressed = true;
         press();
     }
 
-    private void pressEnd(HoloInput input)
+    private void pressEnd(HoloControl control)
     {
-        if (input == trigger) pressed = false;
+        if (control == trigger) pressed = false;
     }
 
     @Override

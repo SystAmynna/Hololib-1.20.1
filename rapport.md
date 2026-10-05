@@ -1,6 +1,7 @@
 # Rapport de fonctionnement — Amynna Holo Lib
 
-État des sources au commit `a7a182b` (« Mémoires, inspection, holoObjects, transforms »), 5 octobre 2026.
+État des sources : commit `7858ebd` (« Interactions possible avec les fenêtres ») plus la capture de contrôles
+(non commitée), 5 octobre 2026.
 Mod Forge 47.4.10 pour Minecraft 1.20.1 (Java 17, mappings officiels), identifiant `hololib`, package racine
 `com.amynna.hololib`. Les chemins ci-dessous sont relatifs à `src/main/java/com/amynna/hololib/`.
 
@@ -14,11 +15,12 @@ Mod Forge 47.4.10 pour Minecraft 1.20.1 (Java 17, mappings officiels), identifia
 4. [Réseau](#4-réseau)
 5. [Côté client : miroirs et routage](#5-côté-client--miroirs-et-routage)
 6. [Pipeline de rendu](#6-pipeline-de-rendu)
-7. [Scénarios pas à pas](#7-scénarios-pas-à-pas)
-8. [Commandes](#8-commandes)
-9. [Étendre le mod](#9-étendre-le-mod)
-10. [Référence par package](#10-référence-par-package)
-11. [Limites connues et points ouverts](#11-limites-connues-et-points-ouverts)
+7. [Interaction et capture de contrôles](#7-interaction-et-capture-de-contrôles)
+8. [Scénarios pas à pas](#8-scénarios-pas-à-pas)
+9. [Commandes](#9-commandes)
+10. [Étendre le mod](#10-étendre-le-mod)
+11. [Référence par package](#11-référence-par-package)
+12. [Limites connues et points ouverts](#12-limites-connues-et-points-ouverts)
 
 ---
 
@@ -51,7 +53,8 @@ peut donc charger tout le code commun.
 
 Le reste s'abonne lui-même aux événements Forge (`@Mod.EventBusSubscriber`) : `HoloContainers` (cycle de vie
 serveur), `PlayerMemoryCapability`, les commandes, `ClientHoloWorld` (tick client), `RenderDispatcher` (rendu),
-`HoloBridges` et `DemoRenderers` (enregistrement des renderers au setup client).
+`HoloControlCapture` (**seul** abonné aux inputs), `HoloInteractions` (survol), `HoloBridges` et `DemoRenderers`
+(enregistrement des renderers au setup client).
 
 ---
 
@@ -68,6 +71,8 @@ dessiné. Il porte :
 | `anchor` (`HoloAnchor`) | repère d'origine, donc famille de renderers | le framework |
 | `transform` (`HoloTransform`) | placement dans le repère de l'ancrage | le framework |
 | `visibility` (`HoloVisibility`) | `PRIVATE` (propriétaire seul) ou `PUBLIC` | le framework |
+| `access` (`HoloAccess`) | qui peut **utiliser** l'objet (interaction) : propriétaire, liste, tous | le framework |
+| `interactibleAt(x, y)` | élément interactible sous un point du plan local `z = 0` (`null` = pas interactible) | — |
 | `boundingRadius()` | rayon englobant, pour le culling | — |
 | `tick()` | animations d'état, appelé chaque tick client | — |
 
@@ -115,7 +120,7 @@ Bornes des demandes venant d'un client : `HoloAnchor.acceptable(transform)`.
 ### 2.3 Résolution par observateur
 
 L'ancrage donne la famille *vue par le propriétaire en première personne*. Le client la **résout** pour le joueur
-local ([`HoloRouting.resolve`](src/main/java/com/amynna/hololib/client/render/holo/HoloRouting.java#L103)) :
+local ([`HoloRouting.resolve`](src/main/java/com/amynna/hololib/client/render/holo/HoloRouting.java#L106)) :
 
 | Ancrage | Objet du joueur local (ou d'une mémoire sans propriétaire), 1re personne | Joueur local en F5 | Objet d'un autre joueur (inspecté) |
 |---|---|---|---|
@@ -178,7 +183,11 @@ Seule la portée joueur a un propriétaire. Pour les autres, `PRIVATE` signifie 
 
 Un module est **partagé** s'il a au moins un objet `PUBLIC` (`HoloContainer.isShared`). Seuls les modules partagés
 sont envoyés aux observateurs, avec l'état `writeSync(..., false)` ; pour un objet `PRIVATE`, l'observateur reçoit la
-visibilité mais ni l'ancrage ni le transform (`ObjectData` les met à `null`), et le client ne le dessine pas.
+visibilité mais ni l'ancrage, ni le transform, ni l'accès (`ObjectData` les met à `null`), et le client ne le
+dessine pas.
+
+Voir n'est pas utiliser : le droit d'**interagir** avec un objet est son `HoloAccess`, distinct de la visibilité
+(voir [§7.4](#74-droits-dusage-et-vérifications-serveur)).
 
 ### 2.7 Inspection
 
@@ -263,9 +272,11 @@ Réseau entrant :
   déplacer un objet de **sa** mémoire de joueur. Si `anchor.acceptable(transform)` est vrai, l'ancrage et le transform
   sont appliqués (puis renvoyés au tick suivant par `flush`) ; sinon le placement serveur est renvoyé au client, qui
   l'avait déjà appliqué localement.
-- `handleAction` → [`actionTarget`](src/main/java/com/amynna/hololib/holo/memory/HoloContainers.java#L197) : mémoire de
-  joueur seulement pour son propriétaire ; dimension = celle du joueur ; position = même niveau et à moins de
-  `(distance de vue + 1) × 16` blocs du marker. Le contenu est ensuite à valider par `handleAction` du module.
+- `handleAction` → `actionTarget` : mémoire de joueur pour son propriétaire, ou — si l'action est envoyée **au nom
+  d'un objet** — pour un joueur présent dans ses `viewers` (il suit et inspecte le propriétaire) ; dimension = celle
+  du joueur ; position = même niveau et à moins de `(distance de vue + 1) × 16` blocs du marker. Avec un objet
+  source, `mayUse` vérifie en plus : propriétaire, ou objet `PUBLIC` dont l'accès autorise le joueur. Le contenu est
+  ensuite à valider par `handleAction(player, source, buf)` du module.
 
 Persistance des joueurs :
 [`PlayerMemoryCapability`](src/main/java/com/amynna/hololib/holo/memory/player/PlayerMemoryCapability.java) attache la
@@ -314,7 +325,7 @@ accepté. Jamais posté pour un retrait ni pour `/hololib_force_inspect`.
 
 ## 4. Réseau
 
-Canal `hololib:main`, protocole `"2"` (les deux côtés doivent avoir la même version), défini dans
+Canal `hololib:main`, protocole `"3"` (les deux côtés doivent avoir la même version), défini dans
 [`HoloNetwork`](src/main/java/com/amynna/hololib/network/HoloNetwork.java). Tous les paquets serveur → client portent
 la `HoloScope` concernée : les mêmes paquets servent au propriétaire et aux observateurs, pour les trois portées.
 
@@ -322,15 +333,15 @@ la `HoloScope` concernée : les mêmes paquets servent au propriétaire et aux o
 |---|---|---|---|---|
 | `HoloSnapshotPacket` | S → C | portée, `forOwner`, modules (état + objets), origine optionnelle | connexion, arrivée d'un viewer ou d'un chunk, changement de mémoire, ouverture d'un marker | remplace tout ce que le client connaissait de la portée |
 | `HoloModulePacket` | S → C | `ADD` / `UPDATE` / `REMOVE` d'un module | `install`, `uninstall`, `flush` | crée le miroir ; `readSync` + `onSync` ; décharge |
-| `HoloObjectPacket` | S → C | placement (ancrage + transform) et visibilité d'un objet | `flush`, refus de déplacement | `HoloObject.restore` |
+| `HoloObjectPacket` | S → C | placement (ancrage + transform), visibilité et accès d'un objet | `flush`, refus de déplacement | `HoloObject.restore` |
 | `HoloOriginPacket` | S → C | nouvelle origine d'une portée | marker déplacé dans son chunk | `ClientHoloContainer.origin` |
 | `HoloForgetPacket` | S → C | portée à oublier | fin de suivi (viewer retiré, chunk), fermeture d'un marker, déconnexion | `ClientHoloWorld.forget` |
 | `HoloMoveObjectPacket` | C → S | portée, module, clé, ancrage, transform | `HoloObject.requestAnchor` / `requestTransform` | `HoloContainers.handleMove` |
-| `HoloModuleActionPacket` | C → S | portée, module, octets (32 767 max) | `HoloModule.sendAction` | `HoloContainers.handleAction` → `HoloModule.handleAction` |
+| `HoloModuleActionPacket` | C → S | portée, module, clé de l'objet source (optionnelle), octets (32 767 max) | `HoloModule.sendAction` | `HoloContainers.handleAction` → `HoloModule.handleAction` |
 
 [`HoloSyncData`](src/main/java/com/amynna/hololib/network/HoloSyncData.java) construit les données au moment de
 l'envoi : `ModuleData.of(module, forOwner, withObjects)` sérialise `writeSync` en octets et ne garde, pour un
-observateur, que les objets `PUBLIC` ; `ObjectData.of` copie le transform. À la lecture, tout est copié, car le
+observateur, que les objets `PUBLIC` ; `ObjectData.of` copie le transform et joint l'accès. À la lecture, tout est copié, car le
 buffer réseau est libéré avant que le fil principal ne l'applique.
 
 Ce qui ne circule **jamais** : les widgets, le contenu des objets, l'état d'un objet `PRIVATE` vers un observateur,
@@ -449,10 +460,13 @@ ordre.
    `Font.drawInBatch`, les textures `RenderType.text(texture)`.
 
 Widgets disponibles ([`holo/widget`](src/main/java/com/amynna/hololib/holo/widget/package-info.java)) :
-- `HoloWidget` : base, position relative au parent, visibilité, `contains`, `onClick`, `tick` ;
+- `HoloWidget` : base, position relative au parent (et absolue : `absoluteX/Y`), visibilité, `contains`, `tick` ;
 - `HoloPanel` : conteneur, fond, bordure, `widgetAt` ;
 - `HoloLabel` : texte aligné ;
-- `HoloButton` : fond, bordure, texte, action client `onPress`.
+- `HoloButton` : fond, bordure, texte, action client `onPress` ; interactible, déclenché par le clic gauche, droit
+  ou molette (`setTrigger`), éclairci au survol et à l'appui.
+
+`HoloCanvas.partialTick()` permet aux widgets d'interpoler leurs animations tenues par `tick()`.
 
 ### 6.4 RenderTypes et règles
 
@@ -473,9 +487,123 @@ Pièges vérifiés dans les sources :
 
 ---
 
-## 7. Scénarios pas à pas
+## 7. Interaction et capture de contrôles
 
-### 7.1 Connexion d'un joueur A
+Deux systèmes **séparés**, utilisables l'un sans l'autre :
+- la **capture de contrôles** (`holo/capture`, `client/capture`) : un `HoloCaptor` reçoit des contrôles du joueur à la
+  place du jeu ;
+- l'**interaction au regard** (`holo/interact`, `client/interact`) : le joueur vise un hologramme avec le réticule ;
+  l'élément visé est survolé et peut intercepter des contrôles tant qu'il est visé. Elle est construite **sur** la
+  capture : c'est un captor passif.
+
+### 7.1 Capture de contrôles
+
+**Contrôles** ([`HoloControl`](src/main/java/com/amynna/hololib/holo/capture/HoloControl.java), valeur immuable) :
+
+| Contrôle | Ce qui est capturé |
+|---|---|
+| `LEFT_CLICK`, `RIGHT_CLICK`, `MIDDLE_CLICK` | boutons **bruts** de la souris, quel que soit le contrôle qui leur est associé |
+| `SCROLL` | molette (le changement d'emplacement de la barre est bloqué) |
+| `MOUSE_MOVE` | mouvements de la souris : la caméra ne tourne plus, les deltas vont au captor |
+| `ESCAPE`, `ENTER` | touches brutes (Entrée du pavé numérique comprise) ; Échap capturé n'ouvre pas le menu pause |
+| `mapping("key.jump")` | n'importe quel `KeyMapping` des options, vanilla ou moddé, désigné par son nom : il suit la touche choisie par le joueur |
+
+**Captor** ([`HoloCaptor`](src/main/java/com/amynna/hololib/holo/capture/HoloCaptor.java)) : `captures(control)`
+(consulté à chaque input), `onCaptureStart` / `onCaptureEnd`, `onPress` / `onRelease` (le relâchement va au captor qui
+a pris l'appui), `onScroll`, `onMouseMove(dYaw, dPitch)` (chaque frame tant qu'il prend `MOUSE_MOVE`, deltas en degrés
+avec sensibilité et inversion appliquées). Contexte
+([`HoloCapture`](src/main/java/com/amynna/hololib/holo/capture/HoloCapture.java)) : joueur, durée de frame, regard,
+`setLook(yaw, pitch)`, `release()`.
+
+**Démarrer** : [`HoloCaptures.begin(captor)`](src/main/java/com/amynna/hololib/holo/capture/HoloCaptures.java) /
+`end(captor)`, façade commune (un widget peut capturer sans classe client) branchée au setup client sur le contrôleur,
+inerte sur un serveur dédié.
+
+**Contrôleur** : [`HoloControlCapture`](src/main/java/com/amynna/hololib/client/capture/HoloControlCapture.java), seul
+abonné du mod aux inputs.
+- Ordre de consultation : la **pile des captures explicites** (la plus récente d'abord), puis les **captors passifs**
+  permanents (`addPassive` ; l'interaction en est un). Le premier qui capture le contrôle le prend, le jeu ne le voit
+  pas ; si personne ne le prend, il va au jeu.
+- Une capture explicite **ne se termine jamais d'elle-même** : seulement par `release()` / `end()` (ou, si elle a été
+  démarrée par l'interaction, quand son objet disparaît). Il faut donc prévoir une sortie (typiquement capturer Échap).
+- Rien n'est distribué quand un écran est ouvert ou que la souris n'est pas capturée par le jeu ; les appuis en cours
+  sont alors relâchés, mais les captures explicites restent (une pause par perte de focus ne les termine pas).
+- À la fin d'une capture explicite, `KeyMapping.setAll()` resynchronise les touches encore enfoncées.
+
+Comment chaque contrôle est retenu (vérifié dans les sources Forge 47.4.10) :
+
+| Contrôle | Mécanisme |
+|---|---|
+| boutons bruts | `InputEvent.MouseButton.Pre`, annulable, posté **avant** la mise à jour des `KeyMapping` |
+| mappings | `MouseButton.Post` et `InputEvent.Key` ne sont pas annulables mais sont postés **juste après** `KeyMapping.set/click` : le mapping est neutralisé aussitôt (`setDown(false)`, clics consommés), et encore au début de chaque tick (touche enfoncée avant la capture) |
+| Échap, Entrée | `InputEvent.Key` ; les mappings liés à la touche sont neutralisés. `KeyboardHandler.keyPress` appelle `pauseGame` **avant** de poster `InputEvent.Key` : l'ouverture du `PauseScreen` est donc annulée dans `ScreenEvent.Opening` quand Échap est capturé et enfoncé |
+| molette | `InputEvent.MouseScrollingEvent`, annulable |
+| attaque / utilisation / pick maintenus | `InteractionKeyMappingTriggered` annulé (sans balancer le bras) si le bouton brut ou le mapping est capturé |
+| mouvements | sans Mixin : vanilla tourne le joueur (`MouseHandler.turnPlayer`, appelé avant `onRenderTickStart` dans `Minecraft.runTick`), l'écart est lu puis reversé au début de chaque frame **et** de chaque tick (jamais de rotation non verrouillée envoyée au serveur), et livré une fois par frame |
+
+### 7.2 Interaction au regard : le picking
+
+Le point visé est le **centre de l'écran**.
+[`HoloPicking`](src/main/java/com/amynna/hololib/client/render/holo/HoloPicking.java) (dans `client/render/holo` car il
+reconstruit les mêmes placements que les ponts ; il ne dessine rien) parcourt les listes de `HoloRouting`, ne garde que
+les objets dont l'accès autorise le joueur local, reconstruit la matrice repère local → repère de la famille,
+intersecte le rayon avec le plan `z = 0` de l'objet (vu de face seulement) et demande
+`HoloObject.interactibleAt(x, y)`. Pour une `HoloWindow`, le point est converti en pixels (même convention que son
+renderer) et le widget `HoloInteractible` le plus profond est renvoyé, sinon la fenêtre.
+
+Priorité dans l'ordre de dessin, puis le plus proche dans une famille :
+
+| Famille | Rayon | Condition |
+|---|---|---|
+| HUD (1re personne) | centre de l'écran, en pixels GUI | objet le plus en avant (`z`) |
+| vue (1re personne) | œil, regard interpolé (cohérent avec la projection `STABLE`, sans bobbing) | — |
+| monde | œil (caméra en F5) | à moins de 16 blocs, non caché par un bloc (`level.clip`, seulement s'il y a un candidat) |
+| ciel | centré sur la caméra | seulement si le regard ne touche rien du jeu (`hitResult` `MISS`) |
+
+### 7.3 Survol et interception
+
+[`HoloInteractions`](src/main/java/com/amynna/hololib/client/interact/HoloInteractions.java) fait le picking au début
+de chaque frame (après le verrou de rotation) et signale le survol à l'élément visé le plus profond (`onHover` /
+`onHoverRelease`, aussi relâché quand un écran s'ouvre). Il ne lit aucun input : il enregistre un **captor passif** qui
+prend un contrôle si un élément de la chaîne survolée l'intercepte.
+
+[`HoloInteractible`](src/main/java/com/amynna/hololib/holo/interact/HoloInteractible.java) :
+- `intercepts(HoloControl)` : ce que l'élément prend **tant qu'il est visé** — tout sauf `MOUSE_MOVE`, qui figerait le
+  regard sur lui ;
+- un contrôle non intercepté **remonte** : cible → panneaux parents interactibles → objet (fenêtre), puis au jeu.
+  `HoloWindow.setInterceptedInputs(...)` permet au fond d'une fenêtre de bloquer les clics ;
+- callbacks : `onLeftClick` / `onLeftClickRelease` (idem droit, molette), `onScroll`, `onControl(control, pressed)`
+  pour Échap, Entrée et les mappings. Le relâchement va à l'élément qui a pris l'appui, même si le regard est parti ;
+- contexte ([`HoloInteraction`](src/main/java/com/amynna/hololib/holo/interact/HoloInteraction.java)) : point visé
+  dans le repère de l'élément (pixels du widget), regard, direction du centre de l'objet, durée de frame, et
+  `capture(captor)` : capture explicite **liée à l'objet**, terminée si l'objet disparaît, n'est plus dessiné ou n'est
+  plus utilisable. C'est ainsi qu'un élément garde des contrôles au-delà du survol (souris comprise).
+
+Les callbacks sont **locaux** au client. Les appels n'ont lieu que sur le fil client, jamais pendant le rendu.
+
+### 7.4 Droits d'usage et vérifications serveur
+
+[`HoloAccess`](src/main/java/com/amynna/hololib/holo/object/HoloAccess.java), valeur immuable portée par chaque objet
+(`setAccess`, synchronisée et sauvegardée comme la visibilité) :
+
+| Mode | Qui peut utiliser l'objet |
+|---|---|
+| `OWNER` (défaut) | le propriétaire de la mémoire de joueur ; **personne** pour une mémoire sans propriétaire |
+| `players(...)` | le propriétaire et ces joueurs |
+| `EVERYONE` | tout joueur qui voit l'objet |
+
+Le propriétaire est toujours autorisé. Côté client, un objet non autorisé n'est pas candidat au picking. Pour agir sur
+le jeu, un callback envoie une action **au nom de l'objet** : `HoloModule.sendAction(source, writer)` (la clé de l'objet
+voyage avec l'action). Le serveur ([§3.3](#33-holocontainers--index-et-événements)) retrouve l'objet et vérifie
+l'accès, la visibilité `PUBLIC` pour un non-propriétaire et, pour la mémoire d'un autre joueur, qu'il en est viewer ;
+puis `handleAction(player, source, buf)` du module valide le contenu. Ainsi, un joueur qui inspecte B peut cliquer la
+fenêtre `Local` de B (vue autour de sa tête) si B l'a ouverte à tous.
+
+---
+
+## 8. Scénarios pas à pas
+
+### 8.1 Connexion d'un joueur A
 
 1. Forge ajoute l'entité de A au niveau. Les joueurs proches commencent à se suivre mutuellement : `StartTracking` →
    `HoloInspections.startTracking` remplit `TRACKERS`. Les conteneurs de A n'existent pas encore, donc rien n'est
@@ -489,7 +617,7 @@ Pièges vérifiés dans les sources :
 5. Côté client de A : `ClientHoloContainer.add` recrée chaque module (`readSync` → `onLoad` → `restore` des
    placements) ; au tick suivant, `HoloRouting` répartit les objets et ils sont dessinés.
 
-### 7.2 Ajout d'un module par commande
+### 8.2 Ajout d'un module par commande
 
 `/hololib_module add player A current hololib:demo_player` :
 1. `ModuleListArgument` vérifie l'identifiant et que la compatibilité du type est `PLAYER`.
@@ -498,7 +626,7 @@ Pièges vérifiés dans les sources :
 3. Si la mémoire visée n'est pas chargée (mémoire de joueur inactive, marker hors chargement),
    `HoloMemories.install` crée le module le temps de produire sa sauvegarde, sans rien envoyer.
 
-### 7.3 Déplacement d'une fenêtre
+### 8.3 Déplacement d'une fenêtre
 
 - **Par un module (serveur)** : `window.transform().setTranslation(...)` → drapeau `dirty` → au `flush` de fin de tick,
   `HoloObjectPacket` au propriétaire et, si l'objet est `PUBLIC` dans un module partagé, aux observateurs → les clients
@@ -510,7 +638,7 @@ Pièges vérifiés dans les sources :
   est appliqué et revient par `flush` (et part aussi aux observateurs) ; si c'est refusé, le placement serveur est
   renvoyé et écrase la modification locale.
 
-### 7.4 A inspecte B
+### 8.4 A inspecte B
 
 1. A tape `/hololib_inspect on B`. `HoloInspectCommand` → `HoloInspections.request(A, B, true, false, A)`.
 2. `HoloInspectEvent` est posté ; personne ne l'annule.
@@ -526,35 +654,55 @@ Pièges vérifiés dans les sources :
    reçoit l'oubli.
 7. L'accès est sauvegardé dans la mémoire active de A et persiste après reconnexion.
 
-### 7.5 Passage en F5
+### 8.5 Passage en F5
 
 Rien n'est envoyé au serveur. Au tick client suivant, `HoloRouting` voit `isFirstPerson() == false` : les objets
 `Local` du joueur local passent dans la famille monde (même sphère, autour de ses yeux et selon son regard), ses
 objets `Hud` ne sont plus routés. En revenant à la première personne, tout reprend sa famille normale.
 
-### 7.6 Un marker bouge
+### 8.6 Un marker bouge
 
 `/tp @e[tag=hololib] ~ ~ ~5` : au tick serveur suivant, `trackMovement` détecte la nouvelle position. Dans le même
 chunk, `HoloOriginPacket` part aux joueurs qui suivent le chunk ; le client met à jour l'origine et le cube de
 `demo_world_pos` suit, sans que le module ait rien fait. Si le marker change de chunk, l'ancien chunk oublie la
 mémoire et le nouveau reçoit un snapshot avec l'origine.
 
-### 7.7 Changement de mémoire de joueur
+### 8.7 Changement de mémoire de joueur
 
 `HoloContainers.selectMemory(player, name)` sauvegarde la mémoire active (modules et inspection), décharge, active
 l'autre mémoire, recharge, renvoie l'état au joueur et à ses viewers, puis `HoloInspections.refresh` : les accès
 d'inspection de la nouvelle mémoire s'appliquent aussitôt. Aucune commande ne l'appelle encore.
 
-### 7.8 Respawn ou changement de dimension
+### 8.8 Respawn ou changement de dimension
 
 - Serveur : l'ancienne entité quitte le niveau (`StopTracking` dans les deux sens, donc viewers retirés et oublis), la
   nouvelle arrive (`StartTracking`, donc snapshots). Le `PlayerHoloContainer` survit, car il est indexé par UUID. La
   mémoire de la nouvelle dimension est renvoyée.
 - Client : `Clone` oublie toutes les portées sauf la mémoire du joueur local.
 
+### 8.9 Clic sur un bouton de `demo_interaction`
+
+1. Début de frame : `HoloControlCapture` verrouille éventuellement la rotation, puis `HoloInteractions` lance le rayon :
+   le bouton « Gauche » de la fenêtre est visé → `onHover` (le bouton s'éclaircit).
+2. Clic gauche : `MouseButton.Pre` → aucune capture explicite ne prend `LEFT_CLICK`, le captor passif de l'interaction
+   oui (le bouton l'intercepte) → l'événement est annulé (pas d'attaque) et `onLeftClick` appelle `onPress`.
+3. `onPress` → `sendAction(window, ...)` : `HoloModuleActionPacket` avec la clé `interaction`. Le serveur vérifie
+   l'accès de la fenêtre, incrémente le compteur et `markDirty()` ; au `flush`, l'état part au propriétaire et aux
+   viewers, `onSync` met le texte à jour.
+4. Relâchement : apparié à l'appui, livré au bouton même si le regard est parti.
+
+### 8.10 Zone de capture de `demo_interaction`
+
+1. Le regard entre dans la zone → `onHover` → `ctx.capture(zone)` : capture explicite liée à la fenêtre, qui prend
+   `MOUSE_MOVE`, `ESCAPE`, `ENTER` et `mapping("key.jump")`.
+2. Chaque frame : la rotation est reversée, les deltas déplacent le point de la zone. Saut (quelle que soit sa touche)
+   est neutralisé et recentre le point : le joueur ne saute pas.
+3. Échap : `pauseGame` → `ScreenEvent.Opening` annulé ; puis `InputEvent.Key` → `onPress(ESCAPE)` → `release()`. La
+   caméra tourne de nouveau ; la zone n'est reprise qu'après l'avoir quittée puis re-survolée.
+
 ---
 
-## 8. Commandes
+## 9. Commandes
 
 | Commande | Permission | Effet |
 |---|---|---|
@@ -576,15 +724,22 @@ forcée est annoncée aux opérateurs.
 Modules de démonstration (`demo/`) :
 - `hololib:demo_dimension` : fenêtre dans le ciel ;
 - `hololib:demo_world_pos` : cube qui tourne un bloc au-dessus du marker ;
-- `hololib:demo_player` : fenêtres HUD, caméra et caméra follow, plus un cube au-dessus de la tête. Ces objets sont
-  publics, sauf le HUD.
+- `hololib:demo_player` : fenêtres HUD, caméra (1,8 bloc) et caméra follow (1,5 bloc), plus un cube au-dessus de la
+  tête. Ces objets sont publics, sauf le HUD ;
+- `hololib:demo_interaction` (joueur) : une fenêtre caméra à 1,6 bloc, publique, avec trois boutons (clic gauche,
+  droit, molette), une zone qui compte la molette, une zone qui réagit au regard, une petite animation, une zone de
+  capture (souris et Saut, sortie par Échap ou Entrée) et un bouton qui bascule l'accès propriétaire / tous (seul le
+  propriétaire peut le basculer). Les compteurs sont l'état serveur du module.
+
+Un module déjà installé garde ses transforms sauvegardés : réinstaller un module de démo pour voir ses valeurs par
+défaut.
 
 Pour tester le multijoueur : tâches Gradle `runClient`, `runClient2` (pseudo `Dev2`) et `runClient3` (`Dev3`),
 chacune dans son propre dossier de jeu ; ouvrir le monde du premier client en LAN.
 
 ---
 
-## 9. Étendre le mod
+## 10. Étendre le mod
 
 ### Créer un module
 
@@ -630,6 +785,46 @@ TYPES.register("my_module", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, 
 
 L'objet fonctionne alors dans les quatre familles, sans renderer de famille à écrire.
 
+### Rendre un objet interactible
+
+- Une `HoloWindow` l'est déjà : ajouter des widgets qui implémentent `HoloInteractible` (ou des `HoloButton`), régler
+  `setAccess(...)` côté serveur si d'autres joueurs doivent pouvoir l'utiliser.
+- Un autre objet : implémenter `HoloInteractible` et surcharger `interactibleAt(x, y)` (plan local `z = 0`).
+
+```java
+final class Counter extends HoloWidget implements HoloInteractible
+{
+    @Override public boolean intercepts(HoloControl control) { return control.equals(HoloControl.SCROLL); }
+    @Override public void onScroll(HoloInteraction ctx, double delta) { /* sendAction(window, ...) */ }
+    @Override protected void draw(HoloCanvas canvas) { /* ... */ }
+}
+```
+
+### Capturer des contrôles
+
+```java
+final class Steering implements HoloCaptor
+{
+    static final HoloControl JUMP = HoloControl.mapping("key.jump");
+
+    @Override
+    public boolean captures(HoloControl control)
+    {
+        return control.equals(HoloControl.MOUSE_MOVE) || control.equals(HoloControl.ESCAPE) || control.equals(JUMP);
+    }
+
+    @Override public void onMouseMove(HoloCapture ctx, float dYaw, float dPitch) { /* ... */ }
+
+    @Override
+    public void onPress(HoloCapture ctx, HoloControl control)
+    {
+        if (control.equals(HoloControl.ESCAPE)) ctx.release();
+    }
+}
+
+HoloCaptures.begin(new Steering());   // cote client ; ou ctx.capture(...) depuis un callback d'interaction
+```
+
 ### Renderer bas niveau
 
 Pour un dessin hors du système d'objets : implémenter `SkyRenderer`, `ViewRenderer` ou `HudRenderer`, ou étendre
@@ -648,17 +843,19 @@ public static void onInspect(HoloInspectEvent event)
 
 ---
 
-## 10. Référence par package
+## 11. Référence par package
 
 ### `holo.object`
-- `HoloObject` : objet dessinable ; clé, ancrage, transform, visibilité ; `requestAnchor` / `requestTransform`
-  (propriétaire, côté client) ; `restore` / `syncDirty` (internes).
+- `HoloObject` : objet dessinable ; clé, ancrage, transform, visibilité, accès, `interactibleAt` ;
+  `requestAnchor` / `requestTransform` (propriétaire, côté client) ; `restore` / `syncDirty` (internes).
+- `HoloAccess` : qui peut utiliser un objet (`OWNER`, `players(...)`, `EVERYONE`).
 - `HoloAnchor` : `Sky`, `World`, `Local`, `Hud` ; `family()`, `acceptable(transform)`, codecs réseau et NBT.
 - `HoloTransform` : translation, rotation, échelle mutables, drapeau `dirty`, `setLookingAtOrigin`, codecs.
 - `HoloVisibility` : `PRIVATE`, `PUBLIC`.
 
 ### `holo.window`, `holo.widget`
-- `HoloWindow` : objet plat (largeur et hauteur en pixels, `pixelScale`), racine `HoloPanel`, `widgetAt`.
+- `HoloWindow` : objet plat (largeur et hauteur en pixels, `pixelScale`), racine `HoloPanel`, `widgetAt` ;
+  interactible (`interactibleAt`, `setInterceptedInputs`).
 - `HoloWidget`, `HoloPanel`, `HoloLabel`, `HoloButton` : arborescence 2D, dessin via `HoloCanvas`.
 
 ### `holo.module`
@@ -675,6 +872,10 @@ public static void onInspect(HoloInspectEvent event)
 ### `holo.inspect`
 - `HoloInspection` (donnée), `HoloInspections` (autorité serveur), `HoloInspectEvent` (politique).
 
+### `holo.capture`, `holo.interact`
+- `HoloControl`, `HoloCaptor`, `HoloCapture`, `HoloCaptures` (capture de contrôles, partie commune).
+- `HoloInteractible`, `HoloInteraction` (interaction au regard, partie commune).
+
 ### `network`
 - `HoloNetwork` (canal), `HoloSyncData` (`ModuleData`, `ObjectData`) et les sept paquets du [§4](#4-réseau).
 
@@ -685,25 +886,38 @@ public static void onInspect(HoloInspectEvent event)
 ### `demo`
 - `DemoModules` (enregistrement), `DemoDimensionModule`, `DemoWorldPosModule`, `DemoPlayerModule`, `DemoWindows`
   (fabrique de fenêtres), `DemoCube`.
+- `DemoInteractionModule` et ses widgets : `DemoScrollZone`, `DemoHoverZone`, `DemoAnimation`, `DemoCaptureZone`.
 
 ### `client.holo`
 - `ClientHoloWorld` (portées connues, tick, oubli), `ClientHoloContainer` (miroirs, origine), `ClientHoloPackets`
   (handlers).
 
+### `client.capture`, `client.interact`
+- `HoloControlCapture` : seul abonné aux inputs, captures explicites et passives, verrou de rotation.
+- `HoloInteractions` : picking et survol, captor passif de l'interaction, captures liées à un objet.
+
 ### `client.render`
 - `RenderDispatcher`, `HoloRenderers` ; `sky/`, `world/`, `view/`, `hud/` (renderer, contexte, passe) ;
   `type/HoloRenderTypes`.
 - `holo/` : `HoloRouting`, `ResolvedHolo`, `HoloPlacement`, `HoloBridges` et les quatre ponts, `HoloDrawContext`,
-  `HoloObjectRenderer(s)`, `HoloWindowRenderer`, `BufferHoloCanvas`.
+  `HoloObjectRenderer(s)`, `HoloWindowRenderer`, `BufferHoloCanvas`, `HoloPicking` (objet sous le réticule, pas un
+  renderer).
 - `demo/` : `DemoCubeRenderer`, `DemoRenderers`.
 
 ---
 
-## 11. Limites connues et points ouverts
+## 12. Limites connues et points ouverts
 
-- **Pas d'interaction** : `HoloWidget.onClick` et `HoloWindow.widgetAt` existent, mais aucun système client ne
-  transforme encore un clic ou un regard en appel (le code parle d'un « futur système d'interaction »). Les boutons ne
-  sont donc pas cliquables en jeu.
+- **Picking plan seulement** : l'interaction vise le plan `z = 0` local d'un objet. Un objet 3D (ex. `DemoCube`)
+  devrait approximer sa surface dans `interactibleAt`. Le bobbing de vue n'est pas pris en compte pour les objets du
+  monde (le rayon part de l'œil, pas de la caméra secouée).
+- **Ciel visable seulement dans le vide** : un objet `Sky` n'est interactible que si le regard ne touche aucun bloc
+  ni entité à portée de vanilla.
+- **Mappings neutralisés après coup** : sans Mixin, un mapping capturé est remis à zéro juste après que vanilla l'a
+  enfoncé. Un mod qui lit l'état brut de la touche (GLFW) ou réagit dans un `InputEvent.Key` posté avant le nôtre
+  n'est pas bloqué.
+- **Capture sans issue de secours** : une capture explicite ne se termine que par son captor (ou la disparition de son
+  objet). Un captor qui ne capture pas Échap et ne se libère jamais bloque ses contrôles jusqu'à la déconnexion.
 - **Pas de commande de mémoire de joueur** : `createMemory`, `deleteMemory` et `selectMemory` existent dans
   `HoloContainers`, mais aucune commande ne les expose.
 - **Aucune politique d'inspection** : `HoloInspectEvent` n'a pas d'abonné, donc toute demande est acceptée. La cible
@@ -716,6 +930,6 @@ public static void onInspect(HoloInspectEvent event)
   borné à ±1000 et un objet épais près de `−1000` peut toucher le plan lointain du GUI.
 - **Pas de migration de sauvegarde** : le format des objets a changé (transform séparé, ancrages simplifiés). Un
   transform absent garde celui de `onLoad`.
-- **Protocole réseau `"2"`** : un client d'une version antérieure est refusé.
+- **Protocole réseau `"3"`** : un client d'une version antérieure est refusé.
 - **Chargement réseau par module** : `ModuleData` sérialise tout l'état à chaque mise à jour ; rien n'est encore
   envoyé en différentiel.
