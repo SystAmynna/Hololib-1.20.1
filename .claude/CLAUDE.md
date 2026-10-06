@@ -36,6 +36,8 @@ com.amynna.hololib
 │   └── interact/                HoloInteractible, HoloInteraction (interaction au regard, partie commune)
 ├── network/                     HoloNetwork + paquets (snapshot, module, objet, origine, oubli ; deplacement, action)
 ├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
+├── modules/                     modules du mod (HoloLibModules = registre) : un sous-package par compatibilite
+│   └── dimension/planet1/       (dimension, monde, camera), un package par module (module + objets, code commun)
 └── client/
     ├── holo/                    ClientHoloWorld (miroirs des modules par portee), handlers des paquets
     ├── capture/                 HoloControlCapture : SEUL abonne aux inputs ; HoloKeyboardScreen (clavier entier)
@@ -49,6 +51,7 @@ com.amynna.hololib
         ├── view/                ViewRenderer, ViewRenderContext, ViewRenderPass
         ├── hud/                 HudRenderer, HudRenderContext, HudRenderPass
         ├── demo/                DemoCubeRenderer (objets des demos)
+        ├── modules/             renderers des modules, meme arborescence que modules/ (ModuleRenderers au setup)
         ├── holo/                ponts objets -> familles (HoloRouting, 4 bridges), HoloObjectRenderer(s), fenetres,
         │                        HoloPicking (objet sous le reticule ; pas un renderer, partage les placements)
         └── type/HoloRenderTypes RenderTypes du mod (POSITION_COLOR_LIGHTMAP, opaque / translucide)
@@ -136,9 +139,9 @@ com.amynna.hololib
 
 | Famille | Stage Forge | Resultat | Gestion de la profondeur |
 |---|---|---|---|
-| `SkyRenderer` | `AFTER_SKY` | dans la skybox, derriere tout le monde | profondeur entre objets du ciel, **videe apres** la passe |
+| `SkyRenderer` | `AFTER_SKY` | dans la skybox, derriere tout le monde | profondeur entre objets du ciel, **videe apres** la passe ; projection du monde sans la translation du bobbing (comme le soleil) |
 | `WorldRenderer<T>` | `AFTER_ENTITIES` | ancre dans le monde, cache par blocs et entites | profondeur du monde ; buffers **vides par vanilla** avec les entites |
-| `ViewRenderer` | `AFTER_LEVEL` | dans la vue, au-dessus du monde, sous main et GUI | profondeur **videe avant** ; projection `STABLE` (sans bobbing) ou `WORLD` |
+| `ViewRenderer` | `AFTER_LEVEL` | dans la vue, au-dessus du monde, sous main et GUI | profondeur **videe avant** ; projection `STABLE` (sans bobbing, FOV des options) ou `WORLD` |
 | `HudRenderer` | overlay GUI sous tous les autres | a l'ecran, orthographique, sous le HUD vanilla | profondeur **videe apres** la passe |
 
 Chaque famille suit le meme schema dans son sous-package : `XxxRenderer` (API publique), `XxxRenderContext` (donnees

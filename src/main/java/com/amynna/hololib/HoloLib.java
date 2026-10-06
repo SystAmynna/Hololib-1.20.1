@@ -3,6 +3,7 @@ package com.amynna.hololib;
 import com.amynna.hololib.demo.DemoModules;
 import com.amynna.hololib.holo.memory.HoloContainers;
 import com.amynna.hololib.holo.module.HoloModuleTypes;
+import com.amynna.hololib.modules.HoloLibModules;
 import com.amynna.hololib.network.HoloNetwork;
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -22,6 +23,7 @@ public class HoloLib
         IEventBus modBus = context.getModEventBus();
         HoloModuleTypes.REGISTER.register(modBus);
         DemoModules.REGISTER.register(modBus);
+        HoloLibModules.REGISTER.register(modBus);
         modBus.addListener(HoloContainers::registerCapabilities);
         modBus.addListener(HoloLib::onCommonSetup);
     }

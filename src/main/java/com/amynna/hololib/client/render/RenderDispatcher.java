@@ -50,7 +50,7 @@ public final class RenderDispatcher
             CAMERA_ROTATION.set(camera.pose());
             CAMERA_NORMAL.set(camera.normal());
             SkyRenderPass.render(HoloRenderers.sky(), event.getCamera(), event.getPartialTick(), CAMERA_ROTATION,
-                    CAMERA_NORMAL);
+                    CAMERA_NORMAL, event.getProjectionMatrix(), fov);
         }
         else if (stage == RenderLevelStageEvent.Stage.AFTER_ENTITIES)
         {

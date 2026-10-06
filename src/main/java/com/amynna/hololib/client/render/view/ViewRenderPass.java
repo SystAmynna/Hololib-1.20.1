@@ -1,6 +1,7 @@
 package com.amynna.hololib.client.render.view;
 
 import com.amynna.hololib.HoloLib;
+import com.amynna.hololib.client.render.StableProjection;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexSorting;
@@ -23,9 +24,6 @@ import java.util.List;
  */
 public final class ViewRenderPass
 {
-    /** Plan proche de vanilla ({@code GameRenderer.getProjectionMatrix}). */
-    private static final float NEAR = 0.05f;
-
     private static final ViewRenderContext CONTEXT = new ViewRenderContext();
     private static final Matrix4f STABLE_PROJECTION = new Matrix4f();
     private static PoseStack pose = new PoseStack();
@@ -35,7 +33,7 @@ public final class ViewRenderPass
     /**
      * @param cameraRotation  rotation camera capturee a {@code AFTER_SKY}
      * @param worldProjection projection du monde de la frame (bobbing compris)
-     * @param fov             FOV effectif de la frame, en degres
+     * @param fov             FOV effectif du monde pour la frame, en degres
      */
     public static void render(List<ViewRenderer> renderers, Camera camera, float partialTick, Matrix4fc cameraRotation,
                               Matrix3fc cameraNormal, Matrix4f worldProjection, float fov)
@@ -43,7 +41,7 @@ public final class ViewRenderPass
         if (renderers.isEmpty()) return;
         Minecraft mc = Minecraft.getInstance();
         float aspect = (float) mc.getWindow().getWidth() / (float) mc.getWindow().getHeight();
-        CONTEXT.set(camera, partialTick, cameraRotation, cameraNormal, fov, aspect);
+        CONTEXT.set(camera, partialTick, cameraRotation, cameraNormal, aspect);
         boolean prepared = false;
         float fogStart = 0f;
         float fogEnd = 0f;
@@ -52,9 +50,10 @@ public final class ViewRenderPass
         {
             for (ViewRenderer renderer : renderers) {
                 if (renderer.hiddenWithGui() && mc.options.hideGui) continue;
-                Matrix4f projection = renderer.projection() == ViewRenderer.Projection.STABLE
-                        ? stableProjection(mc, fov, aspect) : worldProjection;
-                CONTEXT.projection(projection);
+                boolean stable = renderer.projection() == ViewRenderer.Projection.STABLE;
+                float rendererFov = stable ? StableProjection.configuredFov() : fov;
+                Matrix4f projection = stable ? StableProjection.set(STABLE_PROJECTION, rendererFov) : worldProjection;
+                CONTEXT.projection(projection, rendererFov);
                 if (!renderer.shouldRender(CONTEXT)) continue;
 
                 if (!prepared) {
@@ -82,12 +81,6 @@ public final class ViewRenderPass
         {
             if (prepared) restore(fogStart, fogEnd);
         }
-    }
-
-    private static Matrix4f stableProjection(Minecraft mc, float fov, float aspect)
-    {
-        return STABLE_PROJECTION.setPerspective((float) Math.toRadians(fov), aspect, NEAR,
-                mc.gameRenderer.getDepthFar());
     }
 
     private static void prepare()

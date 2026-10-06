@@ -13,6 +13,8 @@ import net.minecraft.client.renderer.MultiBufferSource;
  * appliquer {@link SkyRenderContext#applyCelestialRotation(PoseStack)}.
  * <p>
  * La profondeur est utilisable entre objets du ciel (un modele 3D se cache lui-meme) : elle est videe apres la passe.
+ * La projection est celle du monde sans la translation du bobbing : un objet se comporte comme s'il etait a l'infini
+ * (comme le soleil), il suit les oscillations du terrain sans parallaxe, quelle que soit sa distance.
  * Utiliser des {@code RenderType} de la cible principale et {@code LightTexture.FULL_BRIGHT}.
  */
 public interface SkyRenderer

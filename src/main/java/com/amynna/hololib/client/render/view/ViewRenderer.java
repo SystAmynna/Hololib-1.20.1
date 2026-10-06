@@ -22,7 +22,10 @@ public interface ViewRenderer
     /** Projection utilisee pour ce renderer. */
     enum Projection
     {
-        /** FOV effectif du jeu, sans bobbing, secousse de degats ni nausee : l'objet ne tremble pas. */
+        /**
+         * FOV configure dans les options (ni sprint, ni effets, ni eau, ni autre mod), sans bobbing, secousse de degats
+         * ni nausee : l'objet ne tremble pas et ne change pas de taille.
+         */
         STABLE,
         /** Projection exacte du monde (bobbing compris) : l'objet bouge avec le monde. */
         WORLD

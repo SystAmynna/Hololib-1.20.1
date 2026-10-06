@@ -20,17 +20,20 @@ public final class ViewRenderContext
 
     ViewRenderContext() {}
 
-    void set(Camera camera, float partialTick, Matrix4fc cameraRotation, Matrix3fc cameraNormal, float fov, float aspect)
+    void set(Camera camera, float partialTick, Matrix4fc cameraRotation, Matrix3fc cameraNormal, float aspect)
     {
         this.camera = camera;
         this.partialTick = partialTick;
         this.cameraRotation.set(cameraRotation);
         this.cameraNormal.set(cameraNormal);
-        this.fov = fov;
         this.aspect = aspect;
     }
 
-    void projection(Matrix4fc projection) { this.projection = projection; }
+    void projection(Matrix4fc projection, float fov)
+    {
+        this.projection = projection;
+        this.fov = fov;
+    }
 
     public Camera camera() { return camera; }
 
@@ -42,7 +45,10 @@ public final class ViewRenderContext
     /** Projection utilisee pour ce renderer (voir {@link ViewRenderer#projection()}). */
     public Matrix4fc projection() { return projection; }
 
-    /** FOV vertical effectif du jeu, en degres (sprint, potions et mods compris). */
+    /**
+     * FOV vertical de la projection de ce renderer, en degres : celui des options pour {@code STABLE}, l'effectif du
+     * monde (sprint, effets, mods compris) pour {@code WORLD}.
+     */
     public float fov() { return fov; }
 
     /** Largeur / hauteur de la fenetre. */
