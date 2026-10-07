@@ -30,7 +30,8 @@ final class HoloWorldBridge extends WorldRenderer<ResolvedHolo>
     @Override
     protected boolean shouldRender(ResolvedHolo object, Vec3 position, WorldRenderContext ctx)
     {
-        return object.available() && super.shouldRender(object, position, ctx);
+        // Fenetre d'outils visee : dessinee au-dessus de tout par HoloFocusBridge.
+        return object != HoloPicking.focused() && object.available() && super.shouldRender(object, position, ctx);
     }
 
     @Override

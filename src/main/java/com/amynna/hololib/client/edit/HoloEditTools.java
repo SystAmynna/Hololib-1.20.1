@@ -80,6 +80,7 @@ public final class HoloEditTools
     /** Objet HUD tenu dans le cadre de l'editor. */
     private static HoloObject grabbedHud;
     private static HoloObject pending;
+    private static boolean pendingReplace;
     private static int pendingTicks;
 
     // Temporaires.
@@ -151,18 +152,23 @@ public final class HoloEditTools
         return (dragging || heldAxis >= 0) && target != null && target.object() == object;
     }
 
-    /** Envoi differe (molette) : fait apres quelques ticks sans nouveau changement. */
-    static void schedule(HoloObject object)
+    /**
+     * Fin de modification differee (molette) : {@link HoloEditSession#settle} apres quelques ticks sans nouveau
+     * changement ; {@code replace} : boutons re-places (cumule pour un meme objet).
+     */
+    static void schedule(HoloObject object, boolean replace)
     {
-        if (pending != null && pending != object) HoloEditSession.send(pending);
+        if (pending != null && pending != object) flushPending();
+        pendingReplace |= replace;
         pending = object;
         pendingTicks = SEND_DELAY;
     }
 
     private static void flushPending()
     {
-        if (pending != null) HoloEditSession.send(pending);
+        if (pending != null) HoloEditSession.settle(pending, pendingReplace);
         pending = null;
+        pendingReplace = false;
     }
 
     // ---------------------------------------------------------------- picking (HoloPicking)

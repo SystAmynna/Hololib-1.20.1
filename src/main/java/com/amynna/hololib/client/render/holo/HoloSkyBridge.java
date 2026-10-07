@@ -34,8 +34,11 @@ final class HoloSkyBridge implements SkyRenderer
     public void render(PoseStack pose, MultiBufferSource buffers, SkyRenderContext ctx)
     {
         List<ResolvedHolo> objects = HoloRouting.sky();
+        ResolvedHolo focused = HoloPicking.focused();
         for (int i = 0; i < objects.size(); i++) {
             ResolvedHolo resolved = objects.get(i);
+            // Fenetre d'outils visee : dessinee au-dessus de tout par HoloFocusBridge.
+            if (resolved == focused) continue;
             HoloObject placed = resolved.placed();
             if (!(placed.anchor() instanceof HoloAnchor.Sky sky)) continue;
             HoloTransform transform = placed.transform();
@@ -46,9 +49,8 @@ final class HoloSkyBridge implements SkyRenderer
                 HoloPlacement.applyLocal(pose, rotation, transform);
             } else {
                 // Overlay : placement propre dans les axes du monde, sans la rotation celeste de son hote.
-                HoloPlacement.sky(rotation, center, tmp, sky, transform, ctx.timeOfDay());
-                float scale = resolved.attachment.place(center, rotation, ctx.camera().getUpVector(), offset,
-                        overlayRotation, HoloAttachment.NEAR_DISTANCE);
+                float scale = HoloPlacement.eyeOverlay(resolved.attachment, ctx.camera(), ctx.timeOfDay(), rotation,
+                        center, tmp, offset, overlayRotation);
                 HoloPlacement.overlay(pose, offset, overlayRotation, scale);
             }
             draw.set(ctx.partialTick(), HoloAnchor.Family.SKY, resolved.ownerView);

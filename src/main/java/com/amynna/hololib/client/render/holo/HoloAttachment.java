@@ -18,8 +18,10 @@ import java.util.Objects;
  * <p>
  * Placement propre ({@link #place}), independant de la rotation et de l'echelle de l'hote, calcule au <b>premier</b>
  * placement (amorce de l'edition : l'overlay est cree a l'ouverture de la session ou quand l'objet devient editable)
- * puis <b>fige</b> : l'overlay ne cherche plus a suivre le regard ni la camera, il garde son decalage depuis le centre
- * de l'hote (dont il suit seulement la translation), son orientation et sa taille. Un nouvel overlay est re-oriente.
+ * puis <b>fige</b> : l'overlay ne cherche plus a suivre le regard ni la camera, il garde son orientation, sa taille et sa
+ * position : depuis le centre de l'hote dans le monde (il suit sa translation), depuis l'oeil dans la vue et le ciel
+ * (reperes centres sur l'oeil : l'hote peut s'y deplacer sans l'emporter). {@link #replace()} le fait recalculer (apres
+ * une transformation de l'hote).
  * <p>
  * Au premier placement, l'overlay est pose sur une sphere centree sur le point de vue, a cote de la <b>silhouette</b>
  * de l'hote vue de ce point (hors de son dessin), face au point de vue et sans roulis par rapport a l'ecran. Son
@@ -63,9 +65,13 @@ public final class HoloAttachment
     private final HoloObject overlay;
     private final HoloObject host;
     private final Side side;
-    /** Placement fige au premier {@link #place} : decalage depuis le centre de l'hote, orientation, echelle. */
+    /**
+     * Placement fige au premier {@link #place} : decalage depuis le centre de l'hote, position relative au point de
+     * vue, orientation, echelle.
+     */
     private boolean placed;
     private final Vector3f frozenOffset = new Vector3f();
+    private final Vector3f frozenPosition = new Vector3f();
     private final Quaternionf frozenOrientation = new Quaternionf();
     private float frozenScale;
 
@@ -82,9 +88,12 @@ public final class HoloAttachment
 
     public Side side() { return side; }
 
+    /** Oublie le placement fige : recalcule au prochain {@link #place}, face au point de vue. */
+    public void replace() { placed = false; }
+
     /**
      * Placement de l'overlay : calcule (et ecrit dans son transform) au premier appel, puis fige ; les appels suivants
-     * n'utilisent que {@code center}.
+     * n'utilisent que {@code center} et {@code followHost}.
      *
      * @param center          centre de l'hote relatif au point de vue, axes du monde
      * @param hostOrientation orientation monde de l'hote
@@ -92,17 +101,23 @@ public final class HoloAttachment
      * @param position        recoit la position de l'overlay relative au point de vue
      * @param orientation     recoit l'orientation de l'overlay (face {@code +Z} vers le point de vue)
      * @param maxDistance     distance maximale entre le point de vue et l'overlay (blocs)
+     * @param followHost      vrai : position depuis le centre de l'hote (famille monde) ; faux : position figee
+     *                        relative au point de vue (vue, ciel : l'oeil)
      * @return echelle de l'overlay (blocs par unite)
      */
     float place(Vector3fc center, Quaternionfc hostOrientation, Vector3fc up, Vector3f position,
-                Quaternionf orientation, float maxDistance)
+                Quaternionf orientation, float maxDistance, boolean followHost)
     {
         if (!placed) {
-            frozenScale = compute(center, hostOrientation, up, frozenOffset, frozenOrientation, maxDistance);
-            frozenOffset.sub(center);
+            frozenScale = compute(center, hostOrientation, up, frozenPosition, frozenOrientation, maxDistance);
+            frozenPosition.sub(center, frozenOffset);
             placed = true;
         }
-        position.set(center).add(frozenOffset);
+        if (followHost) {
+            position.set(center).add(frozenOffset);
+        } else {
+            position.set(frozenPosition);
+        }
         orientation.set(frozenOrientation);
         return frozenScale;
     }

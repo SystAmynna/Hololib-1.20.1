@@ -6,7 +6,6 @@ import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloTransform;
 import com.mojang.blaze3d.vertex.PoseStack;
-import net.minecraft.client.Camera;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.util.Mth;
@@ -37,8 +36,11 @@ final class HoloViewBridge implements ViewRenderer
     public void render(PoseStack pose, MultiBufferSource buffers, ViewRenderContext ctx)
     {
         List<ResolvedHolo> objects = HoloRouting.view();
+        ResolvedHolo focused = HoloPicking.focused();
         for (int i = 0; i < objects.size(); i++) {
             ResolvedHolo resolved = objects.get(i);
+            // Fenetre d'outils visee : dessinee au-dessus de tout par HoloFocusBridge.
+            if (resolved == focused) continue;
             HoloObject placed = resolved.placed();
             if (!(placed.anchor() instanceof HoloAnchor.Local local)) continue;
             HoloTransform transform = placed.transform();
@@ -46,10 +48,8 @@ final class HoloViewBridge implements ViewRenderer
             if (resolved.attachment != null) {
                 // Overlay : placement propre dans les axes du monde (relatif ou follow, son hote y est exprime).
                 ctx.applyCameraRotation(pose);
-                Camera camera = ctx.camera();
-                HoloPlacement.local(rotation, center, tmp, local, transform, camera.getYRot(), camera.getXRot());
-                float scale = resolved.attachment.place(center, rotation, camera.getUpVector(), offset,
-                        overlayRotation, Float.MAX_VALUE);
+                float scale = HoloPlacement.eyeOverlay(resolved.attachment, ctx.camera(), 0f, rotation, center, tmp,
+                        offset, overlayRotation);
                 HoloPlacement.overlay(pose, offset, overlayRotation, scale);
             } else {
                 if (local.follow()) {

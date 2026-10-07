@@ -62,7 +62,8 @@ com.amynna.hololib
         ├── demo/                DemoCubeRenderer (objets des demos)
         ├── edit/                HoloGizmoRenderer (segments / cercles des objets World edites)
         ├── modules/             renderers des modules, meme arborescence que modules/ (ModuleRenderers au setup)
-        ├── holo/                ponts objets -> familles (HoloRouting, 4 bridges), HoloObjectRenderer(s), fenetres,
+        ├── holo/                ponts objets -> familles (HoloRouting, 4 bridges + HoloFocusBridge : fenetre
+        │                        d'outils visee au-dessus de tout), HoloObjectRenderer(s), fenetres,
         │                        HoloPicking (objet sous le reticule ; pas un renderer, partage les placements),
         │                        HoloAttachment (overlays clients a cote d'un hote), HoloHudPreview (HUD en miniature)
         └── type/HoloRenderTypes RenderTypes du mod (POSITION_COLOR_LIGHTMAP, opaque / translucide)
@@ -103,8 +104,10 @@ com.amynna.hololib
 
 - Le point vise est le **centre de l'ecran**. `HoloPicking` reconstruit le placement de chaque objet route (comme son
   pont), intersecte le rayon avec le plan `z = 0` local (vu de face) et demande `HoloObject.interactibleAt(x, y)`
-  (`HoloWindow` : widget `HoloInteractible` le plus profond, sinon la fenetre). Priorite HUD > vue > monde (16 blocs,
-  occulte par les blocs) > ciel (seulement si le regard ne touche rien).
+  (`HoloWindow` : widget `HoloInteractible` le plus profond, sinon la fenetre). Priorite HUD > fenetres d'outils
+  (overlays `HoloAttachment`, toutes familles, sans occultation ; la visee devient `HoloPicking.focused()`, dessinee
+  au-dessus de tout par `HoloFocusBridge`) > vue > monde (16 blocs, occulte par les blocs) > ciel (seulement si le
+  regard ne touche rien).
 - `HoloInteractible.intercepts(HoloControl)` choisit controle par controle ce que l'element prend **tant qu'il est
   vise** (tout sauf `MOUSE_MOVE`) ; un controle non pris remonte aux parents (panneaux, fenetre), puis au jeu. Le
   relachement va a qui a pris l'appui. Pour aller au-dela du survol : `ctx.capture(captor)` (capture explicite liee a
@@ -145,8 +148,9 @@ com.amynna.hololib
   d'edition pour un objet editable. `HoloModule.sharedWithObservers()` envoie un module sans objet public (focus).
 - Session (`HoloEditSession`, ouverte par l'editor) : boutons a droite de chaque objet editable (overlays
   `HoloAttachment`, `pixelScale = 1` ; placement propre, independant de la rotation / echelle de l'hote, calcule a
-  la creation de l'overlay puis **fige** (seule la translation de l'hote est suivie) : face au point de vue, sans
-  roulis, hors de la silhouette de l'hote, rectangle si `HoloObject.flat()`, sinon sphere englobante ; point de vue
+  la creation de l'overlay puis **fige** (monde : suit la translation de l'hote ; vue / ciel : fixe autour de l'oeil),
+  re-place a la fin de chaque transformation (relachement, saisie, RESET, molette arretee ; pas la portee) : face au
+  point de vue, sans roulis, hors de la silhouette de l'hote, rectangle si `HoloObject.flat()`, sinon sphere englobante ; point de vue
   dans l'hote, ou ciel : a 2 blocs), un seul outil actif. Outils selon l'ancrage :
   `Local` / `Sky` = l'objet entier est la poignee (regard / souris capturee / molette), `World` = gizmos, `Hud` = cadre
   de la fenetre de l'editor. Les `Local` follow (et `HoloRelativeToOpen`) sont **tenus** : affiches fixes dans le

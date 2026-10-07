@@ -13,7 +13,8 @@ import com.amynna.hololib.holo.window.HoloWindow;
 /**
  * Objet en cours d'edition et ses boutons : panneau des outils a cote ({@link HoloEditPanel}) et oeil de l'affichage
  * au-dessus, deux overlays clients ({@link HoloAttachment}) hors de la silhouette de l'objet, orientes face au joueur
- * a leur creation (ouverture de la session, objet devenu editable) puis fixes.
+ * a leur creation (ouverture de la session, objet devenu editable) puis fixes, re-places apres chaque transformation
+ * ({@link #replace()}).
  * Pour un objet HUD, les boutons sont poses a gauche de l'hote du cadre HUD. Garde aussi les reglages de l'outil echelle (synchronise, axe choisi).
  */
 final class HoloEditTarget
@@ -84,6 +85,13 @@ final class HoloEditTarget
     {
         HoloRouting.detach(panelAttachment);
         if (eyeAttachment != null) HoloRouting.detach(eyeAttachment);
+    }
+
+    /** Re-place les boutons (apres une transformation de l'objet) : face au joueur, a cote de sa silhouette. */
+    void replace()
+    {
+        panelAttachment.replace();
+        if (eyeAttachment != null) eyeAttachment.replace();
     }
 
     /** Chaque tick client : valeurs affichees et animations des widgets. */

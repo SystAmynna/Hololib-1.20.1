@@ -168,8 +168,9 @@ public final class HoloEditSession
     // ---------------------------------------------------------------- modifications
 
     /**
-     * Un groupe de composantes a change : pour un objet tenu, note pour la fermeture ; sinon envoi au serveur, tout de
-     * suite ({@code immediate}) ou apres quelques ticks sans changement (molette).
+     * Un groupe de composantes a change : pour un objet tenu, note pour la fermeture ; sinon envoi au serveur. Fin de
+     * la modification tout de suite ({@code immediate}) ou apres quelques ticks sans changement (molette,
+     * {@link #settle}) : les boutons de l'objet sont alors re-places, sauf pour la portee (silhouette inchangee).
      */
     static void changed(HoloObject object, HoloEditTool group, boolean immediate)
     {
@@ -181,13 +182,24 @@ public final class HoloEditSession
                 case SCALE -> held.scaled = true;
                 case RANGE -> {}
             }
-            return;
         }
         if (immediate) {
-            send(object);
+            settle(object, group != HoloEditTool.RANGE);
         } else {
-            HoloEditTools.schedule(object);
+            HoloEditTools.schedule(object, group != HoloEditTool.RANGE);
         }
+    }
+
+    /**
+     * Fin d'une modification : envoi au serveur (sauf objet tenu, envoye a la fermeture) ; boutons re-places si
+     * {@code replace}.
+     */
+    static void settle(HoloObject object, boolean replace)
+    {
+        if (!active || !HELD.containsKey(object)) send(object);
+        if (!replace || !active) return;
+        HoloEditTarget target = TARGETS.get(object);
+        if (target != null) target.replace();
     }
 
     /** Affichage suivant ({@code OFF -> FOCUS -> ON}). */

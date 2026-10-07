@@ -29,9 +29,10 @@ import java.util.UUID;
  * Pour chaque objet route, la matrice repere local -> repere de la famille est reconstruite comme dans son pont, puis
  * le rayon est intersecte avec le plan {@code z = 0} de l'objet, vu de face seulement ; l'objet decide ensuite s'il
  * arrete le regard ({@link HoloObject#interactibleAt}). Seuls les objets dont l'acces autorise le joueur local sont
- * candidats. Priorite dans l'ordre de dessin : HUD (le plus en avant), vue, monde, ciel ; le plus proche dans une
- * famille. Monde : a moins de {@link #WORLD_REACH} blocs et non cache par un bloc. Ciel : seulement si le regard ne
- * touche rien du jeu ({@code hitResult} {@code MISS}).
+ * candidats. Priorite dans l'ordre de dessin : HUD (le plus en avant), fenetres d'outils (overlays
+ * {@link HoloAttachment}, toutes familles, sans occultation : la visee devient {@link #focused()} et passe au-dessus de
+ * tout), vue, monde, ciel ; le plus proche dans une famille. Monde : a moins de {@link #WORLD_REACH} blocs et non cache
+ * par un bloc. Ciel : seulement si le regard ne touche rien du jeu ({@code hitResult} {@code MISS}).
  * <p>
  * Rayon : en premiere personne, depuis l'oeil selon le regard interpole (la passe vue n'a pas de bobbing) ; en F5,
  * depuis la camera de la frame precedente. Aucune allocation sans candidat du monde.
@@ -81,6 +82,8 @@ public final class HoloPicking
     }
 
     private static final Hit HIT = new Hit();
+    /** Fenetre d'outils (overlay) visee au dernier {@link #pick}, dessinee au-dessus de tout ; {@code null} sinon. */
+    private static ResolvedHolo focused;
     private static final Matrix4f MATRIX = new Matrix4f();
     private static final Matrix4f INVERSE = new Matrix4f();
     private static final Quaternionf ORIENTATION = new Quaternionf();
@@ -107,6 +110,7 @@ public final class HoloPicking
     {
         LocalPlayer player = mc.player;
         HoloEditTools.clearHover();
+        focused = null;
         if (player == null || mc.level == null) return null;
         UUID local = player.getUUID();
         boolean firstPerson = mc.options.getCameraType().isFirstPerson();
@@ -114,6 +118,7 @@ public final class HoloPicking
             return HIT;
         }
         sceneRay(mc, player, partialTick);
+        if (pickOverlay(mc, local, player, firstPerson, partialTick)) return HIT;
         if (firstPerson && pickView(local, player, partialTick)) return HIT;
         if (pickWorld(mc, local, partialTick)) return HIT;
         HitResult hitResult = mc.hitResult;
@@ -190,6 +195,19 @@ public final class HoloPicking
         return null;
     }
 
+    /**
+     * Fenetre d'outils visee (overlay {@link HoloAttachment}) au dernier {@link #pick}, encore routee : dessinee
+     * au-dessus de tout par {@link HoloFocusBridge} ; {@code null} sinon.
+     */
+    static ResolvedHolo focused()
+    {
+        if (focused != null && HoloRouting.resolved(focused.object) != focused) focused = null;
+        return focused;
+    }
+
+    /** Plus de fenetre visee (interaction inactive : {@link #pick} n'est pas appele). */
+    public static void clearFocus() { focused = null; }
+
     /** Resultat de {@link #project}, repere local de l'objet. */
     public static float projectedX() { return projectedX; }
 
@@ -213,6 +231,60 @@ public final class HoloPicking
             }
         }
         return false;
+    }
+
+    /**
+     * Fenetres d'outils (overlays) de toutes les familles, avant tout le reste : sans occultation par les blocs ni
+     * condition sur le ciel, la plus proche gagne et devient {@link #focused()}.
+     */
+    private static boolean pickOverlay(Minecraft mc, UUID local, LocalPlayer player, boolean firstPerson,
+                                       float partialTick)
+    {
+        float best = Float.MAX_VALUE;
+        if (firstPerson) {
+            List<ResolvedHolo> objects = HoloRouting.view();
+            for (int i = 0; i < objects.size(); i++) {
+                ResolvedHolo resolved = objects.get(i);
+                if (resolved.attachment == null || !candidate(resolved, local)
+                        || !viewMatrix(resolved, player, partialTick)) {
+                    continue;
+                }
+                if (accept(resolved, HoloAnchor.Family.VIEW, best)) {
+                    best = HIT.distance;
+                    focused = resolved;
+                }
+            }
+        }
+        List<ResolvedHolo> objects = HoloRouting.world();
+        for (int i = 0; i < objects.size(); i++) {
+            ResolvedHolo resolved = objects.get(i);
+            if (resolved.attachment == null || !candidate(resolved, local) || !worldMatrix(resolved, partialTick)) {
+                continue;
+            }
+            if (accept(resolved, HoloAnchor.Family.WORLD, Math.min(best, (float) WORLD_REACH))) {
+                best = HIT.distance;
+                focused = resolved;
+            }
+        }
+        // Le ciel est centre sur la camera : rayon depuis son origine.
+        float sx = ox, sy = oy, sz = oz;
+        ox = oy = oz = 0f;
+        objects = HoloRouting.sky();
+        for (int i = 0; i < objects.size(); i++) {
+            ResolvedHolo resolved = objects.get(i);
+            if (resolved.attachment == null || !candidate(resolved, local)
+                    || !skyMatrix(resolved, mc, partialTick)) {
+                continue;
+            }
+            if (accept(resolved, HoloAnchor.Family.SKY, best)) {
+                best = HIT.distance;
+                focused = resolved;
+            }
+        }
+        ox = sx;
+        oy = sy;
+        oz = sz;
+        return focused != null;
     }
 
     private static boolean pickView(UUID local, LocalPlayer player, float partialTick)
@@ -390,7 +462,8 @@ public final class HoloPicking
     private static void overlayMatrix(ResolvedHolo resolved, float maxDistance)
     {
         Vector3f up = Minecraft.getInstance().gameRenderer.getMainCamera().getUpVector();
-        float scale = resolved.attachment.place(OFFSET, ORIENTATION, up, CENTER, OVERLAY_ORIENTATION, maxDistance);
+        float scale = resolved.attachment.place(OFFSET, ORIENTATION, up, CENTER, OVERLAY_ORIENTATION, maxDistance,
+                false);
         MATRIX.identity();
         HoloPlacement.overlay(MATRIX, CENTER, OVERLAY_ORIENTATION, scale);
     }

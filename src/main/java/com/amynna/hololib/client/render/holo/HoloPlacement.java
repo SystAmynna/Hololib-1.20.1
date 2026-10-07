@@ -1,8 +1,10 @@
 package com.amynna.hololib.client.render.holo;
 
 import com.amynna.hololib.holo.object.HoloAnchor;
+import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloTransform;
 import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.client.Camera;
 import net.minecraft.util.Mth;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
@@ -52,6 +54,35 @@ final class HoloPlacement
     static void overlay(Matrix4f matrix, Vector3f position, Quaternionf orientation, float scale)
     {
         matrix.translate(position).rotate(orientation).scale(scale);
+    }
+
+    /**
+     * Placement d'un overlay dont l'hote est centre sur l'oeil ({@code Local} ou {@code Sky}), dans les axes du monde
+     * relatifs a l'oeil ({@link HoloAttachment#place}, position figee relative a l'oeil). Dans le ciel, a
+     * {@link HoloAttachment#NEAR_DISTANCE} bloc au plus.
+     *
+     * @param camera      camera de la frame (regard d'un hote follow, haut de l'ecran)
+     * @param timeOfDay   {@code ClientLevel.getTimeOfDay(partialTick)} (hote celeste)
+     * @param position    recoit la position de l'overlay
+     * @param orientation recoit son orientation
+     * @return echelle de l'overlay, ou {@code NaN} si l'hote n'est ni {@code Local} ni {@code Sky}
+     */
+    static float eyeOverlay(HoloAttachment attachment, Camera camera, float timeOfDay, Quaternionf hostRotation,
+                            Vector3f center, Quaternionf tmp, Vector3f position, Quaternionf orientation)
+    {
+        HoloObject host = attachment.host();
+        HoloTransform transform = host.transform();
+        float maxDistance;
+        if (host.anchor() instanceof HoloAnchor.Local local) {
+            local(hostRotation, center, tmp, local, transform, camera.getYRot(), camera.getXRot());
+            maxDistance = Float.MAX_VALUE;
+        } else if (host.anchor() instanceof HoloAnchor.Sky sky) {
+            sky(hostRotation, center, tmp, sky, transform, timeOfDay);
+            maxDistance = HoloAttachment.NEAR_DISTANCE;
+        } else {
+            return Float.NaN;
+        }
+        return attachment.place(center, hostRotation, camera.getUpVector(), position, orientation, maxDistance, false);
     }
 
     /**

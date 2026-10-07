@@ -96,7 +96,7 @@ public final class ResolvedHolo implements WorldRenderable
         hostOrientation.set(orientation);
         hostCenter.set((float) (host.x - view.x), (float) (host.y - view.y), (float) (host.z - view.z));
         overlayScale = attachment.place(hostCenter, hostOrientation, camera.getUpVector(), offset, orientation,
-                Float.MAX_VALUE);
+                Float.MAX_VALUE, true);
         position = view.add(offset.x, offset.y, offset.z);
         return position;
     }

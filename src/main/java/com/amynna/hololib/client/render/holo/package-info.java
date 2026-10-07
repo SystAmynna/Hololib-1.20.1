@@ -26,7 +26,10 @@
  * {@link com.amynna.hololib.client.render.holo.HoloHudPreview}. Les overlays clients
  * ({@link com.amynna.hololib.client.render.holo.HoloAttachment}, boutons d'edition) sont routes dans la famille de
  * leur hote mais ont leur propre placement : a cote de sa silhouette vue du point de vue, face a celui-ci a l'amorce
- * de l'edition, puis fige (seule la translation de l'hote est suivie).
+ * de l'edition, puis fige (dans le monde, il suit la translation de l'hote ; dans la vue et le ciel, il reste fixe
+ * autour de l'oeil) jusqu'a la fin de la prochaine transformation de l'hote. L'overlay vise
+ * ({@code HoloPicking.focused()}, vise avant tout le reste sauf le HUD) est dessine au-dessus de tout par
+ * {@link com.amynna.hololib.client.render.holo.HoloFocusBridge} (passe vue, profondeur videe) a la place de son pont.
  * <p>
  * Exception a la regle "que des renderers" : {@link com.amynna.hololib.client.render.holo.HoloPicking} (objet sous le
  * reticule, pour {@code client.interact}) vit ici parce qu'il reconstruit les memes placements que les ponts ; il ne

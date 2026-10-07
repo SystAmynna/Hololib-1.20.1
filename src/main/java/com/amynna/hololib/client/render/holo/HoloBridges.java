@@ -12,7 +12,7 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 
 /**
- * Enregistre les quatre ponts holographiques, les gizmos d'edition et les renderers d'objets par defaut, et branche
+ * Enregistre les quatre ponts holographiques (plus celui de la fenetre d'outils visee), les gizmos d'edition et les renderers d'objets par defaut, et branche
  * {@link HoloTextMetrics} sur la police du jeu, au setup client.
  */
 @Mod.EventBusSubscriber(modid = HoloLib.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
@@ -27,6 +27,8 @@ public final class HoloBridges
             HoloRenderers.register(new HoloSkyBridge());
             HoloRenderers.register(new HoloWorldBridge());
             HoloRenderers.register(new HoloViewBridge());
+            // Apres le pont vue : fenetre d'outils visee au-dessus de tout.
+            HoloRenderers.register(new HoloFocusBridge());
             HoloRenderers.register(new HoloHudBridge());
             HoloRenderers.register(new HoloGizmoRenderer());
             HoloObjectRenderers.register(HoloWindow.class, new HoloWindowRenderer());

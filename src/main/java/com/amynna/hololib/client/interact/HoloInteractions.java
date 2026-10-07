@@ -92,6 +92,7 @@ public final class HoloInteractions
         Minecraft mc = Minecraft.getInstance();
         dropInvalid(mc.player);
         if (!active(mc)) {
+            HoloPicking.clearFocus();
             setHover(null, null);
             return;
         }
