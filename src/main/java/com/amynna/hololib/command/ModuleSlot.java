@@ -9,6 +9,7 @@ import com.amynna.hololib.holo.module.HoloModuleType;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Memoire visee par une commande de modules, chargee ou non : masque la difference entre un {@link HoloContainer}
@@ -23,8 +24,12 @@ interface ModuleSlot
     /** Types deja installes. */
     Set<ResourceLocation> present();
 
-    /** Installe le module ; faux s'il est deja present (la compatibilite est verifiee par l'appelant). */
-    boolean add(HoloModuleType<?> type);
+    /**
+     * Installe le module ; faux s'il est deja present (la compatibilite est verifiee par l'appelant).
+     *
+     * @param creator joueur qui lance la commande (proprietaire du module pour l'edition), ou {@code null}
+     */
+    boolean add(HoloModuleType<?> type, UUID creator);
 
     /** Retire le module de ce type ; faux s'il est absent. */
     boolean remove(ResourceLocation typeId);
@@ -40,7 +45,10 @@ interface ModuleSlot
             public Set<ResourceLocation> present() { return container.types(); }
 
             @Override
-            public boolean add(HoloModuleType<?> type) { return container.install(type) != null; }
+            public boolean add(HoloModuleType<?> type, UUID creator)
+            {
+                return container.install(type, creator) != null;
+            }
 
             @Override
             public boolean remove(ResourceLocation typeId) { return container.uninstallType(typeId); }
@@ -59,9 +67,9 @@ interface ModuleSlot
             public Set<ResourceLocation> present() { return HoloMemories.types(memory); }
 
             @Override
-            public boolean add(HoloModuleType<?> type)
+            public boolean add(HoloModuleType<?> type, UUID creator)
             {
-                boolean added = HoloMemories.install(memory, type, scope);
+                boolean added = HoloMemories.install(memory, type, scope, creator);
                 if (added) dirty.run();
                 return added;
             }

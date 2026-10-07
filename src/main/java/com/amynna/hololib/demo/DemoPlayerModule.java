@@ -1,5 +1,6 @@
 package com.amynna.hololib.demo;
 
+import com.amynna.hololib.holo.edit.HoloDisplay;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
@@ -10,7 +11,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.player.Player;
 
 /**
- * Demonstration de memoire de joueur : trois fenetres, une par rendu local, et un cube dans le monde.
+ * Demonstration de memoire de joueur : trois fenetres, une par rendu local, un cube dans le monde et une fenetre du
+ * mode focus. Tout est editable en jeu par le proprietaire (module {@code hololib:own_editor}).
  * <ul>
  *     <li>{@code hud} : a l'ecran, en haut a droite (jamais vu par les autres joueurs, masque en F5).</li>
  *     <li>{@code local} : camera normale ({@code Local} relatif) ; reste en place quand on tourne la tete. Orientee
@@ -18,12 +20,14 @@ import net.minecraft.world.entity.player.Player;
  *     sinon elle apparaitrait plein sud.</li>
  *     <li>{@code follow} : camera follow ; suit le regard, un peu a droite et en bas du centre.</li>
  *     <li>{@code cube} : ancre dans le monde au-dessus de la tete du joueur (origine = joueur).</li>
+ *     <li>{@code focus} : affichage {@code FOCUS} et {@code HoloRelativeToOpen} : n'apparait qu'en mode focus
+ *     (module {@code hololib:focus}), a gauche du regard au moment de l'ouverture.</li>
  * </ul>
  * Les fenetres locales et le cube sont publics : les joueurs qui inspectent le proprietaire les voient autour de lui.
  */
 public final class DemoPlayerModule extends HoloModule
 {
-    private static final float LOCAL_DISTANCE = 1.8f;
+    private static final float LOCAL_DISTANCE = 0.8f;
 
     /** Vrai une fois la fenetre {@code local} orientee vers le regard du joueur (sauvegarde). */
     private boolean oriented;
@@ -42,13 +46,19 @@ public final class DemoPlayerModule extends HoloModule
         local.setVisibility(HoloVisibility.PUBLIC);
 
         HoloWindow follow = addObject(DemoWindows.labeled("follow", new HoloAnchor.Local(true),
-                HoloTransform.translation(22f, 12f, 1.5f), 1f / 200f, "Camera follow", "Suit le regard",
+                HoloTransform.translation(32f, 16f, 0.8f), 1f / 200f, "Camera follow", "Suit le regard",
                 0xFFFF80C0));
         follow.setVisibility(HoloVisibility.PUBLIC);
 
         DemoCube cube = addObject(new DemoCube("cube", new HoloAnchor.World(), HoloTransform.translation(0f, 2.4f, 0f),
                 0.3f, 0xA0FF80C0));
         cube.setVisibility(HoloVisibility.PUBLIC);
+
+        // Position relative au regard a l'ouverture du focus : 40 degres a gauche, un peu en haut.
+        DemoRelativeWindow focus = addObject(DemoWindows.relative("focus", HoloTransform.translation(-40f, -8f, 0.8f),
+                1f / 160f, "Focus", "Placee a l'ouverture", 0xFFFFC040));
+        focus.setDisplay(HoloDisplay.FOCUS);
+        focus.setVisibility(HoloVisibility.PUBLIC);
     }
 
     @Override

@@ -35,7 +35,8 @@ import java.util.UUID;
  * dans la {@link HoloMemory} a chaque sauvegarde. Fil serveur uniquement ; gere par {@link HoloContainers}.
  * <p>
  * Replication : le proprietaire (portee joueur) recoit tout. Les observateurs (definis par la sous-classe) ne recoivent
- * que les modules <b>partages</b>, c'est-a-dire ayant au moins un objet {@code PUBLIC}, et leur etat public ; un module
+ * que les modules <b>partages</b>, c'est-a-dire ayant au moins un objet {@code PUBLIC} (ou
+ * {@link HoloModule#sharedWithObservers()}), et leur etat public ; un module
  * qui devient (ou cesse d'etre) partage leur est ajoute (ou retire). Les changements sont envoyes en fin de tick.
  */
 public abstract class HoloContainer
@@ -103,11 +104,14 @@ public abstract class HoloContainer
     /**
      * Installe un nouveau module et le synchronise ; {@code null} si le type est incompatible avec cette memoire ou
      * deja installe.
+     *
+     * @param creator joueur qui l'installe ({@link HoloModule#creator()}), ou {@code null}
      */
-    public final HoloModule install(HoloModuleType<?> type)
+    public final HoloModule install(HoloModuleType<?> type, UUID creator)
     {
         if (type.target() != target() || contains(type.id())) return null;
         HoloModule module = type.create(UUID.randomUUID(), host());
+        module.creator(creator);
         module.onLoad();
         module.clearDirty();
         modules.put(module.instanceId(), module);
@@ -275,6 +279,7 @@ public abstract class HoloContainer
 
     private static boolean isShared(HoloModule module)
     {
+        if (module.sharedWithObservers()) return true;
         for (HoloObject object : module.objects()) if (object.visibility() == HoloVisibility.PUBLIC) return true;
         return false;
     }

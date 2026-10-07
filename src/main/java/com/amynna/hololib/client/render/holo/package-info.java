@@ -20,6 +20,14 @@
  * Les fenetres sont dessinees par {@link com.amynna.hololib.client.render.holo.HoloWindowRenderer} via un
  * {@code HoloCanvas} sur {@code MultiBufferSource}.
  * <p>
+ * Le routage filtre aussi selon l'affichage ({@code HoloDisplay}) et le mode focus du proprietaire de la memoire ; en
+ * session d'edition, les objets editables sont reveles et les objets HUD peuvent quitter le HUD pour
+ * {@link com.amynna.hololib.client.render.holo.HoloRouting#hudPreview()}, dessines en miniature par
+ * {@link com.amynna.hololib.client.render.holo.HoloHudPreview}. Les overlays clients
+ * ({@link com.amynna.hololib.client.render.holo.HoloAttachment}, boutons d'edition) sont routes dans la famille de
+ * leur hote mais ont leur propre placement : a cote de sa silhouette vue du point de vue, face a celui-ci a l'amorce
+ * de l'edition, puis fige (seule la translation de l'hote est suivie).
+ * <p>
  * Exception a la regle "que des renderers" : {@link com.amynna.hololib.client.render.holo.HoloPicking} (objet sous le
  * reticule, pour {@code client.interact}) vit ici parce qu'il reconstruit les memes placements que les ponts ; il ne
  * dessine rien et n'est jamais appele pendant le rendu.

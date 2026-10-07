@@ -1,6 +1,8 @@
 package com.amynna.hololib.holo.memory;
 
 import com.amynna.hololib.HoloLib;
+import com.amynna.hololib.holo.edit.HoloEditRules;
+import com.amynna.hololib.holo.edit.HoloEditorCapability;
 import com.amynna.hololib.holo.inspect.HoloInspections;
 import com.amynna.hololib.holo.memory.dimension.DimensionHoloContainer;
 import com.amynna.hololib.holo.memory.player.HoloMemoryBank;
@@ -11,6 +13,7 @@ import com.amynna.hololib.holo.memory.position.PositionHoloContainer;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloVisibility;
+import com.amynna.hololib.network.HoloEditObjectPacket;
 import com.amynna.hololib.network.HoloForgetPacket;
 import com.amynna.hololib.network.HoloModuleActionPacket;
 import com.amynna.hololib.network.HoloMoveObjectPacket;
@@ -47,6 +50,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -197,6 +201,41 @@ public final class HoloContainers
                     module.type().id(), e);
         } finally {
             buf.release();
+        }
+    }
+
+    /**
+     * Edition en jeu : appliquee si le joueur voit l'objet (conteneur qu'il recoit, objet {@code PUBLIC} s'il n'en est
+     * pas proprietaire), peut l'editer ({@link HoloEditRules#mayEdit}, capacites des modules editeurs de sa memoire)
+     * et ne change que ce que ses interfaces permettent ; sinon l'etat serveur lui est renvoye (il l'avait deja
+     * applique localement).
+     */
+    public static void handleEdit(ServerPlayer player, HoloEditObjectPacket packet)
+    {
+        HoloContainer container = actionTarget(player, packet.scope(), true);
+        HoloModule module = container != null ? container.module(packet.module()) : null;
+        HoloObject object = module != null ? module.object(packet.key()) : null;
+        if (object == null) return;
+        UUID owner = module.owner();
+        boolean ownerView = player.getUUID().equals(owner);
+        boolean visible = ownerView || object.visibility() == HoloVisibility.PUBLIC;
+        PlayerHoloContainer own = player(player);
+        Set<HoloEditorCapability> capabilities = own != null ? HoloEditRules.capabilities(own.modules())
+                : Set.of();
+        if (visible && HoloEditRules.mayEdit(player.getUUID(), player.hasPermissions(2), container.scope(),
+                module.editOwner(), object, capabilities)
+                && HoloEditRules.accepts(object, owner != null, packet.anchor(), packet.transform(), packet.display(),
+                packet.openOffset(), packet.editRange())) {
+            object.setAnchor(packet.anchor());
+            object.transform().set(packet.transform());
+            object.setDisplay(packet.display());
+            object.setEditRange(packet.editRange());
+            if (packet.openOffset() != null) object.openOffset().set(packet.openOffset());
+            return;
+        }
+        if (visible) {
+            HoloNetwork.send(player, new HoloObjectPacket(container.scope(), module.instanceId(),
+                    ObjectData.of(object, ownerView)));
         }
     }
 

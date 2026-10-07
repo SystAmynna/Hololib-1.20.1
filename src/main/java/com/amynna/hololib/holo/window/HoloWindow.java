@@ -95,5 +95,14 @@ public class HoloWindow extends HoloObject implements HoloInteractible
     }
 
     @Override
+    public float halfWidth() { return 0.5f * width * pixelScale; }
+
+    @Override
+    public float halfHeight() { return 0.5f * height * pixelScale; }
+
+    @Override
+    public boolean flat() { return true; }
+
+    @Override
     public void tick() { root.tick(); }
 }

@@ -35,11 +35,14 @@ public final class HoloMemories
     /**
      * Ajoute un module dans son etat initial : le module est cree le temps de produire sa sauvegarde ({@code onLoad}
      * puis {@code saveAll}). Faux si le type est deja present. La compatibilite est verifiee par l'appelant.
+     *
+     * @param creator joueur qui l'installe, ou {@code null}
      */
-    public static boolean install(HoloMemory memory, HoloModuleType<?> type, HoloScope scope)
+    public static boolean install(HoloMemory memory, HoloModuleType<?> type, HoloScope scope, UUID creator)
     {
         if (contains(memory, type.id())) return false;
         HoloModule module = type.create(UUID.randomUUID(), new HoloModuleHost(scope, LogicalSide.SERVER, true));
+        module.creator(creator);
         module.onLoad();
         memory.entries().add(new HoloMemory.Entry(type.id(), module.instanceId(), module.saveAll()));
         module.unload();

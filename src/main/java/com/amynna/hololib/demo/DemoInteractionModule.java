@@ -50,7 +50,7 @@ public final class DemoInteractionModule extends HoloModule
 {
     private static final int WIDTH = 240;
     private static final int HEIGHT = 208;
-    private static final float DISTANCE = 1.6f;
+    private static final float DISTANCE = 0.8f;
     private static final int ACCENT = 0xFF40C0FF;
 
     private static final int ACTION_LEFT = 0;

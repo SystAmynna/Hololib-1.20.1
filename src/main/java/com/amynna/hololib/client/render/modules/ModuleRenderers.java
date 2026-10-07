@@ -1,6 +1,7 @@
 package com.amynna.hololib.client.render.modules;
 
 import com.amynna.hololib.HoloLib;
+import com.amynna.hololib.client.render.modules.camera.editor.EditorRenderers;
 import com.amynna.hololib.client.render.modules.dimension.planet1.Planet1Renderers;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -16,6 +17,9 @@ public final class ModuleRenderers
     @SubscribeEvent
     public static void onClientSetup(FMLClientSetupEvent event)
     {
-        event.enqueueWork(Planet1Renderers::register);
+        event.enqueueWork(() -> {
+            Planet1Renderers.register();
+            EditorRenderers.register();
+        });
     }
 }

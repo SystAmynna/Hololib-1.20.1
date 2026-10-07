@@ -4,8 +4,12 @@ import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
 import com.amynna.hololib.holo.object.HoloVisibility;
+import net.minecraft.server.level.ServerLevel;
 
-/** Planete gazeuse cubique et son anneau carre, dans le ciel de la dimension. Aucun etat : tout est constant. */
+/**
+ * Planete gazeuse cubique et son anneau carre, dans le ciel de la dimension. Aucun etat propre : les placements sont
+ * ceux des objets (editables en jeu) ; l'anneau garde le centre de la planete.
+ */
 public final class Planet1Module extends HoloModule
 {
     /** Direction de la planete depuis l'oeil (degres, conventions de Minecraft : pitch negatif = vers le haut). */
@@ -29,19 +33,36 @@ public final class Planet1Module extends HoloModule
     /** Ecart du plan de l'anneau a l'oeil (degres) : ~{@code DISTANCE * sin(6) * cos(25)} = 3.8 blocs. */
     private static final float RING_OFFSET = 6f;
 
+    private Planet1Planet planet;
+    private Planet1Ring ring;
+
     @Override
     public void onLoad()
     {
         // Ordre d'ajout = ordre de dessin : la planete opaque avant l'anneau translucide (qui ecrit la profondeur).
         HoloTransform planet = new HoloTransform().setLookingAtOrigin(YAW, PITCH, DISTANCE);
         planet.setRotation(planet.yaw() + PLANET_TILT_YAW, planet.pitch() + PLANET_TILT_PITCH, PLANET_ROLL);
-        addObject(new Planet1Planet("planet", new HoloAnchor.Sky(false), planet, PLANET_HALF))
-                .setVisibility(HoloVisibility.PUBLIC);
+        this.planet = addObject(new Planet1Planet("planet", new HoloAnchor.Sky(false), planet, PLANET_HALF));
+        this.planet.setVisibility(HoloVisibility.PUBLIC);
 
         // Face +Z vers l'oeil : le plan local XZ de l'anneau contient l'axe centre -> oeil, quel que soit le roll.
         HoloTransform ring = new HoloTransform().setLookingAtOrigin(YAW, PITCH, DISTANCE);
         ring.setRotation(ring.yaw(), ring.pitch() + RING_OFFSET, RING_ROLL);
-        addObject(new Planet1Ring("ring", new HoloAnchor.Sky(false), ring, RING_INNER, RING_OUTER))
-                .setVisibility(HoloVisibility.PUBLIC);
+        this.ring = addObject(new Planet1Ring("ring", new HoloAnchor.Sky(false), ring, RING_INNER, RING_OUTER));
+        this.ring.setVisibility(HoloVisibility.PUBLIC);
+    }
+
+    /** Cote serveur : l'anneau reste centre sur la planete (synchronise si elle a ete deplacee). */
+    @Override
+    public void serverTick(ServerLevel level) { centerRing(); }
+
+    /** Cote client : meme recentrage, local, pour suivre la planete pendant qu'on la deplace. */
+    @Override
+    public void clientTick() { centerRing(); }
+
+    private void centerRing()
+    {
+        HoloTransform center = planet.transform();
+        ring.transform().setTranslation(center.x(), center.y(), center.z());
     }
 }

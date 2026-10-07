@@ -9,6 +9,10 @@
  * ciel. Un anneau plat vu exactement dans son plan serait invisible (vu par la tranche), d'ou ce petit decalage. Tout
  * tient sous le plan lointain minimal (128 blocs).
  * <p>
+ * Editables en jeu avec le Dimension Editor, par le joueur qui a installe le module ou par un operateur equipe de
+ * l'Other Editor : la planete entierement, l'anneau sauf sa position (son centre suit celui de la planete a chaque
+ * tick, des deux cotes).
+ * <p>
  * Dessin : {@code client.render.modules.dimension.planet1}.
  */
 package com.amynna.hololib.modules.dimension.planet1;

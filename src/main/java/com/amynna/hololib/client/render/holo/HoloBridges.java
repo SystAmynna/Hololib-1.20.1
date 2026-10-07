@@ -2,6 +2,7 @@ package com.amynna.hololib.client.render.holo;
 
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.client.render.HoloRenderers;
+import com.amynna.hololib.client.render.edit.HoloGizmoRenderer;
 import com.amynna.hololib.holo.widget.HoloTextMetrics;
 import com.amynna.hololib.holo.window.HoloWindow;
 import net.minecraft.client.Minecraft;
@@ -11,7 +12,7 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 
 /**
- * Enregistre les quatre ponts holographiques et les renderers d'objets par defaut, et branche
+ * Enregistre les quatre ponts holographiques, les gizmos d'edition et les renderers d'objets par defaut, et branche
  * {@link HoloTextMetrics} sur la police du jeu, au setup client.
  */
 @Mod.EventBusSubscriber(modid = HoloLib.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
@@ -27,6 +28,7 @@ public final class HoloBridges
             HoloRenderers.register(new HoloWorldBridge());
             HoloRenderers.register(new HoloViewBridge());
             HoloRenderers.register(new HoloHudBridge());
+            HoloRenderers.register(new HoloGizmoRenderer());
             HoloObjectRenderers.register(HoloWindow.class, new HoloWindowRenderer());
             HoloTextMetrics.install(new HoloTextMetrics.Backend()
             {

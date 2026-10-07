@@ -14,8 +14,8 @@ import java.util.List;
 /**
  * Pont monde : objets ancres {@code World} (depuis l'origine de leur hote), et ancres {@code Local} vus dans le monde
  * (objet d'un autre joueur, ou vue a la troisieme personne), places sur leur sphere autour de l'oeil du joueur de
- * reference. Position et orientation sont calculees par {@link ResolvedHolo} ; l'echelle du transform est appliquee
- * ici.
+ * reference. Position et orientation (celles de l'overlay, face a la camera) sont calculees par
+ * {@link ResolvedHolo} ; l'echelle du transform (ou de l'overlay) est appliquee ici.
  */
 final class HoloWorldBridge extends WorldRenderer<ResolvedHolo>
 {
@@ -43,9 +43,14 @@ final class HoloWorldBridge extends WorldRenderer<ResolvedHolo>
     protected void render(ResolvedHolo object, PoseStack pose, MultiBufferSource buffers, int packedLight,
                           WorldRenderContext ctx)
     {
-        HoloTransform transform = object.object.transform();
         pose.mulPose(object.orientation());
-        pose.scale(transform.scaleX(), transform.scaleY(), transform.scaleZ());
+        if (object.attachment == null) {
+            HoloTransform transform = object.object.transform();
+            pose.scale(transform.scaleX(), transform.scaleY(), transform.scaleZ());
+        } else {
+            float scale = object.overlayScale();
+            pose.scale(scale, scale, scale);
+        }
         draw.set(ctx.partialTick(), HoloAnchor.Family.WORLD, object.ownerView);
         HoloObjectRenderers.render(object.object, pose, buffers, packedLight, draw);
     }

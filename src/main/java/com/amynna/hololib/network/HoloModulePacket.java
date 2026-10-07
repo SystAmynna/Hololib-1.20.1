@@ -33,7 +33,7 @@ public record HoloModulePacket(HoloScope scope, boolean forOwner, Op op, ModuleD
     public static HoloModulePacket remove(HoloScope scope, HoloModule module)
     {
         return new HoloModulePacket(scope, false, Op.REMOVE,
-                new ModuleData(module.type().id(), module.instanceId(), new byte[0], List.of()));
+                new ModuleData(module.type().id(), module.instanceId(), null, new byte[0], List.of()));
     }
 
     void encode(FriendlyByteBuf buf)

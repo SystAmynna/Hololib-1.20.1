@@ -33,15 +33,24 @@ com.amynna.hololib
 │   ├── memory/                  HoloMemory, HoloScope, HoloContainer(s) ; player/ dimension/ position/
 │   ├── inspect/                 HoloInspection (qui voit qui), HoloInspections (serveur), HoloInspectEvent
 │   ├── capture/                 HoloControl, HoloKeys, HoloCaptor, HoloCapture, HoloCaptures (capture, commune)
-│   └── interact/                HoloInteractible, HoloInteraction (interaction au regard, partie commune)
-├── network/                     HoloNetwork + paquets (snapshot, module, objet, origine, oubli ; deplacement, action)
+│   ├── interact/                HoloInteractible, HoloInteraction (interaction au regard, partie commune)
+│   ├── edit/                    interfaces d'edition (HoloEditable + outils), HoloDisplay, HoloRelativeToOpen,
+│   │                            HoloEditRules (droits, validation), HoloEditMath (rotations, Local relatif <-> follow)
+│   └── mode/                    HoloMode (FOCUS, EDITOR), HoloModeModule (module qui porte un mode)
+├── network/                     HoloNetwork + paquets (snapshot, module, objet, origine, oubli ; deplacement, action,
+│                                edition)
 ├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
 ├── modules/                     modules du mod (HoloLibModules = registre) : un sous-package par compatibilite
-│   └── dimension/planet1/       (dimension, monde, camera), un package par module (module + objets, code commun)
+│   ├── dimension/planet1/       (dimension, monde, camera), un package par module (module + objets, code commun)
+│   └── camera/focus|editor/     modules joueur : mode focus (H) ; editeurs (G) own/world/dimension/other + panneau
 └── client/
-    ├── holo/                    ClientHoloWorld (miroirs des modules par portee), handlers des paquets
+    ├── holo/                    ClientHoloWorld (miroirs des modules par portee), handlers des paquets, HoloModes
     ├── capture/                 HoloControlCapture : SEUL abonne aux inputs ; HoloKeyboardScreen (clavier entier)
     ├── interact/                HoloInteractions : picking + survol ; captor passif de la capture
+    ├── key/                     HoloKeyMappings (touches du mod, etat physique d'un controle)
+    ├── edit/                    HoloEditSession (session d'edition), HoloEditTools (outil actif, poignees, gizmos),
+    │                            boutons des objets edites (HoloEditTarget / Panel / EyeButton)
+    ├── modules/camera/          logique client des modules joueur : FocusController, EditorController
     └── render/                  TOUS les renderers du mod (regle d'architecture)
         ├── package-info.java    doc detaillee : ordre de rendu, regles (source de verite)
         ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
@@ -51,9 +60,11 @@ com.amynna.hololib
         ├── view/                ViewRenderer, ViewRenderContext, ViewRenderPass
         ├── hud/                 HudRenderer, HudRenderContext, HudRenderPass
         ├── demo/                DemoCubeRenderer (objets des demos)
+        ├── edit/                HoloGizmoRenderer (segments / cercles des objets World edites)
         ├── modules/             renderers des modules, meme arborescence que modules/ (ModuleRenderers au setup)
         ├── holo/                ponts objets -> familles (HoloRouting, 4 bridges), HoloObjectRenderer(s), fenetres,
-        │                        HoloPicking (objet sous le reticule ; pas un renderer, partage les placements)
+        │                        HoloPicking (objet sous le reticule ; pas un renderer, partage les placements),
+        │                        HoloAttachment (overlays clients a cote d'un hote), HoloHudPreview (HUD en miniature)
         └── type/HoloRenderTypes RenderTypes du mod (POSITION_COLOR_LIGHTMAP, opaque / translucide)
 ```
 
@@ -101,7 +112,7 @@ com.amynna.hololib
 - Droit d'usage : `HoloObject.access()` (`HoloAccess` : `OWNER` par defaut, liste de joueurs, `EVERYONE` ; le
   proprietaire toujours ; sans proprietaire `OWNER` = personne), synchronise et sauvegarde par le framework. Callbacks
   locaux ; effet sur le jeu via `sendAction(source, ...)`, verifie par le serveur (acces, `PUBLIC` pour un
-  non-proprietaire, et `viewers` pour la memoire d'un autre joueur). Protocole reseau `"3"`.
+  non-proprietaire, et `viewers` pour la memoire d'un autre joueur). Protocole reseau `"6"`.
 
 ### Widgets interactifs (`holo/widget/control`)
 
@@ -112,10 +123,39 @@ com.amynna.hololib
   `interceptsKey` (pas de conflit de defauts).
 - Widgets prets a l'emploi, prefixes `HoloWidget` (`HoloWidgetButton`, `HoloWidgetMultiButton`, `HoloWidgetHoverZone`,
   `HoloWidgetScrollZone`, `HoloWidgetSwitch`, `HoloWidgetValueBar`, `HoloWidgetTextBox`, `HoloWidgetMouseBox`,
-  `HoloWidgetDraggable`, `HoloWidgetKeyBox`), non finaux. Les demos les utilisent ; ne plus ecrire de widget ad hoc
+  `HoloWidgetDraggable`, `HoloWidgetKeyBox`, `HoloWidgetList`), non finaux. Les demos les utilisent ; ne plus ecrire de widget ad hoc
   dans un module si un trait ou un widget existe.
 - Framework : `onDrag` (chaque frame, clic intercepte maintenu, regard projete par `HoloPicking.project`) et
   `hoverMargin()` (survol conserve sur le fond / hors fenetre dans la marge).
+
+### Edition en jeu (`holo/edit`, `client/edit`)
+
+- Un objet editable implemente `HoloEditable` (`ownRequired()` = true, `opRequired()` = false par defaut) via les
+  outils `HoloEditTranslation`, `HoloEditRotation`, `HoloEditScale`, `HoloEditVisibility` (bouton oeil, `HoloDisplay`
+  OFF / FOCUS / ON), `HoloEditFixOrDynamic` (memoire joueur, `Local` relatif <-> follow). Editable = vu + capacite
+  + regles : un module editeur (`HoloEditorModule`) par portee (`own_editor`, `world_editor`, `dimension_editor`) ;
+  `other_editor` (ops) leve `ownRequired` hors de sa memoire ; proprietaire = celui de la memoire de joueur, sinon le
+  createur du module (`HoloModule.creator()`, joueur qui l'a installe, sauve et synchronise) ; `HoloEditorUi` =
+  interface de l'editeur, toujours editable par son proprietaire. L'edition ignore `HoloAccess` (l'objet de l'outil
+  actif reste visable : `HoloPicking.candidate`, `HoloInteractions.valid`). Objet `World` : portee d'edition
+  (`HoloObject.editRange()`, 1 a 16 blocs, defaut 8, synchronisee, ligne "Portee" du panneau). Le serveur reverifie (`HoloContainers.handleEdit`, `HoloEditRules.accepts` : seules les composantes permises
+  changent). RESET = `HoloObject.defaultTransform()` (transform du constructeur).
+- `HoloDisplay` est synchronise et sauvegarde comme la visibilite ; `HoloRouting` filtre : `FOCUS` si le proprietaire
+  de la memoire (le joueur local pour une memoire sans proprietaire) est en focus, `OFF` jamais, sauf en session
+  d'edition pour un objet editable. `HoloModule.sharedWithObservers()` envoie un module sans objet public (focus).
+- Session (`HoloEditSession`, ouverte par l'editor) : boutons a droite de chaque objet editable (overlays
+  `HoloAttachment`, `pixelScale = 1` ; placement propre, independant de la rotation / echelle de l'hote, calcule a
+  la creation de l'overlay puis **fige** (seule la translation de l'hote est suivie) : face au point de vue, sans
+  roulis, hors de la silhouette de l'hote, rectangle si `HoloObject.flat()`, sinon sphere englobante ; point de vue
+  dans l'hote, ou ciel : a 2 blocs), un seul outil actif. Outils selon l'ancrage :
+  `Local` / `Sky` = l'objet entier est la poignee (regard / souris capturee / molette), `World` = gizmos, `Hud` = cadre
+  de la fenetre de l'editor. Les `Local` follow (et `HoloRelativeToOpen`) sont **tenus** : affiches fixes dans le
+  repere de reference (regard a l'ouverture, `HoloEditMath.rebaseLocal`), reconvertis et envoyes a la fermeture ;
+  seuls les groupes modifies changent. Le reste est envoye en fin de manipulation (`HoloEditObjectPacket`) ; le
+  placement recu d'un objet tenu ou manipule est ignore (`ClientHoloContainer.apply`).
+- Modules `hololib:focus` (etat synchronise, sorties lues sur les touches physiques : saut, sprint, marche > 20 ticks
+  sans sneak, double sneak < 10 ticks) et editeurs (G, au moins un equipe ; `editor_panel` les liste et les
+  desactive, a partir de deux) : focus et edition jamais ouverts ensemble.
 
 ### Capture de controles (independante de l'interaction)
 

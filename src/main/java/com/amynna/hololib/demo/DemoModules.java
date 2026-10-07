@@ -17,6 +17,8 @@ public final class DemoModules
             "demo_dimension", () -> new HoloModuleType<>(HoloModuleTarget.DIMENSION, DemoDimensionModule::new));
     public static final RegistryObject<HoloModuleType<DemoWorldPosModule>> DEMO_WORLD_POS = REGISTER.register(
             "demo_world_pos", () -> new HoloModuleType<>(HoloModuleTarget.POSITION, DemoWorldPosModule::new));
+    public static final RegistryObject<HoloModuleType<DemoEditableCubeModule>> DEMO_EDITABLE_CUBE = REGISTER.register(
+            "demo_editable_cube", () -> new HoloModuleType<>(HoloModuleTarget.POSITION, DemoEditableCubeModule::new));
     public static final RegistryObject<HoloModuleType<DemoPlayerModule>> DEMO_PLAYER = REGISTER.register(
             "demo_player", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, DemoPlayerModule::new));
     public static final RegistryObject<HoloModuleType<DemoInteractionModule>> DEMO_INTERACTION = REGISTER.register(

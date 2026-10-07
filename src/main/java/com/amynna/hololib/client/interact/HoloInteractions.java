@@ -2,6 +2,7 @@ package com.amynna.hololib.client.interact;
 
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.client.capture.HoloControlCapture;
+import com.amynna.hololib.client.edit.HoloEditTools;
 import com.amynna.hololib.client.render.holo.HoloPicking;
 import com.amynna.hololib.client.render.holo.HoloRouting;
 import com.amynna.hololib.holo.capture.HoloCapture;
@@ -230,8 +231,11 @@ public final class HoloInteractions
     private static boolean valid(HoloObject object, Player player)
     {
         HoloModule module = object.module();
-        return player != null && module != null && module.object(object.key()) == object
-                && HoloRouting.isRouted(object) && object.access().allows(player.getUUID(), module.owner());
+        // Overlay client (sans module) : valide tant qu'il est route, donc que son hote l'est.
+        if (module == null) return player != null && HoloRouting.isRouted(object);
+        // L'objet de l'outil d'edition actif reste valide sans droit d'usage (gizmos, poignee).
+        return player != null && module.object(object.key()) == object && HoloRouting.isRouted(object)
+                && (object.access().allows(player.getUUID(), module.owner()) || HoloEditTools.editing(object));
     }
 
     private static void deliverRelease(HoloControl control, Pressed pressed)

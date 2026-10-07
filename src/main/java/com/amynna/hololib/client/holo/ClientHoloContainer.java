@@ -1,6 +1,7 @@
 package com.amynna.hololib.client.holo;
 
 import com.amynna.hololib.HoloLib;
+import com.amynna.hololib.client.edit.HoloEditSession;
 import com.amynna.hololib.holo.memory.HoloScope;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.module.HoloModuleHost;
@@ -53,6 +54,7 @@ public final class ClientHoloContainer
             return;
         }
         HoloModule module = type.create(data.instanceId(), new HoloModuleHost(scope, LogicalSide.CLIENT, ownerView));
+        module.creator(data.creator());
         readState(module, data);
         module.onLoad();
         for (ObjectData object : data.objects()) apply(module, object);
@@ -104,9 +106,19 @@ public final class ClientHoloContainer
         }
     }
 
+    /**
+     * Un objet en cours d'edition locale garde son placement et sa portee : seuls visibilite, affichage et acces sont
+     * appliques.
+     */
     private static void apply(HoloModule module, ObjectData data)
     {
         HoloObject object = module.object(data.key());
-        if (object != null) object.restore(data.visibility(), data.access(), data.anchor(), data.transform());
+        if (object == null) return;
+        if (HoloEditSession.holds(object)) {
+            object.restore(data.visibility(), data.display(), data.access(), null, null, null, Float.NaN);
+        } else {
+            object.restore(data.visibility(), data.display(), data.access(), data.anchor(), data.transform(),
+                    data.openOffset(), data.editRange());
+        }
     }
 }

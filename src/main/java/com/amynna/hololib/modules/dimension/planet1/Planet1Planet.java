@@ -1,5 +1,9 @@
 package com.amynna.hololib.modules.dimension.planet1;
 
+import com.amynna.hololib.holo.edit.HoloEditRotation;
+import com.amynna.hololib.holo.edit.HoloEditScale;
+import com.amynna.hololib.holo.edit.HoloEditTranslation;
+import com.amynna.hololib.holo.edit.HoloEditVisibility;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloTransform;
@@ -8,8 +12,10 @@ import net.minecraft.util.Mth;
 /**
  * Geante gazeuse cubique centree sur son origine locale. Elle tourne lentement sur son axe {@code Y} local et ses
  * bandes nuageuses ondulent ; les deux sont animes dans {@link #tick()} (cote client) et interpoles au dessin.
+ * Editable en jeu (Dimension Editor) par le createur du module, ou avec l'Other Editor.
  */
-public final class Planet1Planet extends HoloObject
+public final class Planet1Planet extends HoloObject implements HoloEditTranslation, HoloEditRotation, HoloEditScale,
+        HoloEditVisibility
 {
     /** Rotation propre, en degres par tick (un tour en ~6 minutes). */
     private static final float SPIN_SPEED = 0.05f;

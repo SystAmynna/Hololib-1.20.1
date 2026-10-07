@@ -1,6 +1,7 @@
 package com.amynna.hololib.holo.module;
 
 import com.amynna.hololib.HoloLib;
+import com.amynna.hololib.holo.edit.HoloDisplay;
 import com.amynna.hololib.holo.memory.HoloScope;
 import com.amynna.hololib.holo.object.HoloAccess;
 import com.amynna.hololib.holo.object.HoloAnchor;
@@ -42,6 +43,7 @@ public abstract class HoloModule
     private HoloModuleType<?> type;
     private UUID instanceId;
     private HoloModuleHost host;
+    private UUID creator;
     private final Map<String, HoloObject> objects = new LinkedHashMap<>();
     private final Collection<HoloObject> objectsView = Collections.unmodifiableCollection(objects.values());
     private boolean stateDirty;
@@ -59,6 +61,18 @@ public abstract class HoloModule
 
     /** Joueur proprietaire, ou {@code null} pour un module de dimension ou de position. */
     public final UUID owner() { return host.scope().owner(); }
+
+    /**
+     * Joueur qui a installe le module ({@code /hololib_module add}), ou {@code null} (console, installation
+     * anterieure). Sauvegarde et synchronise.
+     */
+    public final UUID creator() { return creator; }
+
+    /**
+     * Proprietaire au sens de l'edition ({@code HoloEditable.ownRequired}) : le proprietaire de la memoire de joueur,
+     * sinon le createur du module. N'intervient ni dans l'acces ni dans la visibilite.
+     */
+    public final UUID editOwner() { return owner() != null ? owner() : creator; }
 
     // ---------------------------------------------------------------- objets
 
@@ -156,6 +170,12 @@ public abstract class HoloModule
     public void onSync() {}
 
     /**
+     * Vrai : le module est envoye aux observateurs meme sans objet {@code PUBLIC} (son etat public les concerne, ex.
+     * le mode focus d'un joueur). Faux par defaut.
+     */
+    public boolean sharedWithObservers() { return false; }
+
+    /**
      * Cote serveur : action envoyee par un client autorise (proprietaire ; pour une dimension ou une position, un
      * joueur qui la recoit). A valider, le client n'est pas fiable.
      */
@@ -183,6 +203,10 @@ public abstract class HoloModule
         this.host = host;
     }
 
+    /** Usage interne : createur, pose a l'installation, au chargement ou a la reception. */
+    @ApiStatus.Internal
+    public final void creator(UUID creator) { this.creator = creator; }
+
     @ApiStatus.Internal
     public final boolean stateDirty() { return stateDirty; }
 
@@ -193,7 +217,10 @@ public abstract class HoloModule
         for (HoloObject object : objects.values()) object.clearSyncDirty();
     }
 
-    /** Usage interne : etat complet sauvegarde (etat du module + ancrage, transform, visibilite, acces des objets). */
+    /**
+     * Usage interne : etat complet sauvegarde (etat du module + ancrage, transform, visibilite, affichage, acces et
+     * position relative des objets).
+     */
     @ApiStatus.Internal
     public final CompoundTag saveAll()
     {
@@ -205,12 +232,16 @@ public abstract class HoloModule
             objectTag.put("anchor", object.anchor().save());
             objectTag.put("transform", object.transform().save());
             objectTag.putString("visibility", object.visibility().name());
+            objectTag.putString("display", object.display().name());
+            objectTag.putFloat("editRange", object.editRange());
             objectTag.put("access", object.access().save());
+            if (object.openOffset() != null) objectTag.put("openOffset", object.openOffset().save());
             objectTags.put(object.key(), objectTag);
         }
         CompoundTag tag = new CompoundTag();
         tag.put("state", state);
         tag.put("objects", objectTags);
+        if (creator != null) tag.putUUID("creator", creator);
         return tag;
     }
 
@@ -218,6 +249,7 @@ public abstract class HoloModule
     @ApiStatus.Internal
     public final void loadAll(CompoundTag tag)
     {
+        creator = tag.hasUUID("creator") ? tag.getUUID("creator") : null;
         load(tag.getCompound("state"));
         onLoad();
         CompoundTag objectTags = tag.getCompound("objects");
@@ -231,9 +263,20 @@ public abstract class HoloModule
             } catch (IllegalArgumentException e) {
                 HoloLib.LOGGER.warn("Visibilite invalide pour l'objet {} du module {}", object.key(), type);
             }
+            HoloDisplay display = null;
+            if (objectTag.contains("display", Tag.TAG_STRING)) {
+                try {
+                    display = HoloDisplay.valueOf(objectTag.getString("display"));
+                } catch (IllegalArgumentException e) {
+                    HoloLib.LOGGER.warn("Affichage invalide pour l'objet {} du module {}", object.key(), type);
+                }
+            }
             HoloAccess access = objectTag.contains("access", Tag.TAG_COMPOUND)
                     ? HoloAccess.load(objectTag.getCompound("access")) : null;
-            object.restore(visibility, access, anchor, HoloTransform.load(objectTag.getCompound("transform")));
+            object.restore(visibility, display, access, anchor,
+                    HoloTransform.load(objectTag.getCompound("transform")),
+                    HoloTransform.load(objectTag.getCompound("openOffset")),
+                    objectTag.contains("editRange", Tag.TAG_FLOAT) ? objectTag.getFloat("editRange") : Float.NaN);
         }
     }
 

@@ -43,10 +43,10 @@ import java.util.UUID;
  */
 public final class DemoKeyboardModule extends HoloModule
 {
-    private static final float DISTANCE = 1.6f;
+    private static final float DISTANCE = 0.8f;
     /** Ecart angulaire des fenetres de part et d'autre du regard, en degres. */
-    private static final float PAD_YAW = -24f;
-    private static final float EDITOR_YAW = 22f;
+    private static final float PAD_YAW = -36f;
+    private static final float EDITOR_YAW = 40f;
     private static final int BACKGROUND = 0x8010304A;
     private static final int PAD_ACCENT = 0xFF80FF80;
     private static final int EDITOR_ACCENT = 0xFFFFE060;

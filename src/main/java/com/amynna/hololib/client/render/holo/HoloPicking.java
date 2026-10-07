@@ -1,9 +1,11 @@
 package com.amynna.hololib.client.render.holo;
 
+import com.amynna.hololib.client.edit.HoloEditTools;
 import com.amynna.hololib.holo.interact.HoloInteractible;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloTransform;
+import com.amynna.hololib.holo.window.HoloWindow;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -12,6 +14,7 @@ import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
+import org.joml.Vector3d;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
@@ -32,6 +35,10 @@ import java.util.UUID;
  * <p>
  * Rayon : en premiere personne, depuis l'oeil selon le regard interpole (la passe vue n'a pas de bobbing) ; en F5,
  * depuis la camera de la frame precedente. Aucune allocation sans candidat du monde.
+ * <p>
+ * Session d'edition : l'objet qui porte l'outil actif est vise comme un tout (rectangle d'une fenetre, sinon sphere
+ * englobante) et renvoie la poignee de l'outil ; les gizmos d'un objet du monde passent avant les objets du monde.
+ * Un overlay ({@link HoloAttachment}) a son propre placement a cote de son hote, comme dans les ponts.
  */
 public final class HoloPicking
 {
@@ -78,6 +85,7 @@ public final class HoloPicking
     private static final Matrix4f INVERSE = new Matrix4f();
     private static final Quaternionf ORIENTATION = new Quaternionf();
     private static final Quaternionf TMP = new Quaternionf();
+    private static final Quaternionf OVERLAY_ORIENTATION = new Quaternionf();
     private static final Vector3f OFFSET = new Vector3f();
     private static final Vector3f LOCAL_ORIGIN = new Vector3f();
     private static final Vector3f LOCAL_DIR = new Vector3f();
@@ -98,6 +106,7 @@ public final class HoloPicking
     public static Hit pick(Minecraft mc, float partialTick)
     {
         LocalPlayer player = mc.player;
+        HoloEditTools.clearHover();
         if (player == null || mc.level == null) return null;
         UUID local = player.getUUID();
         boolean firstPerson = mc.options.getCameraType().isFirstPerson();
@@ -144,6 +153,43 @@ public final class HoloPicking
         return true;
     }
 
+    /**
+     * Rayon du regard (comme {@link #pick}) : {@code origin} dans le monde, {@code direction} unitaire. Faux sans
+     * joueur.
+     */
+    public static boolean ray(Minecraft mc, float partialTick, Vector3d origin, Vector3f direction)
+    {
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) return false;
+        sceneRay(mc, player, partialTick);
+        origin.set(eyeX + ox, eyeY + oy, eyeZ + oz);
+        direction.set(dx, dy, dz);
+        return true;
+    }
+
+    /**
+     * Objet le plus en avant de {@link HoloRouting#hudPreview()} sous le point {@code (x, y)} (pixels GUI d'un ecran
+     * {@code width} x {@code height}), dans ses bornes ({@code halfWidth}, {@code halfHeight}) ; {@code null} sinon.
+     */
+    public static HoloObject hudPreviewAt(float x, float y, float width, float height)
+    {
+        List<ResolvedHolo> objects = HoloRouting.hudPreview();
+        guiWidth = width;
+        guiHeight = height;
+        ox = x;
+        oy = y;
+        oz = 10000f;
+        dx = 0f;
+        dy = 0f;
+        dz = -1f;
+        for (int i = objects.size() - 1; i >= 0; i--) {
+            HoloObject object = objects.get(i).object;
+            if (!hudMatrix(objects.get(i)) || !intersect()) continue;
+            if (Math.abs(hitX) <= object.halfWidth() && Math.abs(hitY) <= object.halfHeight()) return object;
+        }
+        return null;
+    }
+
     /** Resultat de {@link #project}, repere local de l'objet. */
     public static float projectedX() { return projectedX; }
 
@@ -188,6 +234,19 @@ public final class HoloPicking
     private static boolean pickWorld(Minecraft mc, UUID local, float partialTick)
     {
         List<ResolvedHolo> objects = HoloRouting.world();
+        // Gizmo de l'outil actif : prioritaire sur les objets du monde, non cache par les blocs.
+        float gizmo = HoloEditTools.pickGizmo(eyeX + ox, eyeY + oy, eyeZ + oz, dx, dy, dz, (float) WORLD_REACH);
+        if (gizmo >= 0f) {
+            HIT.object = HoloEditTools.gizmoHost();
+            HIT.target = HoloEditTools.gizmoHandle();
+            HIT.family = HoloAnchor.Family.WORLD;
+            HIT.localX = 0f;
+            HIT.localY = 0f;
+            HIT.distance = gizmo;
+            HIT.objectYaw = mc.player.getViewYRot(partialTick);
+            HIT.objectPitch = mc.player.getViewXRot(partialTick);
+            return true;
+        }
         boolean found = false;
         float best = (float) WORLD_REACH;
         for (int i = 0; i < objects.size(); i++) {
@@ -280,16 +339,17 @@ public final class HoloPicking
 
     private static boolean viewMatrix(ResolvedHolo resolved, LocalPlayer player, float partialTick)
     {
-        if (!(resolved.object.anchor() instanceof HoloAnchor.Local anchor)) return false;
-        HoloTransform transform = resolved.object.transform();
-        if (anchor.follow()) {
-            HoloPlacement.yawPitch(ORIENTATION, player.getViewYRot(partialTick), player.getViewXRot(partialTick));
+        HoloObject placed = resolved.placed();
+        if (!(placed.anchor() instanceof HoloAnchor.Local anchor)) return false;
+        HoloTransform transform = placed.transform();
+        HoloPlacement.local(ORIENTATION, OFFSET, TMP, anchor, transform, player.getViewYRot(partialTick),
+                player.getViewXRot(partialTick));
+        if (resolved.attachment != null) {
+            overlayMatrix(resolved, Float.MAX_VALUE);
         } else {
-            ORIENTATION.identity();
+            MATRIX.translation(OFFSET).rotate(ORIENTATION)
+                    .scale(transform.scaleX(), transform.scaleY(), transform.scaleZ());
         }
-        HoloPlacement.onSphere(ORIENTATION, OFFSET, TMP, transform);
-        MATRIX.translation(OFFSET).rotate(ORIENTATION)
-                .scale(transform.scaleX(), transform.scaleY(), transform.scaleZ());
         return true;
     }
 
@@ -297,30 +357,51 @@ public final class HoloPicking
     {
         Vec3 position = resolved.position(partialTick);
         if (!resolved.available()) return false;
-        HoloTransform transform = resolved.object.transform();
         MATRIX.translation((float) (position.x - eyeX), (float) (position.y - eyeY), (float) (position.z - eyeZ))
-                .rotate(resolved.orientation())
-                .scale(transform.scaleX(), transform.scaleY(), transform.scaleZ());
+                .rotate(resolved.orientation());
+        if (resolved.attachment != null) {
+            MATRIX.scale(resolved.overlayScale());
+        } else {
+            HoloTransform transform = resolved.object.transform();
+            MATRIX.scale(transform.scaleX(), transform.scaleY(), transform.scaleZ());
+        }
         return true;
     }
 
     private static boolean skyMatrix(ResolvedHolo resolved, Minecraft mc, float partialTick)
     {
-        if (!(resolved.object.anchor() instanceof HoloAnchor.Sky sky)) return false;
-        HoloTransform transform = resolved.object.transform();
-        MATRIX.identity();
-        if (sky.celestial()) {
-            // Comme SkyRenderContext.applyCelestialRotation.
-            MATRIX.rotateY(-90f * Mth.DEG_TO_RAD).rotateX(mc.level.getTimeOfDay(partialTick) * 360f * Mth.DEG_TO_RAD);
+        HoloObject placed = resolved.placed();
+        if (!(placed.anchor() instanceof HoloAnchor.Sky sky)) return false;
+        HoloTransform transform = placed.transform();
+        HoloPlacement.sky(ORIENTATION, OFFSET, TMP, sky, transform, mc.level.getTimeOfDay(partialTick));
+        if (resolved.attachment != null) {
+            overlayMatrix(resolved, HoloAttachment.NEAR_DISTANCE);
+        } else {
+            MATRIX.translation(OFFSET).rotate(ORIENTATION)
+                    .scale(transform.scaleX(), transform.scaleY(), transform.scaleZ());
         }
-        MATRIX.translate(transform.x(), transform.y(), transform.z());
-        applyLocal(transform);
         return true;
     }
 
-    /** Objet dessinable par le joueur local et qu'il a le droit d'utiliser. */
+    /**
+     * Repere d'un overlay ({@link HoloAttachment#place}), son hote etant en {@link #OFFSET} / {@link #ORIENTATION}
+     * (relatifs a l'oeil, axes du monde).
+     */
+    private static void overlayMatrix(ResolvedHolo resolved, float maxDistance)
+    {
+        Vector3f up = Minecraft.getInstance().gameRenderer.getMainCamera().getUpVector();
+        float scale = resolved.attachment.place(OFFSET, ORIENTATION, up, CENTER, OVERLAY_ORIENTATION, maxDistance);
+        MATRIX.identity();
+        HoloPlacement.overlay(MATRIX, CENTER, OVERLAY_ORIENTATION, scale);
+    }
+
+    /**
+     * Objet dessinable par le joueur local et qu'il a le droit d'utiliser, ou portant l'outil d'edition actif
+     * (l'edition ne depend pas du droit d'usage : seule la poignee de l'outil est alors visee, voir {@link #accept}).
+     */
     private static boolean candidate(ResolvedHolo resolved, UUID local)
     {
+        if (resolved.attachment == null && HoloEditTools.handleFor(resolved.object) != null) return true;
         return resolved.object.access().allows(local, resolved.container.scope().owner());
     }
 
@@ -338,9 +419,16 @@ public final class HoloPicking
     /** Intersecte {@link #MATRIX} avec le rayon ; remplit {@link #HIT} si l'objet vise est plus proche que max. */
     private static boolean accept(ResolvedHolo resolved, HoloAnchor.Family family, float max)
     {
-        if (!intersect() || hitT >= max) return false;
-        HoloInteractible target = resolved.object.interactibleAt(hitX, hitY);
-        if (target == null) return false;
+        HoloInteractible handle = resolved.attachment == null ? HoloEditTools.handleFor(resolved.object) : null;
+        HoloInteractible target;
+        if (handle != null) {
+            if (!hitWhole(resolved.object) || hitT >= max) return false;
+            target = handle;
+        } else {
+            if (!intersect() || hitT >= max) return false;
+            target = resolved.object.interactibleAt(hitX, hitY);
+            if (target == null) return false;
+        }
         HIT.object = resolved.object;
         HIT.target = target;
         HIT.family = family;
@@ -353,6 +441,32 @@ public final class HoloPicking
             HIT.objectPitch = (float) Mth.atan2(-CENTER.y, Math.sqrt(CENTER.x * CENTER.x + CENTER.z * CENTER.z))
                     * Mth.RAD_TO_DEG;
         }
+        return true;
+    }
+
+    /**
+     * Objet vise comme un tout (poignee d'un outil d'edition) : rectangle d'une fenetre (vue de face), sinon sphere
+     * englobante centree sur l'origine de {@link #MATRIX}.
+     */
+    private static boolean hitWhole(HoloObject object)
+    {
+        if (object instanceof HoloWindow window) {
+            return intersect() && Math.abs(hitX) <= window.halfWidth() && Math.abs(hitY) <= window.halfHeight();
+        }
+        MATRIX.getTranslation(CENTER);
+        float radius = object.boundingRadius() * object.transform().maxScale();
+        float lx = CENTER.x - ox;
+        float ly = CENTER.y - oy;
+        float lz = CENTER.z - oz;
+        float along = lx * dx + ly * dy + lz * dz;
+        float d2 = lx * lx + ly * ly + lz * lz - along * along;
+        if (d2 > radius * radius) return false;
+        float half = (float) Math.sqrt(radius * radius - d2);
+        float t = along - half >= 0f ? along - half : along + half;
+        if (t < 0f) return false;
+        hitX = 0f;
+        hitY = 0f;
+        hitT = t;
         return true;
     }
 

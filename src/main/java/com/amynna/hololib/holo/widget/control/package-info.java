@@ -28,7 +28,8 @@
  * Classes non finales, heritables (couleurs, textes, {@code draw} et hooks proteges), prefixees {@code HoloWidget} :
  * {@code HoloWidgetButton}, {@code HoloWidgetMultiButton}, {@code HoloWidgetHoverZone}, {@code HoloWidgetScrollZone},
  * {@code HoloWidgetSwitch}, {@code HoloWidgetValueBar}, {@code HoloWidgetTextBox}, {@code HoloWidgetMouseBox},
- * {@code HoloWidgetDraggable}, {@code HoloWidgetKeyBox}. Leurs ecouteurs s'executent cote client : pour agir sur le
+ * {@code HoloWidgetDraggable}, {@code HoloWidgetKeyBox}, {@code HoloWidgetList} (liste encadree scrollable).
+ * Leurs ecouteurs s'executent cote client : pour agir sur le
  * jeu, envoyer une action au module ({@code HoloModule.sendAction(source, ...)}), que le serveur valide, puis reposer
  * l'etat synchronise ({@code setValue}, {@code setOn}, {@code setText}...).
  */

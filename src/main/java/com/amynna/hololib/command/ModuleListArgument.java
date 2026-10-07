@@ -20,6 +20,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -84,9 +85,11 @@ final class ModuleListArgument
                 ids.add(id);
             }
         }
+        // Le joueur qui installe devient proprietaire du module pour l'edition (la console : personne).
+        UUID creator = source.getPlayer() != null ? source.getPlayer().getUUID() : null;
         int done = 0;
         for (ResourceLocation id : ids) {
-            String error = add ? add(slot, id) : remove(slot, id);
+            String error = add ? add(slot, id, creator) : remove(slot, id);
             if (error != null) {
                 source.sendFailure(Component.literal(id + " : " + error));
             } else {
@@ -100,12 +103,12 @@ final class ModuleListArgument
     }
 
     /** @return message d'erreur, ou {@code null} si le module a ete ajoute */
-    private static String add(ModuleSlot slot, ResourceLocation id)
+    private static String add(ModuleSlot slot, ResourceLocation id, UUID creator)
     {
         HoloModuleType<?> type = HoloModuleTypes.get(id);
         if (type == null) return "module inconnu";
         if (type.target() != slot.target()) return "module de type " + type.target() + ", attendu " + slot.target();
-        return slot.add(type) ? null : "deja present";
+        return slot.add(type, creator) ? null : "deja present";
     }
 
     /** @return message d'erreur, ou {@code null} si le module a ete retire */

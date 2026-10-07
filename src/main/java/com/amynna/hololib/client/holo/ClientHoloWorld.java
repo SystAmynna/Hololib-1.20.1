@@ -42,6 +42,20 @@ public final class ClientHoloWorld
 
     static ClientHoloContainer existing(HoloScope scope) { return CONTAINERS.get(scope); }
 
+    /** Portee connue du client, ou {@code null}. */
+    public static ClientHoloContainer find(HoloScope scope) { return CONTAINERS.get(scope); }
+
+    /** Memoire du joueur local, ou {@code null} si elle n'est pas (encore) recue. */
+    public static ClientHoloContainer local()
+    {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return null;
+        for (ClientHoloContainer container : CONTAINERS.values()) {
+            if (mc.player.getUUID().equals(container.scope().owner())) return container;
+        }
+        return null;
+    }
+
     static void forget(HoloScope scope)
     {
         ClientHoloContainer container = CONTAINERS.remove(scope);
