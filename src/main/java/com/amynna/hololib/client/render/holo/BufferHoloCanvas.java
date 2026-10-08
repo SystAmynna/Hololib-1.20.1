@@ -101,6 +101,22 @@ final class BufferHoloCanvas implements HoloCanvas
     }
 
     @Override
+    public void quad(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3, int argb)
+    {
+        int a = argb >>> 24;
+        int r = argb >> 16 & 0xFF;
+        int g = argb >> 8 & 0xFF;
+        int b = argb & 0xFF;
+        Matrix4f m = pose.pose();
+        VertexConsumer vc = buffers.getBuffer(HoloRenderTypes.TRANSLUCENT_QUADS);
+        vc.vertex(m, ox + x0, oy + y0, z).color(r, g, b, a).uv2(light).endVertex();
+        vc.vertex(m, ox + x1, oy + y1, z).color(r, g, b, a).uv2(light).endVertex();
+        vc.vertex(m, ox + x2, oy + y2, z).color(r, g, b, a).uv2(light).endVertex();
+        vc.vertex(m, ox + x3, oy + y3, z).color(r, g, b, a).uv2(light).endVertex();
+        z += Z_STEP;
+    }
+
+    @Override
     public void text(Component text, float x, float y, int argb)
     {
         textMatrix.set(pose.pose()).translate(0f, 0f, z);

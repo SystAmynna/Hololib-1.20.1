@@ -117,6 +117,13 @@ public abstract class HoloObject
      */
     public boolean flat() { return false; }
 
+    /**
+     * Cote client : condition d'affichage locale, en plus de {@link #display()} (ex. fenetre ouverte par le joueur).
+     * Ni synchronisee ni sauvegardee ; vrai par defaut. Ignoree en session d'edition pour un objet editable (toujours
+     * dessine).
+     */
+    public boolean shown() { return true; }
+
     /** Appele chaque tick client (animations d'etat) ; jamais pendant le rendu. */
     public void tick() {}
 

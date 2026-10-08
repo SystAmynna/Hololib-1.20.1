@@ -4,6 +4,7 @@ import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.holo.module.HoloModuleTarget;
 import com.amynna.hololib.holo.module.HoloModuleType;
 import com.amynna.hololib.holo.module.HoloModuleTypes;
+import com.amynna.hololib.modules.camera.config.ConfigModule;
 import com.amynna.hololib.modules.camera.editor.DimensionEditorModule;
 import com.amynna.hololib.modules.camera.editor.EditorPanelModule;
 import com.amynna.hololib.modules.camera.editor.OtherEditorModule;
@@ -34,6 +35,8 @@ public final class HoloLibModules
             "other_editor", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, OtherEditorModule::new));
     public static final RegistryObject<HoloModuleType<EditorPanelModule>> EDITOR_PANEL = REGISTER.register(
             "editor_panel", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, EditorPanelModule::new));
+    public static final RegistryObject<HoloModuleType<ConfigModule>> CONFIG = REGISTER.register(
+            "config", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, ConfigModule::new));
 
     private HoloLibModules() {}
 }

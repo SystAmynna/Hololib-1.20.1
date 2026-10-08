@@ -31,6 +31,12 @@ public interface HoloCanvas
         fill(x + width - thickness, y + thickness, thickness, height - 2f * thickness, argb);
     }
 
+    /**
+     * Quadrilatere quelconque aux sommets donnes, dans l'ordre du contour (un triangle : deux sommets confondus).
+     * Pour les formes non rectangulaires (disque en eventail, piece tournee...), calculees par le widget.
+     */
+    void quad(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3, int argb);
+
     /** Texte sur une ligne, coin haut gauche en {@code (x, y)}. */
     void text(Component text, float x, float y, int argb);
 

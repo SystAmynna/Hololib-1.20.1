@@ -17,7 +17,9 @@
  *     {@link com.amynna.hololib.demo.DemoInteractionModule} ;</li>
  *     <li>{@code hololib:demo_keyboard} : un pave ou chaque joueur pilote son point avec les controles de deplacement
  *     captures (une {@code HoloWidgetKeyBox} multijoueur) et une zone de texte qui capture tout le clavier, chacun
- *     avec un interrupteur d'ouverture a tous, voir {@link com.amynna.hololib.demo.DemoKeyboardModule}.</li>
+ *     avec un interrupteur d'ouverture a tous, voir {@link com.amynna.hololib.demo.DemoKeyboardModule} ;</li>
+ *     <li>{@code hololib:demo_configurable} : une jauge au HUD reglee depuis sa fenetre de configuration, ouverte par
+ *     le module Config ({@code hololib:config}), voir {@link com.amynna.hololib.demo.DemoConfigurableModule}.</li>
  * </ul>
  * Les fenetres ({@link com.amynna.hololib.demo.DemoEditableWindow}) et les cubes implementent toutes les interfaces
  * d'edition. A installer avec {@code /hololib_module}.

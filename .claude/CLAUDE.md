@@ -42,7 +42,8 @@ com.amynna.hololib
 ├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
 ├── modules/                     modules du mod (HoloLibModules = registre) : un sous-package par compatibilite
 │   ├── dimension/planet1/       (dimension, monde, camera), un package par module (module + objets, code commun)
-│   └── camera/focus|editor/     modules joueur : mode focus (H) ; editeurs (G) own/world/dimension/other + panneau
+│   └── camera/focus|editor|config/ modules joueur : mode focus (H) ; editeurs (G) own/world/dimension/other +
+│                                panneau ; config (ecrou du focus -> liste des modules Configurable)
 └── client/
     ├── holo/                    ClientHoloWorld (miroirs des modules par portee), handlers des paquets, HoloModes
     ├── capture/                 HoloControlCapture : SEUL abonne aux inputs ; HoloKeyboardScreen (clavier entier)
@@ -50,7 +51,8 @@ com.amynna.hololib
     ├── key/                     HoloKeyMappings (touches du mod, etat physique d'un controle)
     ├── edit/                    HoloEditSession (session d'edition), HoloEditTools (outil actif, poignees, gizmos),
     │                            boutons des objets edites (HoloEditTarget / Panel / EyeButton)
-    ├── modules/camera/          logique client des modules joueur : FocusController, EditorController
+    ├── modules/camera/          logique client des modules joueur : FocusController, EditorController,
+    │                            ConfigController
     └── render/                  TOUS les renderers du mod (regle d'architecture)
         ├── package-info.java    doc detaillee : ordre de rendu, regles (source de verite)
         ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
@@ -84,6 +86,8 @@ com.amynna.hololib
   origine du monde pour une dimension) ; `Local` : `x`/`y` = yaw/pitch sur la sphere, `z` = distance, puis rotation et
   echelle ; `Hud` : `x`/`y` pixels GUI depuis le point d'alignement, `z` = ordre de dessin. Bornes des demandes
   clients : `HoloAnchor.acceptable(transform)`.
+- `HoloObject.shown()` : condition d'affichage **locale** au client (non synchronisee, vrai par defaut, ex. fenetre
+  ouverte), en plus de `HoloDisplay` ; ignoree quand la session d'edition revele l'objet.
 - On replique l'**etat des modules**, jamais les widgets : chaque client recree le module depuis son type, `onLoad`
   reconstruit les objets (meme code, memes cles des deux cotes). Ancrage, transform et visibilite sont synchronises
   par le framework ; seuls les modules ayant un objet `PUBLIC` sont envoyes aux observateurs.
@@ -160,6 +164,18 @@ com.amynna.hololib
 - Modules `hololib:focus` (etat synchronise, sorties lues sur les touches physiques : saut, sprint, marche > 20 ticks
   sans sneak, double sneak < 10 ticks) et editeurs (G, au moins un equipe ; `editor_panel` les liste et les
   desactive, a partir de deux) : focus et edition jamais ouverts ensemble.
+
+### Configuration en jeu (`modules/camera/config`)
+
+- Module `hololib:config` (joueur) : bouton ecrou (`ConfigNutWindow`, `HoloRelativeToOpen`, affichage `FOCUS` non
+  modifiable ; clic = rotation de l'ecrou + ouvre / ferme la liste) et liste (`ConfigListWindow`) des modules de la
+  memoire du joueur qui implementent **`Configurable`** (`configName()`, `configWindow()`). Implementer l'interface
+  est la declaration : la liste les decouvre chaque tick (`ConfigController`).
+- **Regle** : un module configurable detient sa `ConfigWindow` (objet du module cree dans `onLoad`, widgets dans
+  `content()`) ; Config l'ouvre devant le regard au clic (`open()`, position relative = `openOffset`, editable dans
+  l'editor), la ferme (croix) et l'epingle (epingle : etat sauvegarde du module Config, par id de type). Ouverture
+  locale au client (`shown()`) ; a l'ouverture du focus, les fenetres epinglees se rouvrent, les autres sont fermees.
+- Icones dessinees en quadrilateres (`HoloCanvas.quad`), sans texture.
 
 ### Capture de controles (independante de l'interaction)
 

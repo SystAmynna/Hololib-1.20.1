@@ -104,14 +104,21 @@ public final class FocusController
     {
         ClientHoloContainer container = ClientHoloWorld.local();
         if (container == null) return;
-        HoloEditMath.yawPitch(GAZE, player.getYRot(), player.getXRot());
         for (HoloModule module : container.modules()) {
-            for (HoloObject object : module.objects()) {
-                if (object.openOffset() == null || !object.replicated()) continue;
-                MATH.rebaseLocal(object.openOffset(), GAZE, IDENTITY, object.transform());
-                object.requestAnchor(FIXED);
-            }
+            for (HoloObject object : module.objects()) placeRelative(object, player.getYRot(), player.getXRot());
         }
+    }
+
+    /**
+     * Place un objet {@code HoloRelativeToOpen} de la memoire du joueur local devant le regard {@code (yRot, xRot)},
+     * d'apres sa position relative, en {@code Local} fixe, et le demande au serveur. Sans effet pour un autre objet.
+     */
+    public static void placeRelative(HoloObject object, float yRot, float xRot)
+    {
+        if (object.openOffset() == null || !object.replicated()) return;
+        HoloEditMath.yawPitch(GAZE, yRot, xRot);
+        MATH.rebaseLocal(object.openOffset(), GAZE, IDENTITY, object.transform());
+        object.requestAnchor(FIXED);
     }
 
     private static void watchExits(Minecraft mc, FocusModule module)

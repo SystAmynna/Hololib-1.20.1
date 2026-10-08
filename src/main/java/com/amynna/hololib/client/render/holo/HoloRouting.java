@@ -33,7 +33,8 @@ import java.util.UUID;
  * Un objet n'est dessine qu'une fois son etat recu du serveur, et seulement s'il est {@code PUBLIC} quand le joueur
  * local n'en est pas proprietaire. Son affichage ({@code HoloDisplay}) filtre ensuite : {@code FOCUS} seulement si le
  * proprietaire de la memoire (le joueur local pour une memoire sans proprietaire) est en mode focus, {@code OFF}
- * jamais ; en session d'edition, un objet que le joueur local peut editer est toujours dessine.
+ * jamais ; {@code ON} et {@code FOCUS} demandent aussi {@code HoloObject.shown()} (condition locale). En session
+ * d'edition, un objet que le joueur local peut editer est toujours dessine.
  * <p>
  * Session d'edition avec cadre HUD : les objets HUD ne vont plus au HUD mais a {@link #hudPreview()} (dessines dans
  * la fenetre de l'editor). Les overlays ({@link HoloAttachment}) sont routes apres leur hote, dans sa famille.
@@ -137,12 +138,15 @@ public final class HoloRouting
         HUD_PREVIEW.sort(HUD_ORDER);
     }
 
-    /** Filtre d'affichage ; {@code focus} : mode focus du proprietaire de la memoire. */
+    /**
+     * Filtre d'affichage ; {@code focus} : mode focus du proprietaire de la memoire. La condition locale
+     * ({@code shown}) ne masque pas un objet que la session d'edition revele.
+     */
     private static boolean displayed(HoloObject object, boolean focus, HoloScope scope)
     {
         return switch (object.display()) {
-            case ON -> true;
-            case FOCUS -> focus || HoloEditSession.reveals(object, scope);
+            case ON -> object.shown() || HoloEditSession.reveals(object, scope);
+            case FOCUS -> focus && object.shown() || HoloEditSession.reveals(object, scope);
             case OFF -> HoloEditSession.reveals(object, scope);
         };
     }
