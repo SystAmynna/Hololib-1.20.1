@@ -12,6 +12,9 @@ public interface HoloScrollable extends HoloInteractible
     /** Crans de molette : positif vers le haut. */
     void onScrolled(HoloInteraction ctx, int steps);
 
+    /** Vrai (defaut) si un cran pris par l'element joue le son de molette (cote client). */
+    default boolean scrollSound() { return true; }
+
     @Override
     default boolean interceptsScroll() { return true; }
 

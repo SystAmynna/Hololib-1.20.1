@@ -19,6 +19,7 @@ import com.amynna.hololib.network.HoloModuleActionPacket;
 import com.amynna.hololib.network.HoloMoveObjectPacket;
 import com.amynna.hololib.network.HoloNetwork;
 import com.amynna.hololib.network.HoloObjectPacket;
+import com.amynna.hololib.network.HoloOpenObjectPacket;
 import com.amynna.hololib.network.HoloSyncData.ObjectData;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
@@ -182,6 +183,16 @@ public final class HoloContainers
         }
     }
 
+    /** Ouverture d'un objet de la memoire du joueur, demandee par son proprietaire. */
+    public static void handleOpen(ServerPlayer player, HoloOpenObjectPacket packet)
+    {
+        if (!player.getUUID().equals(packet.scope().owner())) return;
+        PlayerHoloContainer container = player(player);
+        HoloModule module = container != null ? container.module(packet.module()) : null;
+        HoloObject object = module != null ? module.object(packet.key()) : null;
+        if (object != null) object.setOpened(packet.open());
+    }
+
     public static void handleAction(ServerPlayer player, HoloModuleActionPacket packet)
     {
         boolean sourced = packet.source() != null;
@@ -223,14 +234,16 @@ public final class HoloContainers
         Set<HoloEditorCapability> capabilities = own != null ? HoloEditRules.capabilities(own.modules())
                 : Set.of();
         if (visible && HoloEditRules.mayEdit(player.getUUID(), player.hasPermissions(2), container.scope(),
-                module.editOwner(), object, capabilities)
+                module.editOwner(), object, HoloEditRules.ownCapability(object, object.anchor()),
+                capabilities)
                 && HoloEditRules.accepts(object, owner != null, packet.anchor(), packet.transform(), packet.display(),
-                packet.openOffset(), packet.editRange())) {
+                packet.openOffset(), packet.rotationFrame(), packet.editRange(), capabilities)) {
             object.setAnchor(packet.anchor());
             object.transform().set(packet.transform());
             object.setDisplay(packet.display());
             object.setEditRange(packet.editRange());
             if (packet.openOffset() != null) object.openOffset().set(packet.openOffset());
+            object.setRotationFrame(packet.rotationFrame());
             return;
         }
         if (visible) {

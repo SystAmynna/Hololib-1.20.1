@@ -1,6 +1,7 @@
 package com.amynna.hololib.network;
 
 import com.amynna.hololib.holo.edit.HoloDisplay;
+import com.amynna.hololib.holo.edit.HoloRotationFrame;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAccess;
 import com.amynna.hololib.holo.object.HoloAnchor;
@@ -25,28 +26,31 @@ public final class HoloSyncData
     private HoloSyncData() {}
 
     /**
-     * Placement (ancrage + transform), visibilite, affichage, acces et position relative d'un objet. Les transforms
-     * sont des copies prises a l'envoi.
+     * Placement (ancrage + transform), visibilite, affichage, acces, position relative et repere de rotation d'un
+     * objet. Les transforms sont des copies prises a l'envoi.
      *
      * @param display    {@code null} quand le destinataire n'a pas le droit de le connaitre (objet prive)
      * @param access     {@code null} dans le meme cas
      * @param anchor     {@code null} dans le meme cas
      * @param transform  {@code null} dans le meme cas
      * @param openOffset {@code null} dans le meme cas, ou si l'objet n'est pas {@code HoloRelativeToOpen}
+     * @param rotationFrame {@code null} dans le meme cas
+     * @param opened     ouverture ({@code HoloObject.opened()}), {@code null} dans le meme cas
      * @param editRange  portee d'edition, {@code NaN} dans le meme cas
      */
     public record ObjectData(String key, HoloVisibility visibility, HoloDisplay display, HoloAccess access,
-                             HoloAnchor anchor, HoloTransform transform, HoloTransform openOffset, float editRange)
+                             HoloAnchor anchor, HoloTransform transform, HoloTransform openOffset,
+                             HoloRotationFrame rotationFrame, Boolean opened, float editRange)
     {
         public static ObjectData of(HoloObject object, boolean forOwner)
         {
             if (!forOwner && object.visibility() != HoloVisibility.PUBLIC) {
-                return new ObjectData(object.key(), object.visibility(), null, null, null, null, null, Float.NaN);
+                return new ObjectData(object.key(), object.visibility(), null, null, null, null, null, null, null, Float.NaN);
             }
             HoloTransform offset = object.openOffset();
             return new ObjectData(object.key(), object.visibility(), object.display(), object.access(),
                     object.anchor(), object.transform().copy(), offset != null ? offset.copy() : null,
-                    object.editRange());
+                    object.rotationFrame(), object.opened(), object.editRange());
         }
 
         void write(FriendlyByteBuf buf)
@@ -61,6 +65,8 @@ public final class HoloSyncData
                 transform.write(buf);
                 buf.writeBoolean(openOffset != null);
                 if (openOffset != null) openOffset.write(buf);
+                buf.writeByte(rotationFrame.ordinal());
+                buf.writeBoolean(opened);
                 buf.writeFloat(editRange);
             }
         }
@@ -69,13 +75,18 @@ public final class HoloSyncData
         {
             String key = buf.readUtf();
             HoloVisibility visibility = HoloVisibility.byOrdinal(buf.readByte());
-            if (!buf.readBoolean()) return new ObjectData(key, visibility, null, null, null, null, null, Float.NaN);
+            if (!buf.readBoolean()) {
+                return new ObjectData(key, visibility, null, null, null, null, null, null, null, Float.NaN);
+            }
             HoloDisplay display = HoloDisplay.byOrdinal(buf.readByte());
             HoloAccess access = HoloAccess.read(buf);
             HoloAnchor anchor = HoloAnchor.read(buf);
             HoloTransform transform = HoloTransform.read(buf);
             HoloTransform offset = buf.readBoolean() ? HoloTransform.read(buf) : null;
-            return new ObjectData(key, visibility, display, access, anchor, transform, offset, buf.readFloat());
+            HoloRotationFrame frame = HoloRotationFrame.byOrdinal(buf.readByte());
+            boolean opened = buf.readBoolean();
+            return new ObjectData(key, visibility, display, access, anchor, transform, offset, frame, opened,
+                    buf.readFloat());
         }
     }
 

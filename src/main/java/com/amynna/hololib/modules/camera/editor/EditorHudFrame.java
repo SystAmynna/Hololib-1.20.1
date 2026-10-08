@@ -67,6 +67,10 @@ public class EditorHudFrame extends HoloWidget implements HoloClickable, HoloScr
     @Override
     public boolean clickableBy(HoloControl button) { return button == HoloControl.LEFT_CLICK; }
 
+    /** Pas de son de bouton : viser un objet joue celui de l'edition (partie client). */
+    @Override
+    public boolean clickSound() { return false; }
+
     @Override
     public void onClick(HoloInteraction ctx, HoloControl button)
     {

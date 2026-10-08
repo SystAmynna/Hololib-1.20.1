@@ -18,7 +18,8 @@ import java.util.Arrays;
  * {@link HoloCanvas} sur un {@code MultiBufferSource}. La pile doit etre dans le repere du GUI (pixels, {@code y} vers
  * le bas, face visible vers {@code +Z}) : voir {@link HoloWindowRenderer}. Les decalages de {@link #push} sont tenus
  * en flottants (pas de {@code pushPose}, donc pas d'allocation) ; chaque dessin avance d'un pas en {@code z} pour
- * eviter le z-fighting. Objet reutilise, fil de rendu uniquement.
+ * eviter le z-fighting, une couche ({@link #beginLayer()}) d'un seul pas a sa fin. Objet reutilise, fil de rendu
+ * uniquement.
  */
 final class BufferHoloCanvas implements HoloCanvas
 {
@@ -28,6 +29,8 @@ final class BufferHoloCanvas implements HoloCanvas
     private final Matrix4f textMatrix = new Matrix4f();
     private float[] offsets = new float[32];
     private int depth;
+    /** Couches ouvertes : tant qu'il y en a, {@code z} n'avance pas. */
+    private int layers;
     private PoseStack.Pose pose;
     private MultiBufferSource buffers;
     private Font font;
@@ -45,6 +48,7 @@ final class BufferHoloCanvas implements HoloCanvas
         this.light = light;
         this.font = Minecraft.getInstance().font;
         depth = 0;
+        layers = 0;
         ox = 0f;
         oy = 0f;
         z = 0f;
@@ -80,6 +84,22 @@ final class BufferHoloCanvas implements HoloCanvas
     }
 
     @Override
+    public void beginLayer() { layers++; }
+
+    @Override
+    public void endLayer()
+    {
+        if (layers == 0) throw new IllegalStateException("HoloCanvas.endLayer sans beginLayer");
+        if (--layers == 0) z += Z_STEP;
+    }
+
+    /** Pas en profondeur apres un dessin, sauf dans une couche. */
+    private void advance()
+    {
+        if (layers == 0) z += Z_STEP;
+    }
+
+    @Override
     public void fill(float x, float y, float width, float height, int argb)
     {
         if (width <= 0f || height <= 0f) return;
@@ -97,7 +117,7 @@ final class BufferHoloCanvas implements HoloCanvas
         vc.vertex(m, x0, y1, z).color(r, g, b, a).uv2(light).endVertex();
         vc.vertex(m, x1, y1, z).color(r, g, b, a).uv2(light).endVertex();
         vc.vertex(m, x1, y0, z).color(r, g, b, a).uv2(light).endVertex();
-        z += Z_STEP;
+        advance();
     }
 
     @Override
@@ -113,7 +133,7 @@ final class BufferHoloCanvas implements HoloCanvas
         vc.vertex(m, ox + x1, oy + y1, z).color(r, g, b, a).uv2(light).endVertex();
         vc.vertex(m, ox + x2, oy + y2, z).color(r, g, b, a).uv2(light).endVertex();
         vc.vertex(m, ox + x3, oy + y3, z).color(r, g, b, a).uv2(light).endVertex();
-        z += Z_STEP;
+        advance();
     }
 
     @Override
@@ -121,7 +141,7 @@ final class BufferHoloCanvas implements HoloCanvas
     {
         textMatrix.set(pose.pose()).translate(0f, 0f, z);
         font.drawInBatch(text, ox + x, oy + y, argb, false, textMatrix, buffers, Font.DisplayMode.NORMAL, 0, light);
-        z += Z_STEP;
+        advance();
     }
 
     @Override
@@ -150,6 +170,6 @@ final class BufferHoloCanvas implements HoloCanvas
         vc.vertex(m, x0, y1, z).color(r, g, b, a).uv(u0, v1).uv2(light).endVertex();
         vc.vertex(m, x1, y1, z).color(r, g, b, a).uv(u1, v1).uv2(light).endVertex();
         vc.vertex(m, x1, y0, z).color(r, g, b, a).uv(u1, v0).uv2(light).endVertex();
-        z += Z_STEP;
+        advance();
     }
 }

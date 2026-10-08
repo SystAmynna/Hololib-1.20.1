@@ -23,7 +23,7 @@ public final class HoloKeyMappings
     /** Mode focus (module {@code hololib:focus}), H par defaut. */
     public static final KeyMapping FOCUS = new KeyMapping("key.hololib.focus", KeyConflictContext.IN_GAME,
             InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_H, CATEGORY);
-    /** Mode edition (modules editeurs, {@code hololib:own_editor}...), G par defaut. */
+    /** Mode edition (modules editeurs, {@code hololib:own_fix_editor}...), G par defaut. */
     public static final KeyMapping EDITOR = new KeyMapping("key.hololib.editor", KeyConflictContext.IN_GAME,
             InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_G, CATEGORY);
 

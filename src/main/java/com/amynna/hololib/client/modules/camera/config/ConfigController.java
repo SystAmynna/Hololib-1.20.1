@@ -20,7 +20,8 @@ import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 /**
  * Module Config du joueur local ({@link ConfigModule} de sa memoire). Fil client, fin de tick.
  * <ul>
- *     <li>Chaque tick : liste des modules {@code Configurable} ({@link ConfigListWindow#sync}).</li>
+ *     <li>Chaque tick : liste des modules {@code Configurable} ({@link ConfigListWindow#sync}), aussi pour les
+ *     joueurs inspectes (leur liste est publique).</li>
  *     <li>Ouverture du focus : chaque fenetre de Config (liste et fenetres de configuration) est ouverte si elle est
  *     epinglee, fermee sinon ; elle a deja ete placee devant le regard par le focus ({@code HoloRelativeToOpen}).</li>
  * </ul>
@@ -58,6 +59,7 @@ public final class ConfigController
             return;
         }
         ClientHoloContainer local = ClientHoloWorld.local();
+        syncForeign(local);
         ConfigModule config = HoloModes.find(local, ConfigModule.class);
         boolean focus = HoloModes.active(local, HoloMode.FOCUS);
         boolean opening = focus && !focused;
@@ -68,5 +70,15 @@ public final class ConfigController
         if (!opening) return;
         list.setOpen(list.pinned());
         for (ConfigWindow window : list.windows()) window.setOpen(window.pinned());
+    }
+
+    /** Listes de Config des autres memoires de joueur recues (joueurs inspectes). */
+    private static void syncForeign(ClientHoloContainer local)
+    {
+        for (ClientHoloContainer container : ClientHoloWorld.containers()) {
+            if (container == local || container.scope().owner() == null) continue;
+            ConfigModule config = HoloModes.find(container, ConfigModule.class);
+            if (config != null) config.list().sync(container.modules(), config);
+        }
     }
 }

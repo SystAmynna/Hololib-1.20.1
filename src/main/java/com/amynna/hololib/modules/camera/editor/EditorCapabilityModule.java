@@ -9,8 +9,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
 /**
- * Base des modules editeurs : une capacite d'edition, active par defaut. Le joueur peut la desactiver depuis le
- * panneau des editeurs ({@link EditorPanelModule}) ; l'etat est sauvegarde (desactive jusqu'a reactivation) et
+ * Base des modules editeurs : une capacite d'edition, active par defaut. Le joueur peut la desactiver depuis la
+ * fenetre "Editeurs" de Config ({@link EditorPanelModule}) ; l'etat est sauvegarde (desactive jusqu'a reactivation) et
  * synchronise. Le serveur ne compte que les editeurs actifs.
  */
 public abstract class EditorCapabilityModule extends HoloModule implements HoloEditorModule

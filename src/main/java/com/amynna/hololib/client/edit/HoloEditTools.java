@@ -2,6 +2,7 @@ package com.amynna.hololib.client.edit;
 
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.client.capture.HoloControlCapture;
+import com.amynna.hololib.client.interact.HoloSounds;
 import com.amynna.hololib.client.render.holo.HoloPicking;
 import com.amynna.hololib.client.render.holo.HoloRouting;
 import com.amynna.hololib.client.render.holo.ResolvedHolo;
@@ -309,6 +310,7 @@ public final class HoloEditTools
         } else if (tool == HoloEditTool.ROTATE) {
             dragging = ctx.capture(ROTATION);
         }
+        if (dragging) HoloSounds.edit();
     }
 
     /**
@@ -462,6 +464,7 @@ public final class HoloEditTools
         GRAB_POSITION.set(t.x(), t.y(), t.z());
         HoloEditMath.rotation(GRAB_ROTATION, t);
         heldAxis = axis;
+        HoloSounds.edit();
     }
 
     private static void dragGizmo(Minecraft mc, float partialTick)
@@ -561,6 +564,12 @@ public final class HoloEditTools
     private static final class CameraHandle implements HoloClickable, HoloScrollable
     {
         @Override
+        public boolean clickSound() { return false; }
+
+        @Override
+        public boolean scrollSound() { return false; }
+
+        @Override
         public boolean clickableBy(HoloControl button)
         {
             return button == HoloControl.LEFT_CLICK && target != null
@@ -596,6 +605,9 @@ public final class HoloEditTools
 
         @Override
         public boolean clickableBy(HoloControl button) { return button == HoloControl.LEFT_CLICK; }
+
+        @Override
+        public boolean clickSound() { return false; }
 
         @Override
         public void onClick(HoloInteraction ctx, HoloControl button)

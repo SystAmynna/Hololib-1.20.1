@@ -13,6 +13,8 @@ import org.joml.Vector3f;
  */
 public final class HoloEditMath
 {
+    private static final Quaternionfc IDENTITY = new Quaternionf();
+
     private final Quaternionf world = new Quaternionf();
     private final Quaternionf direction = new Quaternionf();
     private final Quaternionf tmp = new Quaternionf();
@@ -80,5 +82,38 @@ public final class HoloEditMath
         out.setTranslation(yaw, pitch, distance);
         setRotation(out, tmp);
         return out.setScale(sx, sy, sz);
+    }
+
+    /**
+     * Comme {@link #rebaseLocal}, mais seule la direction change de base : distance, rotation et echelle sont
+     * recopiees (la rotation reste relative a la face droite, tournee vers l'oeil, du {@code Local}).
+     */
+    public HoloTransform rebaseDirection(HoloTransform source, Quaternionfc from, Quaternionfc to, HoloTransform out)
+    {
+        yawPitch(direction, source.x(), source.y());
+        tmp.set(to).conjugate().mul(from).mul(direction);
+        forward.set(0f, 0f, 1f).rotate(tmp);
+        float distance = source.z();
+        out.setRotation(source.yaw(), source.pitch(), source.roll());
+        out.setScale(source.scaleX(), source.scaleY(), source.scaleZ());
+        return out.setTranslation(yawOf(forward), pitchOf(forward), distance);
+    }
+
+    /**
+     * Place une position relative ({@link HoloRelativeToOpen}, repere du regard {@code gaze}) en {@code Local} fixe,
+     * selon le repere de sa rotation. {@code out} peut etre {@code offset}.
+     */
+    public HoloTransform fromOffset(HoloTransform offset, Quaternionfc gaze, HoloRotationFrame frame,
+                                    HoloTransform out)
+    {
+        return frame == HoloRotationFrame.GAZE ? rebaseLocal(offset, gaze, IDENTITY, out)
+                : rebaseDirection(offset, gaze, IDENTITY, out);
+    }
+
+    /** Inverse de {@link #fromOffset} : position relative au regard {@code gaze} d'un {@code Local} fixe. */
+    public HoloTransform toOffset(HoloTransform placed, Quaternionfc gaze, HoloRotationFrame frame, HoloTransform out)
+    {
+        return frame == HoloRotationFrame.GAZE ? rebaseLocal(placed, IDENTITY, gaze, out)
+                : rebaseDirection(placed, IDENTITY, gaze, out);
     }
 }

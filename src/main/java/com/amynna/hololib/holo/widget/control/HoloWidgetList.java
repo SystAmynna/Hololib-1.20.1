@@ -85,6 +85,29 @@ public class HoloWidgetList extends HoloPanel implements HoloScrollable
         layout();
     }
 
+    /**
+     * Indice de l'element affiche a l'ordonnee {@code y} (repere de la liste), borne aux elements affiches ; -1 si la
+     * liste est vide.
+     */
+    public int indexAt(float y)
+    {
+        if (items.isEmpty()) return -1;
+        int row = (int) Math.floor((y - PAD + SPACING / 2f) / (itemHeight + SPACING));
+        int last = Math.min(first + visibleCount(), items.size()) - 1;
+        return Math.max(first, Math.min(first + row, last));
+    }
+
+    /**
+     * Deplace l'element d'indice {@code from} a l'indice {@code to}, puis replace les elements (meme si egaux : un
+     * element deplace a la main reprend sa place). Sans effet hors des bornes.
+     */
+    public void moveItem(int from, int to)
+    {
+        if (from < 0 || to < 0 || from >= items.size() || to >= items.size()) return;
+        if (from != to) items.add(to, items.remove(from));
+        layout();
+    }
+
     @Override
     public HoloWidget setBounds(float x, float y, float width, float height)
     {

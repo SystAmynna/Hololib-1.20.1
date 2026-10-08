@@ -42,8 +42,9 @@ com.amynna.hololib
 ├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
 ├── modules/                     modules du mod (HoloLibModules = registre) : un sous-package par compatibilite
 │   ├── dimension/planet1/       (dimension, monde, camera), un package par module (module + objets, code commun)
-│   └── camera/focus|editor|config/ modules joueur : mode focus (H) ; editeurs (G) own/world/dimension/other +
-│                                panneau ; config (ecrou du focus -> liste des modules Configurable)
+│   └── camera/focus|editor|config|quickaction/ modules joueur : mode focus (H) ; editeurs (G)
+│                                own fix/dyn/hud, world/dimension/other + editor_panel (fenetre Config) ; config (ecrou du focus -> liste des modules
+│                                Configurable) ; quickaction (roue d'actions du focus, QuickActionProvider)
 └── client/
     ├── holo/                    ClientHoloWorld (miroirs des modules par portee), handlers des paquets, HoloModes
     ├── capture/                 HoloControlCapture : SEUL abonne aux inputs ; HoloKeyboardScreen (clavier entier)
@@ -52,7 +53,7 @@ com.amynna.hololib
     ├── edit/                    HoloEditSession (session d'edition), HoloEditTools (outil actif, poignees, gizmos),
     │                            boutons des objets edites (HoloEditTarget / Panel / EyeButton)
     ├── modules/camera/          logique client des modules joueur : FocusController, EditorController,
-    │                            ConfigController
+    │                            ConfigController, QuickActionController
     └── render/                  TOUS les renderers du mod (regle d'architecture)
         ├── package-info.java    doc detaillee : ordre de rendu, regles (source de verite)
         ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
@@ -86,8 +87,10 @@ com.amynna.hololib
   origine du monde pour une dimension) ; `Local` : `x`/`y` = yaw/pitch sur la sphere, `z` = distance, puis rotation et
   echelle ; `Hud` : `x`/`y` pixels GUI depuis le point d'alignement, `z` = ordre de dessin. Bornes des demandes
   clients : `HoloAnchor.acceptable(transform)`.
-- `HoloObject.shown()` : condition d'affichage **locale** au client (non synchronisee, vrai par defaut, ex. fenetre
-  ouverte), en plus de `HoloDisplay` ; ignoree quand la session d'edition revele l'objet.
+- `HoloObject.shown()` : condition d'affichage **locale** au client (non synchronisee, vrai par defaut), en plus de
+  `HoloDisplay` ; ignoree quand la session d'edition revele l'objet. Pour une fenetre que le proprietaire ouvre et
+  ferme : `HoloObject.opened()` (synchronise vers les observateurs, non sauvegarde ; `requestOpened` depuis le client
+  du proprietaire, `HoloOpenObjectPacket`, qui fait foi) et `shown()` = `opened()`.
 - On replique l'**etat des modules**, jamais les widgets : chaque client recree le module depuis son type, `onLoad`
   reconstruit les objets (meme code, memes cles des deux cotes). Ancrage, transform et visibilite sont synchronises
   par le framework ; seuls les modules ayant un objet `PUBLIC` sont envoyes aux observateurs.
@@ -119,7 +122,7 @@ com.amynna.hololib
 - Droit d'usage : `HoloObject.access()` (`HoloAccess` : `OWNER` par defaut, liste de joueurs, `EVERYONE` ; le
   proprietaire toujours ; sans proprietaire `OWNER` = personne), synchronise et sauvegarde par le framework. Callbacks
   locaux ; effet sur le jeu via `sendAction(source, ...)`, verifie par le serveur (acces, `PUBLIC` pour un
-  non-proprietaire, et `viewers` pour la memoire d'un autre joueur). Protocole reseau `"6"`.
+  non-proprietaire, et `viewers` pour la memoire d'un autre joueur). Protocole reseau `"8"`.
 
 ### Widgets interactifs (`holo/widget/control`)
 
@@ -130,17 +133,26 @@ com.amynna.hololib
   `interceptsKey` (pas de conflit de defauts).
 - Widgets prets a l'emploi, prefixes `HoloWidget` (`HoloWidgetButton`, `HoloWidgetMultiButton`, `HoloWidgetHoverZone`,
   `HoloWidgetScrollZone`, `HoloWidgetSwitch`, `HoloWidgetValueBar`, `HoloWidgetTextBox`, `HoloWidgetMouseBox`,
-  `HoloWidgetDraggable`, `HoloWidgetKeyBox`, `HoloWidgetList`), non finaux. Les demos les utilisent ; ne plus ecrire de widget ad hoc
+  `HoloWidgetDraggable`, `HoloWidgetKeyBox`, `HoloWidgetList`, `HoloWidgetDragRow` : ligne d'une liste reordonnee au
+  glisser), non finaux. Les demos les utilisent ; ne plus ecrire de widget ad hoc
   dans un module si un trait ou un widget existe.
 - Framework : `onDrag` (chaque frame, clic intercepte maintenu, regard projete par `HoloPicking.project`) et
   `hoverMargin()` (survol conserve sur le fond / hors fenetre dans la marge).
+- Sons (`client/interact/HoloSounds`, joues par `HoloInteractions`) : clic pris par un `HoloClickable` = son generique
+  different selon le bouton (gauche / droit / molette), cran pris par un `HoloScrollable` = son de molette ;
+  `clickSound()` / `scrollSound()` = false pour un element qui joue le sien (poignees d'edition, cadre HUD : son
+  d'edition a la saisie d'un objet).
 
 ### Edition en jeu (`holo/edit`, `client/edit`)
 
 - Un objet editable implemente `HoloEditable` (`ownRequired()` = true, `opRequired()` = false par defaut) via les
   outils `HoloEditTranslation`, `HoloEditRotation`, `HoloEditScale`, `HoloEditVisibility` (bouton oeil, `HoloDisplay`
-  OFF / FOCUS / ON), `HoloEditFixOrDynamic` (memoire joueur, `Local` relatif <-> follow). Editable = vu + capacite
-  + regles : un module editeur (`HoloEditorModule`) par portee (`own_editor`, `world_editor`, `dimension_editor`) ;
+  OFF / FOCUS / ON), `HoloEditFixOrDynamic` (memoire joueur, `Local` relatif <-> follow ; proposee seulement avec les
+  deux own editors actifs, `HoloEditRules.bothOwn`). Editable = vu + capacite
+  + regles : un module editeur (`HoloEditorModule`) par portee (`own_fix_editor` : objets fixes de sa memoire
+  (`Local` relatif, monde, ciel) ; `own_dyn_editor` : objets dynamiques, `Local` follow et `HoloRelativeToOpen`, capture du regard et repere ;
+  `own_hud_editor` : objets HUD et cadre HUD ; capacite de l'objet : `HoloEditRules.ownCapability` ;
+  `world_editor`, `dimension_editor`) ;
   `other_editor` (ops) leve `ownRequired` hors de sa memoire ; proprietaire = celui de la memoire de joueur, sinon le
   createur du module (`HoloModule.creator()`, joueur qui l'a installe, sauve et synchronise) ; `HoloEditorUi` =
   interface de l'editeur, toujours editable par son proprietaire. L'edition ignore `HoloAccess` (l'objet de l'outil
@@ -157,13 +169,19 @@ com.amynna.hololib
   point de vue, sans roulis, hors de la silhouette de l'hote, rectangle si `HoloObject.flat()`, sinon sphere englobante ; point de vue
   dans l'hote, ou ciel : a 2 blocs), un seul outil actif. Outils selon l'ancrage :
   `Local` / `Sky` = l'objet entier est la poignee (regard / souris capturee / molette), `World` = gizmos, `Hud` = cadre
-  de la fenetre de l'editor. Les `Local` follow (et `HoloRelativeToOpen`) sont **tenus** : affiches fixes dans le
+  de la fenetre de l'editor. Avec l'Own Dyn Editor actif (`HoloEditSession.setDynamicEditing`, et toujours pour les
+  `HoloEditorUi`), les `Local` follow (et `HoloRelativeToOpen`) sont **tenus** : affiches fixes dans le
   repere de reference (regard a l'ouverture, `HoloEditMath.rebaseLocal`), reconvertis et envoyes a la fermeture ;
-  seuls les groupes modifies changent. Le reste est envoye en fin de manipulation (`HoloEditObjectPacket`) ; le
+  seuls les groupes modifies changent. Editor ouvert depuis le focus : les `HoloRelativeToOpen` deja places gardent
+  leur place (regard de leur placement, `FocusController.placement`) et la gardent a la fermeture.
+- `HoloRotationFrame` d'un `HoloRelativeToOpen` (synchronise, sauve ; `PLAYER` par defaut) : direction toujours
+  relative au regard, rotation relative au joueur (`HoloEditMath.rebaseDirection`, fenetre droite face a l'oeil) ou
+  au regard (`rebaseLocal`). Interrupteur "Rot. joueur" du panneau. Panneau : boutons d'outils a icone, valeurs
+  X Y Z (et RESET) seulement sur les lignes ouvertes par leur "+" (panneau reconstruit). Le reste est envoye en fin de manipulation (`HoloEditObjectPacket`) ; le
   placement recu d'un objet tenu ou manipule est ignore (`ClientHoloContainer.apply`).
 - Modules `hololib:focus` (etat synchronise, sorties lues sur les touches physiques : saut, sprint, marche > 20 ticks
-  sans sneak, double sneak < 10 ticks) et editeurs (G, au moins un equipe ; `editor_panel` les liste et les
-  desactive, a partir de deux) : focus et edition jamais ouverts ensemble.
+  sans sneak, double sneak < 10 ticks) et editeurs (G, au moins un equipe ; `editor_panel` est `Configurable` : sa
+  fenetre "Editeurs" de Config les liste et les active / desactive) : focus et edition jamais ouverts ensemble.
 
 ### Configuration en jeu (`modules/camera/config`)
 
@@ -174,8 +192,26 @@ com.amynna.hololib
 - **Regle** : un module configurable detient sa `ConfigWindow` (objet du module cree dans `onLoad`, widgets dans
   `content()`) ; Config l'ouvre devant le regard au clic (`open()`, position relative = `openOffset`, editable dans
   l'editor), la ferme (croix) et l'epingle (epingle : etat sauvegarde du module Config, par id de type). Ouverture
-  locale au client (`shown()`) ; a l'ouverture du focus, les fenetres epinglees se rouvrent, les autres sont fermees.
-- Icones dessinees en quadrilateres (`HoloCanvas.quad`), sans texture.
+  decidee par le client du proprietaire (`opened()`) ; a l'ouverture du focus, les fenetres epinglees se rouvrent, les
+  autres sont fermees. Ecrou, liste, fenetres Config et roue Quick Action sont `PUBLIC` : un joueur qui inspecte le
+  proprietaire les voit (sans s'en servir) ; listes et roues des joueurs inspectes sont remplies par les controleurs.
+- Icones dessinees en quadrilateres (`HoloCanvas.quad`), sans texture ; une forme en plusieurs quads se dessine dans
+  une couche (`HoloCanvas.beginLayer/endLayer` : meme profondeur, sinon elle se deforme en perspective).
+
+### Roue d'actions (`modules/camera/quickaction`)
+
+- Module `hololib:quick_action` (joueur, `Configurable`) : a l'ouverture du focus, roue (`QuickActionWheelWindow`,
+  `HoloRelativeToOpen` sans outil d'edition, `FOCUS`) placee au centre du regard en `Local` fixe ; on vise un secteur
+  en tournant la camera, clic gauche ou droit = action, puis la roue se masque (et le focus se ferme si "Laisser le
+  focus active" est OFF, via `QuickActionModule.Backend`). Zone morte au centre ; masquee si le regard s'eloigne de
+  plus de 1,25 x son rayon angulaire ("Masquer si ignoree"). Ouverture decidee par le client du proprietaire
+  (`QuickActionController`). La roue entiere est dessinee d'un coup (widget `Wheel`, une couche), les secteurs ne
+  servent qu'a viser.
+- **Regle** : declarer des actions = implementer **`QuickActionProvider`** (module de la memoire de joueur) et creer
+  ses `QuickAction` dans `onLoad` (`id()` stable, `name()`, `drawIcon(canvas, size)` en quads ou
+  `QuickActionIcon.texture`, `run()` cote client -> `sendAction`). Decouvertes chaque tick ; ordre et activation
+  sauvegardes par cle `<type du module>/<id>`. Pour apparaitre dans la roue vue par un observateur, le provider doit
+  lui etre envoye (`sharedWithObservers()`). Demo : `hololib:demo_quick_actions`.
 
 ### Capture de controles (independante de l'interaction)
 

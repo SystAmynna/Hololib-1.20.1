@@ -12,7 +12,8 @@ import net.minecraft.world.entity.player.Player;
 
 /**
  * Demonstration de memoire de joueur : trois fenetres, une par rendu local, un cube dans le monde et une fenetre du
- * mode focus. Tout est editable en jeu par le proprietaire (module {@code hololib:own_editor}).
+ * mode focus. Tout est editable en jeu par le proprietaire (modules {@code hololib:own_fix_editor},
+ * {@code hololib:own_dyn_editor} et {@code hololib:own_hud_editor}).
  * <ul>
  *     <li>{@code hud} : a l'ecran, en haut a droite (jamais vu par les autres joueurs, masque en F5).</li>
  *     <li>{@code local} : camera normale ({@code Local} relatif) ; reste en place quand on tourne la tete. Orientee

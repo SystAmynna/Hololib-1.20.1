@@ -73,7 +73,8 @@ public class ConfigNutButton extends HoloWidgetButton
         float r = radius();
         float c = r;
         boolean lit = hovered() || pressed();
-        // Disque en eventail puis bordure.
+        // Disque en eventail puis bordure, dans une couche (a plat) ; l'ecrou dans une autre, devant.
+        canvas.beginLayer();
         for (int i = 0; i < SEGMENTS; i++) {
             float a0 = i * Mth.TWO_PI / SEGMENTS;
             float a1 = (i + 1) * Mth.TWO_PI / SEGMENTS;
@@ -90,11 +91,13 @@ public class ConfigNutButton extends HoloWidgetButton
             canvas.quad(c + r * Mth.cos(a0), c + r * Mth.sin(a0), c + r * Mth.cos(a1), c + r * Mth.sin(a1),
                     c + rim * Mth.cos(a1), c + rim * Mth.sin(a1), c + rim * Mth.cos(a0), c + rim * Mth.sin(a0), RIM);
         }
+        canvas.endLayer();
         // Ecrou : chaque cote de l'hexagone, decoupe en bandes jusqu'au trou rond.
         float turn = Mth.lerp(canvas.partialTick(), prevAngle, angle);
         float hex = 0.62f * r;
         float hole = 0.28f * r;
         int color = lit ? NUT_HOVER : NUT;
+        canvas.beginLayer();
         for (int side = 0; side < 6; side++) {
             float a = turn + side * SIXTH;
             float hx0 = c + hex * Mth.cos(a);
@@ -111,5 +114,6 @@ public class ConfigNutButton extends HoloWidgetButton
                         c + hole * Mth.cos(b0), c + hole * Mth.sin(b0), color);
             }
         }
+        canvas.endLayer();
     }
 }

@@ -14,6 +14,6 @@ public interface HoloEditorModule
     /** Faux si le joueur l'a desactive (etat sauvegarde) : le module ne donne alors plus sa capacite. */
     boolean editorEnabled();
 
-    /** Nom affiche (panneau des editeurs). */
+    /** Nom affiche (fenetre "Editeurs" de Config). */
     Component editorName();
 }

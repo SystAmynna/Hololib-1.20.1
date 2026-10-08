@@ -10,19 +10,29 @@ import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloTransform;
 import com.amynna.hololib.holo.window.HoloWindow;
 
+import java.util.EnumSet;
+import java.util.Set;
+
 /**
  * Objet en cours d'edition et ses boutons : panneau des outils a cote ({@link HoloEditPanel}) et oeil de l'affichage
  * au-dessus, deux overlays clients ({@link HoloAttachment}) hors de la silhouette de l'objet, orientes face au joueur
  * a leur creation (ouverture de la session, objet devenu editable) puis fixes, re-places apres chaque transformation
  * ({@link #replace()}).
- * Pour un objet HUD, les boutons sont poses a gauche de l'hote du cadre HUD. Garde aussi les reglages de l'outil echelle (synchronise, axe choisi).
+ * Pour un objet HUD, les boutons sont poses a gauche de l'hote du cadre HUD. Garde aussi les reglages de l'outil echelle
+ * (synchronise, axe choisi) et les lignes ouvertes du panneau ({@link #expanded}) : ouvrir ou fermer une ligne
+ * reconstruit le panneau au tick suivant.
  */
 final class HoloEditTarget
 {
     private final HoloObject object;
     private final boolean hud;
-    private final HoloEditPanel panel;
-    private final HoloAttachment panelAttachment;
+    private final HoloObject host;
+    private boolean fixOrDynamic;
+    private final Set<HoloEditTool> expanded = EnumSet.noneOf(HoloEditTool.class);
+    private HoloEditPanel panel;
+    private HoloAttachment panelAttachment;
+    private boolean attached;
+    private boolean rebuild;
     private final HoloWindow eye;
     private final HoloAttachment eyeAttachment;
     private boolean scaleSync = true;
@@ -32,12 +42,9 @@ final class HoloEditTarget
     {
         this.object = object;
         this.hud = hud;
-        boolean fixOrDynamic = !hud && object.openOffset() == null
-                && HoloEditRules.fixOrDynamic(object, object.anchor(), HoloEditSession.playerScope(object));
-        this.panel = new HoloEditPanel(this, fixOrDynamic);
-        overlay(panel);
-        this.panelAttachment = new HoloAttachment(panel, host,
-                hud ? HoloAttachment.Side.LEFT : HoloAttachment.Side.RIGHT);
+        this.host = host;
+        this.fixOrDynamic = fixOrDynamic();
+        buildPanel();
         if (object instanceof HoloEditVisibility) {
             eye = new HoloWindow("edit_eye", new HoloAnchor.Local(false), new HoloTransform(), HoloEditEyeButton.WIDTH,
                     HoloEditEyeButton.HEIGHT, 1f);
@@ -54,6 +61,24 @@ final class HoloEditTarget
     static HoloEditTarget create(HoloObject object, HoloObject host, boolean hud)
     {
         return new HoloEditTarget(object, host, hud);
+    }
+
+    /**
+     * Bascule fixe / dynamique proposee : objet qui la permet ({@code HoloEditRules.fixOrDynamic}), et les deux
+     * editeurs de sa memoire actifs.
+     */
+    private boolean fixOrDynamic()
+    {
+        return !hud && object.openOffset() == null
+                && HoloEditRules.fixOrDynamic(object, object.anchor(), HoloEditSession.playerScope(object))
+                && HoloEditSession.bothOwnEditors();
+    }
+
+    private void buildPanel()
+    {
+        panel = new HoloEditPanel(this, fixOrDynamic);
+        overlay(panel);
+        panelAttachment = new HoloAttachment(panel, host, hud ? HoloAttachment.Side.LEFT : HoloAttachment.Side.RIGHT);
     }
 
     private static void overlay(HoloWindow window)
@@ -75,14 +100,26 @@ final class HoloEditTarget
 
     void setScaleAxis(int axis) { this.scaleAxis = axis; }
 
+    /** Vrai si la ligne de l'outil montre ses valeurs (ouverte par son "+"). */
+    boolean expanded(HoloEditTool tool) { return expanded.contains(tool); }
+
+    /** Ouvre ou ferme la ligne de l'outil ; le panneau est reconstruit au tick suivant (pas pendant le clic). */
+    void toggleExpanded(HoloEditTool tool)
+    {
+        if (!expanded.remove(tool)) expanded.add(tool);
+        rebuild = true;
+    }
+
     void attach()
     {
+        attached = true;
         HoloRouting.attach(panelAttachment);
         if (eyeAttachment != null) HoloRouting.attach(eyeAttachment);
     }
 
     void detach()
     {
+        attached = false;
         HoloRouting.detach(panelAttachment);
         if (eyeAttachment != null) HoloRouting.detach(eyeAttachment);
     }
@@ -97,6 +134,17 @@ final class HoloEditTarget
     /** Chaque tick client : valeurs affichees et animations des widgets. */
     void tick()
     {
+        boolean switchable = fixOrDynamic();
+        if (switchable != fixOrDynamic) {
+            fixOrDynamic = switchable;
+            rebuild = true;
+        }
+        if (rebuild) {
+            rebuild = false;
+            if (attached) HoloRouting.detach(panelAttachment);
+            buildPanel();
+            if (attached) HoloRouting.attach(panelAttachment);
+        }
         panel.refresh();
         panel.tick();
         if (eye != null) eye.tick();

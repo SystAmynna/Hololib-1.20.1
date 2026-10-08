@@ -108,17 +108,19 @@ public final class ClientHoloContainer
 
     /**
      * Un objet en cours d'edition locale garde son placement et sa portee : seuls visibilite, affichage et acces sont
-     * appliques.
+     * appliques. L'ouverture n'est appliquee que chez un observateur (le client du proprietaire fait foi).
      */
     private static void apply(HoloModule module, ObjectData data)
     {
         HoloObject object = module.object(data.key());
         if (object == null) return;
+        Boolean opened = module.host().ownerView() ? null : data.opened();
         if (HoloEditSession.holds(object)) {
-            object.restore(data.visibility(), data.display(), data.access(), null, null, null, Float.NaN);
+            object.restore(data.visibility(), data.display(), data.access(), null, null, null, null, opened,
+                    Float.NaN);
         } else {
             object.restore(data.visibility(), data.display(), data.access(), data.anchor(), data.transform(),
-                    data.openOffset(), data.editRange());
+                    data.openOffset(), data.rotationFrame(), opened, data.editRange());
         }
     }
 }

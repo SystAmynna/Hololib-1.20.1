@@ -20,7 +20,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
  */
 public final class HoloNetwork
 {
-    private static final String PROTOCOL = "6";
+    private static final String PROTOCOL = "8";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             ResourceLocation.fromNamespaceAndPath(HoloLib.MODID, "main"), () -> PROTOCOL, PROTOCOL::equals,
@@ -56,6 +56,9 @@ public final class HoloNetwork
         CHANNEL.messageBuilder(HoloEditObjectPacket.class, id++, NetworkDirection.PLAY_TO_SERVER)
                 .encoder(HoloEditObjectPacket::encode).decoder(HoloEditObjectPacket::decode)
                 .consumerMainThread(HoloEditObjectPacket::handle).add();
+        CHANNEL.messageBuilder(HoloOpenObjectPacket.class, id++, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(HoloOpenObjectPacket::encode).decoder(HoloOpenObjectPacket::decode)
+                .consumerMainThread(HoloOpenObjectPacket::handle).add();
     }
 
     public static void send(ServerPlayer player, Object packet)

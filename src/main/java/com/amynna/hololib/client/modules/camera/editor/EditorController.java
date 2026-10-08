@@ -6,6 +6,7 @@ import com.amynna.hololib.client.edit.HoloEditTools;
 import com.amynna.hololib.client.holo.ClientHoloContainer;
 import com.amynna.hololib.client.holo.ClientHoloWorld;
 import com.amynna.hololib.client.holo.HoloModes;
+import com.amynna.hololib.client.interact.HoloSounds;
 import com.amynna.hololib.client.key.HoloKeyMappings;
 import com.amynna.hololib.client.modules.camera.focus.FocusController;
 import com.amynna.hololib.client.render.holo.HoloPicking;
@@ -15,7 +16,8 @@ import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.modules.camera.editor.EditorHudFrame;
 import com.amynna.hololib.modules.camera.editor.EditorPanelModule;
-import com.amynna.hololib.modules.camera.editor.OwnEditorModule;
+import com.amynna.hololib.modules.camera.editor.OwnDynEditorModule;
+import com.amynna.hololib.modules.camera.editor.OwnHudEditorModule;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraftforge.api.distmarker.Dist;
@@ -29,11 +31,14 @@ import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
  * tick.
  * <ul>
  *     <li>Touche d'edition (G) : ouvre (en fermant le focus) si au moins un editeur est equipe, ou ferme.</li>
- *     <li>Ouverture : avec l'Own Editor, son repere de l'ecran ({@code EditorReference}) prend le champ de vision et
- *     les proportions de l'ecran, son cadre HUD aussi ; la session d'edition s'ouvre avec le regard courant comme
- *     repere de reference.</li>
- *     <li>Chaque tick : liste du panneau des editeurs ({@link EditorPanelModule}) ; hote du cadre HUD = fenetre de
- *     l'Own Editor s'il est actif, sinon aucun (les objets HUD restent au HUD). Plus aucun editeur : fermeture.</li>
+ *     <li>Ouverture : avec l'Own Dyn Editor, son repere de l'ecran ({@code EditorReference}) prend le champ de vision
+ *     et les proportions de l'ecran ; avec l'Own Hud Editor, son cadre HUD prend les proportions de l'ecran ; la
+ *     session d'edition s'ouvre avec le regard courant comme repere de reference, objets dynamiques tenus si l'Own Dyn
+ *     Editor est actif. Depuis le focus, les objets qu'il a places gardent leur place (regard de leur placement,
+ *     {@code FocusController.placement}), puis le focus se ferme.</li>
+ *     <li>Chaque tick : liste de la fenetre "Editeurs" de Config ({@link EditorPanelModule}) ; hote du cadre HUD =
+ *     fenetre de l'Own Hud Editor s'il est actif, sinon aucun (les objets HUD restent au HUD) ; edition des objets
+ *     dynamiques selon l'Own Dyn Editor. Plus aucun editeur : fermeture.</li>
  * </ul>
  * Fournit aussi la partie client du cadre HUD ({@link EditorHudFrame.Backend}).
  */
@@ -75,7 +80,7 @@ public final class EditorController
         }
         ClientHoloContainer local = ClientHoloWorld.local();
         EditorPanelModule panel = HoloModes.find(local, EditorPanelModule.class);
-        if (panel != null) panel.window().sync(local.modules());
+        if (panel != null) panel.sync(local.modules());
         while (HoloKeyMappings.EDITOR.consumeClick()) toggle(mc, local);
         if (!opened) return;
         // Plus d'editeur (modules retires, memoire changee), ou session fermee ailleurs.
@@ -83,7 +88,8 @@ public final class EditorController
             close();
             return;
         }
-        HoloEditSession.setHudHost(hudHost(HoloModes.find(local, OwnEditorModule.class)));
+        HoloEditSession.setHudHost(hudHost(HoloModes.find(local, OwnHudEditorModule.class)));
+        HoloEditSession.setDynamicEditing(dynamicEditing(local));
     }
 
     private static void toggle(Minecraft mc, ClientHoloContainer local)
@@ -93,23 +99,31 @@ public final class EditorController
             return;
         }
         if (!hasEditor(local)) return;
-        FocusController.close();
+        // Ouvert depuis le focus : les objets places par le focus restent ou ils sont (regard de leur placement).
+        boolean fromFocus = FocusController.active();
         LocalPlayer player = mc.player;
-        OwnEditorModule own = HoloModes.find(local, OwnEditorModule.class);
-        if (own != null) {
-            float aspect = (float) mc.getWindow().getGuiScaledWidth()
-                    / Math.max(1, mc.getWindow().getGuiScaledHeight());
-            own.reference().capture(mc.options.fov().get(), aspect);
-            own.window().fitFrame(aspect);
-        }
+        OwnHudEditorModule hud = HoloModes.find(local, OwnHudEditorModule.class);
+        OwnDynEditorModule dyn = HoloModes.find(local, OwnDynEditorModule.class);
+        float aspect = (float) mc.getWindow().getGuiScaledWidth() / Math.max(1, mc.getWindow().getGuiScaledHeight());
+        if (dyn != null) dyn.reference().capture(mc.options.fov().get(), aspect);
+        if (hud != null) hud.window().fitFrame(aspect);
         opened = true;
-        HoloEditSession.open(player.getYRot(), player.getXRot(), hudHost(own));
+        HoloEditSession.open(player.getYRot(), player.getXRot(), hudHost(hud),
+                fromFocus ? FocusController::placement : null, dynamicEditing(local));
+        FocusController.close();
     }
 
-    /** Fenetre du cadre HUD de l'Own Editor s'il est actif, sinon {@code null}. */
-    private static HoloObject hudHost(OwnEditorModule own)
+    /** Fenetre du cadre HUD de l'Own Hud Editor s'il est actif, sinon {@code null}. */
+    private static HoloObject hudHost(OwnHudEditorModule hud)
     {
-        return own != null && own.editorEnabled() ? own.window() : null;
+        return hud != null && hud.editorEnabled() ? hud.window() : null;
+    }
+
+    /** Own Dyn Editor equipe et actif : objets dynamiques tenus et editables. */
+    private static boolean dynamicEditing(ClientHoloContainer local)
+    {
+        OwnDynEditorModule dyn = HoloModes.find(local, OwnDynEditorModule.class);
+        return dyn != null && dyn.editorEnabled();
     }
 
     private static boolean hasEditor(ClientHoloContainer local)
@@ -139,8 +153,13 @@ public final class EditorController
         @Override
         public HoloObject selected() { return HoloEditSession.selectedHud(); }
 
+        /** Clic dans le cadre : sur un objet, son de l'edition. */
         @Override
-        public void select(HoloObject object) { HoloEditSession.selectHud(object); }
+        public void select(HoloObject object)
+        {
+            if (object != null) HoloSounds.edit();
+            HoloEditSession.selectHud(object);
+        }
 
         @Override
         public void grab(HoloObject object) { HoloEditTools.grabHud(object); }

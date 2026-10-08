@@ -22,13 +22,20 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import org.joml.Quaternionf;
+import org.joml.Vector2f;
+import org.joml.Vector2fc;
+
+import java.util.IdentityHashMap;
+import java.util.Map;
 
 /**
  * Mode focus du joueur local (module {@link FocusModule} de sa memoire). Fil client, fin de tick.
  * <ul>
  *     <li>Touche focus (H) : ouvre (en fermant l'editor) ou ferme le mode.</li>
  *     <li>Ouverture : chaque objet {@code HoloRelativeToOpen} de la memoire du joueur est place en {@code Local} fixe
- *     d'apres sa position relative au regard courant, et demande au serveur.</li>
+ *     d'apres sa position relative au regard courant (selon son {@code HoloRotationFrame}), et demande au serveur ;
+ *     le regard de placement est retenu ({@link #placement}) : l'editor, ouvert depuis le focus, garde les objets ou
+ *     ils sont.</li>
  *     <li>Sorties, lues sur les <b>inputs</b> (touches physiques liees aux controles, pas le mouvement : un mur ne
  *     bloque rien) et seulement quand le controle va au jeu : saut, sprint, deplacement non accroupi pendant plus de
  *     {@value #WALK_TICKS} ticks consecutifs, deux appuis sur sneak en moins de {@value #DOUBLE_SNEAK_TICKS} ticks.
@@ -52,7 +59,8 @@ public final class FocusController
 
     private static final HoloEditMath MATH = new HoloEditMath();
     private static final Quaternionf GAZE = new Quaternionf();
-    private static final Quaternionf IDENTITY = new Quaternionf();
+    /** Regard (yaw, pitch) de placement des objets places depuis l'ouverture du focus. */
+    private static final Map<HoloObject, Vector2f> PLACED = new IdentityHashMap<>();
 
     private static boolean jumpDown;
     private static boolean sprintDown;
@@ -69,6 +77,19 @@ public final class FocusController
         FocusModule module = module();
         if (module != null && module.modeActive()) module.requestActive(false);
     }
+
+    /** Vrai si le mode focus du joueur local est ouvert. */
+    public static boolean active()
+    {
+        FocusModule module = module();
+        return module != null && module.modeActive();
+    }
+
+    /**
+     * Regard (yaw, pitch) avec lequel l'objet a ete place depuis l'ouverture du focus, ou {@code null} (focus ferme,
+     * objet pas place). Valeur vivante : ne pas la garder.
+     */
+    public static Vector2fc placement(HoloObject object) { return active() ? PLACED.get(object) : null; }
 
     @SubscribeEvent
     public static void onClientTick(TickEvent.ClientTickEvent event)
@@ -93,6 +114,7 @@ public final class FocusController
         }
         EditorController.close();
         module.requestActive(true);
+        PLACED.clear();
         placeRelative(mc.player);
         seed(mc);
         walkTicks = 0;
@@ -111,14 +133,16 @@ public final class FocusController
 
     /**
      * Place un objet {@code HoloRelativeToOpen} de la memoire du joueur local devant le regard {@code (yRot, xRot)},
-     * d'apres sa position relative, en {@code Local} fixe, et le demande au serveur. Sans effet pour un autre objet.
+     * d'apres sa position relative et son repere de rotation, en {@code Local} fixe, et le demande au serveur ; retient
+     * le regard de placement. Sans effet pour un autre objet.
      */
     public static void placeRelative(HoloObject object, float yRot, float xRot)
     {
         if (object.openOffset() == null || !object.replicated()) return;
         HoloEditMath.yawPitch(GAZE, yRot, xRot);
-        MATH.rebaseLocal(object.openOffset(), GAZE, IDENTITY, object.transform());
+        MATH.fromOffset(object.openOffset(), GAZE, object.rotationFrame(), object.transform());
         object.requestAnchor(FIXED);
+        PLACED.computeIfAbsent(object, o -> new Vector2f()).set(yRot, xRot);
     }
 
     private static void watchExits(Minecraft mc, FocusModule module)

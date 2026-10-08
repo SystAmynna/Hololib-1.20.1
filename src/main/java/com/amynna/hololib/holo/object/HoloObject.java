@@ -2,10 +2,12 @@ package com.amynna.hololib.holo.object;
 
 import com.amynna.hololib.holo.edit.HoloDisplay;
 import com.amynna.hololib.holo.edit.HoloRelativeToOpen;
+import com.amynna.hololib.holo.edit.HoloRotationFrame;
 import com.amynna.hololib.holo.interact.HoloInteractible;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.network.HoloMoveObjectPacket;
 import com.amynna.hololib.network.HoloNetwork;
+import com.amynna.hololib.network.HoloOpenObjectPacket;
 import org.jetbrains.annotations.ApiStatus;
 
 import java.util.Objects;
@@ -27,8 +29,8 @@ import java.util.Objects;
  * synchronise par le framework.
  * <p>
  * Un objet editable en jeu implemente les interfaces de {@code holo.edit} ; son {@linkplain #display() affichage}
- * (quand il est dessine) et, pour un {@link HoloRelativeToOpen}, sa {@linkplain #openOffset() position relative} sont
- * aussi synchronises et sauvegardes par le framework.
+ * (quand il est dessine) et, pour un {@link HoloRelativeToOpen}, sa {@linkplain #openOffset() position relative} et
+ * le {@linkplain #rotationFrame() repere de sa rotation} sont aussi synchronises et sauvegardes par le framework.
  */
 public abstract class HoloObject
 {
@@ -46,8 +48,10 @@ public abstract class HoloObject
     private final HoloTransform openOffset;
     private HoloVisibility visibility = HoloVisibility.PRIVATE;
     private HoloDisplay display = HoloDisplay.ON;
+    private HoloRotationFrame rotationFrame = HoloRotationFrame.PLAYER;
     private float editRange = DEFAULT_EDIT_RANGE;
     private HoloAccess access = HoloAccess.OWNER;
+    private boolean opened = true;
     private boolean syncDirty = true;
     private boolean replicated;
 
@@ -91,6 +95,12 @@ public abstract class HoloObject
     public final HoloDisplay display() { return display; }
 
     /**
+     * Repere de la rotation quand l'objet est place depuis sa {@linkplain #openOffset() position relative}
+     * ({@code PLAYER} par defaut) ; sans effet si l'objet n'est pas {@link HoloRelativeToOpen}.
+     */
+    public final HoloRotationFrame rotationFrame() { return rotationFrame; }
+
+    /**
      * Portee d'edition (objet ancre {@code World}) : distance maximale entre l'oeil et l'objet pour l'editer en jeu,
      * en blocs, dans {@code [MIN_EDIT_RANGE, MAX_EDIT_RANGE]}. Synchronisee et sauvegardee.
      */
@@ -116,6 +126,39 @@ public abstract class HoloObject
      * mode edition hors de sa silhouette.
      */
     public boolean flat() { return false; }
+
+    /**
+     * Ouvert ou ferme (vrai par defaut) : etat d'une fenetre que le proprietaire ouvre et ferme lui-meme. Synchronise
+     * vers les observateurs, jamais sauvegarde (valeur du constructeur au chargement) ; le client du proprietaire fait
+     * foi ({@link #requestOpened}). L'objet s'en sert typiquement dans {@link #shown()}.
+     */
+    public final boolean opened() { return opened; }
+
+    /** Change l'etat d'ouverture. Cote serveur, synchronise au tick suivant ; cote client, effet local seulement. */
+    public final void setOpened(boolean opened)
+    {
+        if (opened == this.opened) return;
+        this.opened = opened;
+        syncDirty = true;
+    }
+
+    /**
+     * Ouvre ou ferme l'objet au nom du proprietaire. Cote client (miroir d'un module du joueur local) : applique
+     * localement puis envoie au serveur, qui le transmet aux observateurs ; sans effet pour une memoire de dimension ou
+     * de position. Cote serveur : {@link #setOpened}.
+     */
+    public final void requestOpened(boolean opened)
+    {
+        if (opened == this.opened) return;
+        if (module == null || !module.host().clientSide())
+        {
+            setOpened(opened);
+            return;
+        }
+        if (!canRequest()) return;
+        setOpened(opened);
+        HoloNetwork.CHANNEL.sendToServer(new HoloOpenObjectPacket(module.scope(), module.instanceId(), key, opened));
+    }
 
     /**
      * Cote client : condition d'affichage locale, en plus de {@link #display()} (ex. fenetre ouverte par le joueur).
@@ -158,6 +201,15 @@ public abstract class HoloObject
         Objects.requireNonNull(display);
         if (display == this.display) return;
         this.display = display;
+        syncDirty = true;
+    }
+
+    /** Change le repere de rotation. Cote serveur, synchronise au tick suivant ; cote client, effet local seulement. */
+    public final void setRotationFrame(HoloRotationFrame frame)
+    {
+        Objects.requireNonNull(frame);
+        if (frame == rotationFrame) return;
+        rotationFrame = frame;
         syncDirty = true;
     }
 
@@ -231,10 +283,13 @@ public abstract class HoloObject
      */
     @ApiStatus.Internal
     public final void restore(HoloVisibility visibility, HoloDisplay display, HoloAccess access, HoloAnchor anchor,
-                              HoloTransform transform, HoloTransform openOffset, float editRange)
+                              HoloTransform transform, HoloTransform openOffset, HoloRotationFrame rotationFrame,
+                              Boolean opened, float editRange)
     {
         this.visibility = visibility;
+        if (opened != null) this.opened = opened;
         if (display != null) this.display = display;
+        if (rotationFrame != null) this.rotationFrame = rotationFrame;
         if (Float.isFinite(editRange)) this.editRange = Math.max(MIN_EDIT_RANGE, Math.min(MAX_EDIT_RANGE, editRange));
         if (access != null) this.access = access;
         if (anchor != null) this.anchor = anchor;
@@ -244,8 +299,8 @@ public abstract class HoloObject
     }
 
     /**
-     * Usage interne : vrai quand l'ancrage, le transform, la visibilite, l'affichage, l'acces ou la position relative
-     * doivent etre envoyes.
+     * Usage interne : vrai quand l'ancrage, le transform, la visibilite, l'affichage, l'acces, la position relative,
+     * le repere de rotation ou l'ouverture doivent etre envoyes.
      */
     @ApiStatus.Internal
     public final boolean syncDirty()

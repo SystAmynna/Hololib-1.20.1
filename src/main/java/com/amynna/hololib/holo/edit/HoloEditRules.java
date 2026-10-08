@@ -41,7 +41,8 @@ public final class HoloEditRules
      * <ul>
      *     <li>l'objet est {@link HoloEditable}, et le joueur operateur si {@code opRequired} ;</li>
      *     <li>un {@link HoloEditorUi} de sa propre memoire l'est toujours ;</li>
-     *     <li>sinon il faut la capacite de la portee ({@link HoloEditorCapability#of}) ;</li>
+     *     <li>sinon il faut la capacite de la portee ({@link HoloEditorCapability#of} ; dans sa memoire, celle de
+     *     l'objet, {@link #ownCapability}) ;</li>
      *     <li>{@code ownRequired} : le joueur doit etre {@code editOwner}, sauf hors de sa memoire avec
      *     {@link HoloEditorCapability#OTHER} et en etant operateur.</li>
      * </ul>
@@ -49,18 +50,46 @@ public final class HoloEditRules
      * @param op           joueur operateur (niveau 2)
      * @param scope        portee de la memoire de l'objet
      * @param editOwner    proprietaire pour l'edition ({@code HoloModule.editOwner()}), peut etre nul
+     * @param own          capacite de l'objet dans sa propre memoire ({@link #ownCapability}, d'apres son etat reel)
      * @param capabilities capacites du joueur ({@link #capabilities})
      */
     public static boolean mayEdit(UUID player, boolean op, HoloScope scope, UUID editOwner, HoloObject object,
-                                  Set<HoloEditorCapability> capabilities)
+                                  HoloEditorCapability own, Set<HoloEditorCapability> capabilities)
     {
         if (!(object instanceof HoloEditable editable) || player == null) return false;
         if (editable.opRequired() && !op) return false;
         if (object instanceof HoloEditorUi && player.equals(scope.owner())) return true;
-        HoloEditorCapability needed = HoloEditorCapability.of(scope, player);
+        HoloEditorCapability needed = HoloEditorCapability.of(scope, player, own);
         if (needed == null || !capabilities.contains(needed)) return false;
         if (!editable.ownRequired() || player.equals(editOwner)) return true;
-        return needed != HoloEditorCapability.OWN && op && capabilities.contains(HoloEditorCapability.OTHER);
+        return !needed.own() && op && capabilities.contains(HoloEditorCapability.OTHER);
+    }
+
+    /**
+     * Capacite qui edite l'objet, avec cet ancrage, dans la memoire de son proprietaire :
+     * {@link HoloEditorCapability#OWN_DYN} s'il est {@linkplain #dynamic dynamique},
+     * {@link HoloEditorCapability#OWN_HUD} s'il est ancre au HUD, sinon {@link HoloEditorCapability#OWN_FIX}.
+     */
+    public static HoloEditorCapability ownCapability(HoloObject object, HoloAnchor anchor)
+    {
+        if (dynamic(object, anchor)) return HoloEditorCapability.OWN_DYN;
+        return anchor instanceof HoloAnchor.Hud ? HoloEditorCapability.OWN_HUD : HoloEditorCapability.OWN_FIX;
+    }
+
+    /**
+     * Vrai si l'objet est dynamique, avec cet ancrage : {@code Local} follow, ou place relativement au regard
+     * ({@link HoloRelativeToOpen}).
+     */
+    public static boolean dynamic(HoloObject object, HoloAnchor anchor)
+    {
+        return object.openOffset() != null || anchor instanceof HoloAnchor.Local local && local.follow();
+    }
+
+    /** Vrai avec les deux capacites de sa memoire : la bascule fixe / dynamique est alors permise. */
+    public static boolean bothOwn(Set<HoloEditorCapability> capabilities)
+    {
+        return capabilities.contains(HoloEditorCapability.OWN_FIX)
+                && capabilities.contains(HoloEditorCapability.OWN_DYN);
     }
 
     /** Vrai si l'objet propose au moins un outil d'edition (boutons du mode edition). */
@@ -80,15 +109,23 @@ public final class HoloEditRules
     /**
      * Vrai si le nouvel etat demande ne modifie que ce que les interfaces de l'objet permettent, et reste dans les
      * bornes de l'ancrage. Changement d'ancrage : seulement {@code Local} relatif <-> follow par
-     * {@link HoloEditFixOrDynamic} (memoire de joueur), qui autorise alors translation et rotation (conversion).
+     * {@link HoloEditFixOrDynamic} (memoire de joueur, avec les deux capacites {@link #bothOwn}), qui autorise alors
+     * translation et rotation (conversion).
      *
      * @param openOffset nouvelle position relative ({@link HoloRelativeToOpen}), {@code null} = inchangee
+     * @param rotationFrame repere de rotation demande (changeable pour un {@link HoloRelativeToOpen} avec
+     *                      {@link HoloEditRotation})
      * @param editRange  portee d'edition demandee (changeable pour un objet ancre {@code World})
      */
     public static boolean accepts(HoloObject object, boolean playerScope, HoloAnchor anchor, HoloTransform transform,
-                                  HoloDisplay display, HoloTransform openOffset, float editRange)
+                                  HoloDisplay display, HoloTransform openOffset, HoloRotationFrame rotationFrame,
+                                  float editRange, Set<HoloEditorCapability> capabilities)
     {
-        if (!Float.isFinite(editRange)) return false;
+        if (!Float.isFinite(editRange) || rotationFrame == null) return false;
+        if (rotationFrame != object.rotationFrame()
+                && !(object.openOffset() != null && object instanceof HoloEditRotation)) {
+            return false;
+        }
         // Portee d'edition : objets ancres dans le monde seulement, dans ses bornes.
         if (Math.abs(editRange - object.editRange()) > EPSILON && !(anchor instanceof HoloAnchor.World
                 && editRange >= HoloObject.MIN_EDIT_RANGE && editRange <= HoloObject.MAX_EDIT_RANGE)) {
@@ -98,7 +135,8 @@ public final class HoloEditRules
         HoloEditMath math = new HoloEditMath();
         HoloTransform current = object.transform();
         boolean switched = !anchor.equals(object.anchor());
-        if (switched && !(fixOrDynamic(object, object.anchor(), playerScope) && anchor instanceof HoloAnchor.Local)) {
+        if (switched && !(fixOrDynamic(object, object.anchor(), playerScope) && anchor instanceof HoloAnchor.Local
+                && bothOwn(capabilities))) {
             return false;
         }
         if (!sameTranslation(current, transform) && !(switched || object instanceof HoloEditTranslation)) {

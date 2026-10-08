@@ -2,6 +2,7 @@ package com.amynna.hololib.holo.module;
 
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.holo.edit.HoloDisplay;
+import com.amynna.hololib.holo.edit.HoloRotationFrame;
 import com.amynna.hololib.holo.memory.HoloScope;
 import com.amynna.hololib.holo.object.HoloAccess;
 import com.amynna.hololib.holo.object.HoloAnchor;
@@ -218,8 +219,8 @@ public abstract class HoloModule
     }
 
     /**
-     * Usage interne : etat complet sauvegarde (etat du module + ancrage, transform, visibilite, affichage, acces et
-     * position relative des objets).
+     * Usage interne : etat complet sauvegarde (etat du module + ancrage, transform, visibilite, affichage, acces,
+     * position relative et repere de rotation des objets).
      */
     @ApiStatus.Internal
     public final CompoundTag saveAll()
@@ -235,7 +236,10 @@ public abstract class HoloModule
             objectTag.putString("display", object.display().name());
             objectTag.putFloat("editRange", object.editRange());
             objectTag.put("access", object.access().save());
-            if (object.openOffset() != null) objectTag.put("openOffset", object.openOffset().save());
+            if (object.openOffset() != null) {
+                objectTag.put("openOffset", object.openOffset().save());
+                objectTag.putString("rotationFrame", object.rotationFrame().name());
+            }
             objectTags.put(object.key(), objectTag);
         }
         CompoundTag tag = new CompoundTag();
@@ -271,11 +275,19 @@ public abstract class HoloModule
                     HoloLib.LOGGER.warn("Affichage invalide pour l'objet {} du module {}", object.key(), type);
                 }
             }
+            HoloRotationFrame frame = null;
+            if (objectTag.contains("rotationFrame", Tag.TAG_STRING)) {
+                try {
+                    frame = HoloRotationFrame.valueOf(objectTag.getString("rotationFrame"));
+                } catch (IllegalArgumentException e) {
+                    HoloLib.LOGGER.warn("Repere de rotation invalide pour l'objet {} du module {}", object.key(), type);
+                }
+            }
             HoloAccess access = objectTag.contains("access", Tag.TAG_COMPOUND)
                     ? HoloAccess.load(objectTag.getCompound("access")) : null;
             object.restore(visibility, display, access, anchor,
                     HoloTransform.load(objectTag.getCompound("transform")),
-                    HoloTransform.load(objectTag.getCompound("openOffset")),
+                    HoloTransform.load(objectTag.getCompound("openOffset")), frame, null,
                     objectTag.contains("editRange", Tag.TAG_FLOAT) ? objectTag.getFloat("editRange") : Float.NaN);
         }
     }

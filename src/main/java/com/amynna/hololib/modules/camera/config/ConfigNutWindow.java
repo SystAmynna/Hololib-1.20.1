@@ -7,6 +7,7 @@ import com.amynna.hololib.holo.edit.HoloEditTranslation;
 import com.amynna.hololib.holo.edit.HoloRelativeToOpen;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
+import com.amynna.hololib.holo.object.HoloVisibility;
 import com.amynna.hololib.holo.widget.control.HoloWidgetButton;
 import com.amynna.hololib.holo.window.HoloWindow;
 
@@ -28,6 +29,8 @@ public final class ConfigNutWindow extends HoloWindow implements HoloRelativeToO
     {
         super(key, new HoloAnchor.Local(false), HoloTransform.translation(-28f, 16f, 0.8f), SIZE, SIZE, 1f / 400f);
         setDisplay(HoloDisplay.FOCUS);
+        // Publique : un joueur qui inspecte le proprietaire la voit (sans pouvoir l'utiliser).
+        setVisibility(HoloVisibility.PUBLIC);
         button = root().add(new ConfigNutButton(0, 0, SIZE, onPress));
     }
 

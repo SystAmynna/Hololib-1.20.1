@@ -11,6 +11,7 @@ import com.amynna.hololib.holo.edit.HoloEditRules;
 import com.amynna.hololib.holo.edit.HoloEditVisibility;
 import com.amynna.hololib.holo.edit.HoloEditorCapability;
 import com.amynna.hololib.holo.edit.HoloEditorUi;
+import com.amynna.hololib.holo.edit.HoloRotationFrame;
 import com.amynna.hololib.holo.memory.HoloScope;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAnchor;
@@ -27,6 +28,7 @@ import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import org.joml.Quaternionf;
+import org.joml.Vector2fc;
 
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -35,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Session d'edition du joueur local (fil client), ouverte et fermee par un module (l'editor). Tant qu'elle est
@@ -44,9 +47,13 @@ import java.util.UUID;
  *     joueur) et proposant un outil recoit ses boutons ; un objet ancre {@code World}, seulement a moins de sa portee
  *     d'edition ({@code HoloObject.editRange()})
  *     ({@link HoloEditTarget}) ; un objet editable masque ({@code OFF} / {@code FOCUS}) est dessine ;</li>
- *     <li>les objets {@code Local} follow du joueur (et des memoires sans proprietaire) sont <b>tenus</b> : affiches
+ *     <li>avec l'edition des objets dynamiques ({@link #setDynamicEditing}, Own Dyn Editor actif ; toujours pour les
+ *     objets d'interface de l'editeur {@link HoloEditorUi}), les objets {@code Local} follow du joueur (et des
+ *     memoires sans proprietaire) sont <b>tenus</b> : affiches
  *     fixes dans le repere de reference (regard a l'ouverture), puis reconvertis a la fermeture ; de meme, un
- *     {@code HoloRelativeToOpen} de la memoire du joueur est place depuis sa position relative ;</li>
+ *     {@code HoloRelativeToOpen} de la memoire du joueur est place depuis sa position relative (selon son
+ *     {@link HoloRotationFrame}), sauf s'il est deja place (focus ouvert a l'ouverture : il reste ou il est, dans le
+ *     repere de son placement, et y reste a la fermeture) ;</li>
  *     <li>avec un hote de cadre HUD, les objets HUD quittent le HUD pour ce cadre ({@link #hudSuspended()}).</li>
  * </ul>
  * Une modification est envoyee au serveur ({@link HoloEditObjectPacket}) a la fin de chaque manipulation ; celle d'un
@@ -64,6 +71,7 @@ public final class HoloEditSession
     private static final HoloAnchor.Local FOLLOW = new HoloAnchor.Local(true);
 
     private static boolean active;
+    private static boolean dynamicEditing;
     private static HoloObject hudHost;
     private static HoloObject selectedHud;
     private static final Map<HoloObject, HoloEditTarget> TARGETS = new IdentityHashMap<>();
@@ -83,15 +91,20 @@ public final class HoloEditSession
      * @param yaw     regard de reference (degres)
      * @param pitch   regard de reference
      * @param hudHost objet qui affiche le cadre HUD (les objets HUD quittent alors le HUD), ou {@code null}
+     * @param placements regard (yaw, pitch) avec lequel un {@code HoloRelativeToOpen} deja affiche a ete place
+     *                   (focus), ou {@code null} ; fonction elle-meme {@code null} si rien n'est place
+     * @param dynamicEditing objets dynamiques tenus et editables ({@link #setDynamicEditing})
      */
-    public static void open(float yaw, float pitch, HoloObject hudHost)
+    public static void open(float yaw, float pitch, HoloObject hudHost,
+                            Function<HoloObject, ? extends Vector2fc> placements, boolean dynamicEditing)
     {
         if (active) return;
         active = true;
+        HoloEditSession.dynamicEditing = dynamicEditing;
         HoloEditMath.yawPitch(BASE, yaw, pitch);
         HoloEditSession.hudHost = hudHost;
         selectedHud = null;
-        holdNew();
+        holdNew(placements);
     }
 
     /** Ferme la session : envoie les objets tenus modifies, restaure les autres, retire les boutons. */
@@ -106,6 +119,36 @@ public final class HoloEditSession
         active = false;
         hudHost = null;
         selectedHud = null;
+    }
+
+    /**
+     * Edition des objets dynamiques (Own Dyn Editor actif) : ils sont tenus dans le repere du regard a l'ouverture.
+     * Desactivee en cours de session, les objets dynamiques tenus sont relaches (reconvertis, envoyes s'ils ont
+     * change) ; reactivee, ils sont repris au tick suivant. Les objets {@link HoloEditorUi} restent tenus.
+     */
+    public static void setDynamicEditing(boolean dynamicEditing)
+    {
+        if (!active || dynamicEditing == HoloEditSession.dynamicEditing) return;
+        HoloEditSession.dynamicEditing = dynamicEditing;
+        if (dynamicEditing) return;
+        Iterator<Map.Entry<HoloObject, Held>> iterator = HELD.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<HoloObject, Held> entry = iterator.next();
+            HoloObject object = entry.getKey();
+            Held held = entry.getValue();
+            if (object instanceof HoloEditorUi || !held.dynamic()) continue;
+            HoloEditTarget target = TARGETS.get(object);
+            if (target != null && HoloEditTools.target() == target) HoloEditTools.select(null, null);
+            release(object, held);
+            iterator.remove();
+        }
+    }
+
+    /** Vrai si le joueur local a les deux editeurs de sa memoire actifs : la bascule fixe / dynamique est proposee. */
+    public static boolean bothOwnEditors()
+    {
+        ClientHoloContainer local = ClientHoloWorld.local();
+        return local != null && HoloEditRules.bothOwn(HoloEditRules.capabilities(local.modules()));
     }
 
     /** Vrai si les objets HUD sont affiches dans le cadre de l'editor plutot qu'au HUD. */
@@ -151,7 +194,8 @@ public final class HoloEditSession
 
     /**
      * Vrai si le joueur local peut editer cet objet de la portee {@code scope} : memes regles que le serveur, avec les
-     * capacites des modules editeurs de sa memoire.
+     * capacites des modules editeurs de sa memoire. Capacite de l'objet (fixe, dynamique, HUD) d'apres son etat reel
+     * (celui d'un objet tenu avant la session).
      */
     public static boolean mayEdit(HoloObject object, HoloScope scope)
     {
@@ -161,7 +205,9 @@ public final class HoloEditSession
         Set<HoloEditorCapability> capabilities = local != null ? HoloEditRules.capabilities(local.modules())
                 : Set.of();
         UUID editOwner = object.module() != null ? object.module().editOwner() : null;
-        return HoloEditRules.mayEdit(player.getUUID(), player.hasPermissions(2), scope, editOwner, object,
+        Held held = active ? HELD.get(object) : null;
+        HoloEditorCapability own = HoloEditRules.ownCapability(object, held != null ? held.anchor : object.anchor());
+        return HoloEditRules.mayEdit(player.getUUID(), player.hasPermissions(2), scope, editOwner, object, own,
                 capabilities);
     }
 
@@ -230,10 +276,11 @@ public final class HoloEditSession
             return;
         }
         HoloTransform transform = object.transform();
-        if (converted(object)) {
-            MATH.rebaseLocal(transform, IDENTITY, BASE, TMP);
+        Held held = converted(object);
+        if (held != null) {
+            toReal(object, held, transform, TMP);
             copy(TMP, object.defaultTransform(), group);
-            MATH.rebaseLocal(TMP, BASE, IDENTITY, transform);
+            toDisplayed(object, held, TMP, transform);
         } else {
             copy(transform, object.defaultTransform(), group);
         }
@@ -244,7 +291,8 @@ public final class HoloEditSession
     static boolean isDefault(HoloObject object, HoloEditTool group)
     {
         HoloTransform real = object.transform();
-        if (converted(object)) real = MATH.rebaseLocal(real, IDENTITY, BASE, TMP);
+        Held held = converted(object);
+        if (held != null) real = toReal(object, held, real, TMP);
         HoloTransform def = object.defaultTransform();
         return switch (group) {
             case TRANSLATE -> HoloEditRules.sameTranslation(real, def);
@@ -311,6 +359,23 @@ public final class HoloEditSession
         held.follow = dynamic;
     }
 
+    /**
+     * Repere de la rotation d'un {@code HoloRelativeToOpen} : l'objet affiche ne bouge pas, sa position relative sera
+     * recalculee dans le nouveau repere a la fermeture.
+     */
+    static void setRotationFrame(HoloObject object, HoloRotationFrame frame)
+    {
+        if (!active || object.openOffset() == null || frame == object.rotationFrame()) return;
+        object.setRotationFrame(frame);
+        Held held = HELD.get(object);
+        if (held != null) {
+            held.rotated = true;
+            held.frame = true;
+        } else {
+            send(object);
+        }
+    }
+
     // ---------------------------------------------------------------- tick
 
     /** Apres le routage du tick ({@code ClientHoloWorld}, priorite normale). */
@@ -325,7 +390,7 @@ public final class HoloEditSession
             return;
         }
         dropDead();
-        holdNew();
+        holdNew(null);
         refreshTargets();
         HoloEditTools.tick();
     }
@@ -336,8 +401,11 @@ public final class HoloEditSession
         HELD.keySet().removeIf(object -> !alive(object));
     }
 
-    /** Tient les objets follow et {@code HoloRelativeToOpen} pas encore tenus (nouveaux, ou a l'ouverture). */
-    private static void holdNew()
+    /**
+     * Tient les objets follow et {@code HoloRelativeToOpen} pas encore tenus (nouveaux, ou a l'ouverture) ;
+     * {@code placements} : voir {@link #open}.
+     */
+    private static void holdNew(Function<HoloObject, ? extends Vector2fc> placements)
     {
         Player player = Minecraft.getInstance().player;
         if (player == null) return;
@@ -348,35 +416,54 @@ public final class HoloEditSession
             for (HoloModule module : container.modules()) {
                 for (HoloObject object : module.objects()) {
                     if (!object.replicated() || HELD.containsKey(object)) continue;
+                    if (!dynamicEditing && !(object instanceof HoloEditorUi)) continue;
                     if (object.openOffset() != null && owner != null) {
-                        hold(object, true);
+                        hold(object, true, placements != null ? placements.apply(object) : null);
                     } else if (object.anchor() instanceof HoloAnchor.Local anchor && anchor.follow()) {
-                        hold(object, false);
+                        hold(object, false, null);
                     }
                 }
             }
         }
     }
 
-    private static void hold(HoloObject object, boolean offset)
+    /** @param placement regard de placement d'un {@code HoloRelativeToOpen} deja affiche, ou {@code null} */
+    private static void hold(HoloObject object, boolean offset, Vector2fc placement)
     {
         HoloTransform transform = object.transform();
         Held held = new Held(object.anchor(), transform.copy(), offset ? object.openOffset().copy() : null);
         held.follow = !offset;
         HELD.put(object, held);
-        if (offset) transform.set(object.openOffset());
-        MATH.rebaseLocal(transform, BASE, IDENTITY, transform);
+        if (offset && placement != null && FIXED.equals(object.anchor())) {
+            // Deja place : il reste ou il est, sa position relative est dans le repere de son placement.
+            held.placed = true;
+            HoloEditMath.yawPitch(held.base, placement.x(), placement.y());
+            return;
+        }
+        if (offset) {
+            MATH.fromOffset(object.openOffset(), BASE, object.rotationFrame(), transform);
+        } else {
+            MATH.rebaseLocal(transform, BASE, IDENTITY, transform);
+        }
         object.setAnchor(FIXED);
     }
 
-    /** Fin de session pour un objet tenu : etat reel recalcule, envoye s'il a change, sinon restaure. */
+    /**
+     * Fin de session pour un objet tenu : etat reel recalcule, envoye s'il a change, sinon restaure. Un
+     * {@code HoloRelativeToOpen} deja place garde sa position affichee.
+     */
     private static void release(HoloObject object, Held held)
     {
         if (!alive(object)) return;
         HoloTransform current = object.transform();
         if (held.offset != null) {
             HoloTransform offset = held.offset.copy();
-            merge(offset, MATH.rebaseLocal(current, IDENTITY, BASE, TMP), held, true);
+            merge(offset, toReal(object, held, current, TMP), held, true);
+            if (held.placed) {
+                object.openOffset().set(offset);
+                if (held.edited()) send(object, FIXED, current, offset);
+                return;
+            }
             object.setAnchor(held.anchor);
             current.set(held.original);
             object.openOffset().set(offset);
@@ -386,7 +473,7 @@ public final class HoloEditSession
         boolean wasFollow = held.anchor instanceof HoloAnchor.Local local && local.follow();
         if (held.follow) {
             HoloTransform real = held.original.copy();
-            merge(real, MATH.rebaseLocal(current, IDENTITY, BASE, TMP), held, wasFollow);
+            merge(real, MATH.rebaseLocal(current, IDENTITY, held.base, TMP), held, wasFollow);
             object.setAnchor(FOLLOW);
             current.set(real);
             if (held.edited() || !wasFollow) send(object, FOLLOW, current, null);
@@ -465,11 +552,29 @@ public final class HoloEditSession
         return position.distanceToSqr(mc.player.getEyePosition(partialTick)) <= range * range;
     }
 
-    /** Vrai si l'objet affiche est un {@code Local} fixe converti depuis le repere de reference (follow, offset). */
-    private static boolean converted(HoloObject object)
+    /**
+     * Objet tenu si l'objet affiche est un {@code Local} fixe converti depuis un repere de regard (follow, offset),
+     * sinon {@code null}.
+     */
+    private static Held converted(HoloObject object)
     {
         Held held = HELD.get(object);
-        return held != null && (held.offset != null || held.anchor instanceof HoloAnchor.Local local && local.follow());
+        return held != null && (held.offset != null || held.anchor instanceof HoloAnchor.Local local && local.follow())
+                ? held : null;
+    }
+
+    /** Transform reel (position relative, ou {@code Local} follow) d'un objet tenu converti, depuis l'affiche. */
+    private static HoloTransform toReal(HoloObject object, Held held, HoloTransform displayed, HoloTransform out)
+    {
+        return held.offset != null ? MATH.toOffset(displayed, held.base, object.rotationFrame(), out)
+                : MATH.rebaseLocal(displayed, IDENTITY, held.base, out);
+    }
+
+    /** Inverse de {@link #toReal}. */
+    private static HoloTransform toDisplayed(HoloObject object, Held held, HoloTransform real, HoloTransform out)
+    {
+        return held.offset != null ? MATH.fromOffset(real, held.base, object.rotationFrame(), out)
+                : MATH.rebaseLocal(real, held.base, IDENTITY, out);
     }
 
     /** Vrai si l'objet appartient a une memoire de joueur. */
@@ -492,7 +597,7 @@ public final class HoloEditSession
         if (module == null || !alive(object)) return;
         HoloNetwork.CHANNEL.sendToServer(new HoloEditObjectPacket(module.scope(), module.instanceId(), object.key(),
                 anchor, transform.copy(), object.display(), offset != null ? offset.copy() : null,
-                object.editRange()));
+                object.rotationFrame(), object.editRange()));
     }
 
     private static void copy(HoloTransform dest, HoloTransform source, HoloEditTool group)
@@ -512,12 +617,17 @@ public final class HoloEditSession
         private final HoloTransform original;
         /** Non nul : place depuis sa position relative ({@code HoloRelativeToOpen}), qui est ce qu'on edite. */
         private final HoloTransform offset;
+        /** Repere de regard de l'objet converti : celui de la session, ou celui de son placement. */
+        private final Quaternionf base = new Quaternionf(BASE);
+        /** {@code HoloRelativeToOpen} deja place a l'ouverture : il garde sa position a la fermeture. */
+        private boolean placed;
         /** Mode reel voulu a la fermeture : follow (sinon fixe). */
         private boolean follow;
         private boolean translated;
         private boolean rotated;
         private boolean scaled;
         private boolean display;
+        private boolean frame;
 
         private Held(HoloAnchor anchor, HoloTransform original, HoloTransform offset)
         {
@@ -526,6 +636,12 @@ public final class HoloEditSession
             this.offset = offset;
         }
 
-        private boolean edited() { return translated || rotated || scaled || display; }
+        private boolean edited() { return translated || rotated || scaled || display || frame; }
+
+        /** Objet dynamique avant la session ({@code HoloEditRules.dynamic}) : position relative ou follow. */
+        private boolean dynamic()
+        {
+            return offset != null || anchor instanceof HoloAnchor.Local local && local.follow();
+        }
     }
 }

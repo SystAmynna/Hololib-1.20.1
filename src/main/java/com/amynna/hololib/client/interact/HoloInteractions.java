@@ -15,6 +15,8 @@ import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.widget.HoloPanel;
 import com.amynna.hololib.holo.widget.HoloWidget;
+import com.amynna.hololib.holo.widget.control.HoloClickable;
+import com.amynna.hololib.holo.widget.control.HoloScrollable;
 import com.amynna.hololib.holo.window.HoloWindow;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.player.Player;
@@ -41,7 +43,8 @@ import java.util.Map;
  *     <li>Interception : un captor <b>passif</b> de {@link HoloControlCapture} prend un controle si un element de la
  *     chaine survolee (cible, panneaux parents, objet) l'intercepte, et le route vers le premier qui l'intercepte
  *     ({@code onLeftClick...}, {@code onScroll}, {@code onControl}). Le relachement va a l'element qui a pris
- *     l'appui. Les captures explicites passent avant.</li>
+ *     l'appui. Les captures explicites passent avant. Un clic pris par un {@code HoloClickable}, un cran pris par un
+ *     {@code HoloScrollable} jouent leur son ({@link HoloSounds}).</li>
  *     <li>Captures liees a un objet ({@link HoloInteraction#capture}) : terminees si l'objet disparait, n'est plus
  *     dessine ou n'est plus utilisable par le joueur.</li>
  * </ul>
@@ -307,6 +310,9 @@ public final class HoloInteractions
             HoloInteractible receiver = hoverTarget != null ? receiver(hoverTarget, hoverObject, control) : null;
             if (receiver == null) return;
             PRESSED.put(control, new Pressed(receiver, hoverObject, hoverX, hoverY));
+            if (control.mouseButton() >= 0 && receiver instanceof HoloClickable clickable && clickable.clickSound()) {
+                HoloSounds.click(control);
+            }
             HoloInteraction ctx = context(hoverObject, receiver, hoverX, hoverY, true);
             switch (control.mouseButton()) {
                 case 0 -> receiver.onLeftClick(ctx);
@@ -328,7 +334,9 @@ public final class HoloInteractions
         {
             HoloInteractible receiver = hoverTarget != null
                     ? receiver(hoverTarget, hoverObject, HoloControl.SCROLL) : null;
-            if (receiver != null) receiver.onScroll(context(hoverObject, receiver, hoverX, hoverY, true), delta);
+            if (receiver == null) return;
+            if (receiver instanceof HoloScrollable scrollable && scrollable.scrollSound()) HoloSounds.scroll();
+            receiver.onScroll(context(hoverObject, receiver, hoverX, hoverY, true), delta);
         }
     }
 

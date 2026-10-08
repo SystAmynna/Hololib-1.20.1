@@ -9,6 +9,7 @@ import com.amynna.hololib.holo.edit.HoloRelativeToOpen;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloTransform;
+import com.amynna.hololib.holo.object.HoloVisibility;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloLabel;
 import com.amynna.hololib.holo.widget.HoloPanel;
@@ -25,9 +26,11 @@ import java.util.function.Consumer;
  * widgets. Ancree {@code Local} fixe, affichage {@code FOCUS} (non editable) ; deplacable, tournable et
  * redimensionnable dans l'editor ({@link HoloRelativeToOpen} : on edite sa position relative au regard).
  * <p>
- * Etat local au client : ouverte ({@link #shown()}) ou non. {@link #open()} la place devant le regard courant d'apres
- * sa position relative ; une fenetre epinglee se rouvre avec le focus (placee devant le regard a l'ouverture), les
- * autres se ferment avec lui. L'epingle est l'etat du module Config, relie par {@link #link}.
+ * Ouverte ({@link #shown()}) ou non : {@code HoloObject.opened()}, decide par le client du proprietaire et
+ * transmis aux observateurs (fenetre publique : un joueur qui inspecte le proprietaire la voit, sans pouvoir s'en
+ * servir). {@link #open()} la place devant le regard courant d'apres sa position relative ; une fenetre epinglee se
+ * rouvre avec le focus (placee devant le regard a l'ouverture), les autres se ferment avec lui. L'epingle est l'etat
+ * du module Config, relie par {@link #link}.
  */
 public class ConfigWindow extends HoloWindow implements HoloRelativeToOpen, HoloEditTranslation, HoloEditRotation,
         HoloEditScale
@@ -44,7 +47,6 @@ public class ConfigWindow extends HoloWindow implements HoloRelativeToOpen, Holo
     private final HoloPanel content;
     private final ConfigPinButton pin;
     private Consumer<Boolean> link;
-    private boolean open;
 
     /** Partie client : placement devant le regard du joueur local. */
     public interface Backend
@@ -68,6 +70,8 @@ public class ConfigWindow extends HoloWindow implements HoloRelativeToOpen, Holo
     {
         super(key, new HoloAnchor.Local(false), transform, contentWidth, contentHeight + BAR_HEIGHT, pixelScale);
         setDisplay(HoloDisplay.FOCUS);
+        setVisibility(HoloVisibility.PUBLIC);
+        setOpened(false);
         setInterceptedInputs(HoloControl.LEFT_CLICK, HoloControl.RIGHT_CLICK);
         root().setBackground(BACKGROUND).setBorder(ACCENT, 1f);
         root().add(new HoloPanel(0, 0, contentWidth, BAR_HEIGHT).setBackground(BAR_BACKGROUND));
@@ -83,21 +87,21 @@ public class ConfigWindow extends HoloWindow implements HoloRelativeToOpen, Holo
     /** Zone sous la barre de titre, pour les widgets du module. */
     public final HoloPanel content() { return content; }
 
-    /** Cote client : vrai si la fenetre est ouverte. */
-    public final boolean isOpen() { return open; }
+    /** Vrai si la fenetre est ouverte. */
+    public final boolean isOpen() { return opened(); }
 
-    /** Cote client : ouvre la fenetre (ou la ramene) devant le regard courant. */
+    /** Cote client (proprietaire) : ouvre la fenetre (ou la ramene) devant le regard courant. */
     public final void open()
     {
         if (backend != null) backend.placeInFront(this);
-        open = true;
+        requestOpened(true);
     }
 
-    /** Cote client : ferme la fenetre. */
-    public final void close() { open = false; }
+    /** Cote client (proprietaire) : ferme la fenetre. */
+    public final void close() { requestOpened(false); }
 
-    /** Cote client : ouvre ou ferme sans la deplacer (reouverture avec le focus, deja placee). */
-    public final void setOpen(boolean open) { this.open = open; }
+    /** Cote client (proprietaire) : ouvre ou ferme sans la deplacer (reouverture avec le focus, deja placee). */
+    public final void setOpen(boolean open) { requestOpened(open); }
 
     public final boolean pinned() { return pin.isOn(); }
 
@@ -113,7 +117,7 @@ public class ConfigWindow extends HoloWindow implements HoloRelativeToOpen, Holo
     }
 
     @Override
-    public boolean shown() { return open; }
+    public boolean shown() { return opened(); }
 
     /** Croix de fermeture : deux barres en diagonale. */
     private static final class CloseButton extends HoloWidgetButton

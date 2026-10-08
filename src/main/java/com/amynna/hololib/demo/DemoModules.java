@@ -27,6 +27,8 @@ public final class DemoModules
             "demo_keyboard", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, DemoKeyboardModule::new));
     public static final RegistryObject<HoloModuleType<DemoConfigurableModule>> DEMO_CONFIGURABLE = REGISTER.register(
             "demo_configurable", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, DemoConfigurableModule::new));
+    public static final RegistryObject<HoloModuleType<DemoQuickActionsModule>> DEMO_QUICK_ACTIONS = REGISTER.register(
+            "demo_quick_actions", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, DemoQuickActionsModule::new));
 
     private DemoModules() {}
 }
