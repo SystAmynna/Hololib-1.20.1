@@ -15,6 +15,9 @@ import com.amynna.hololib.modules.camera.editor.WorldEditorModule;
 import com.amynna.hololib.modules.camera.focus.FocusModule;
 import com.amynna.hololib.modules.camera.quickaction.QuickActionModule;
 import com.amynna.hololib.modules.dimension.planet1.Planet1Module;
+import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
+import com.amynna.hololib.modules.monde.spaceconfigurator.SpaceConfiguratorModule;
+import com.amynna.hololib.modules.monde.spacecontroller.SpaceControllerModule;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.RegistryObject;
 
@@ -26,6 +29,13 @@ public final class HoloLibModules
 
     public static final RegistryObject<HoloModuleType<Planet1Module>> PLANET_1 = REGISTER.register(
             "planet_1", () -> new HoloModuleType<>(HoloModuleTarget.DIMENSION, Planet1Module::new));
+    public static final RegistryObject<HoloModuleType<SpaceEnvironmentModule>> SPACE_ENVIRONMENT = REGISTER.register(
+            "space_environment", () -> new HoloModuleType<>(HoloModuleTarget.DIMENSION, SpaceEnvironmentModule::new));
+    public static final RegistryObject<HoloModuleType<SpaceControllerModule>> SPACE_CONTROLLER = REGISTER.register(
+            "space_controller", () -> new HoloModuleType<>(HoloModuleTarget.POSITION, SpaceControllerModule::new));
+    public static final RegistryObject<HoloModuleType<SpaceConfiguratorModule>> SPACE_CONFIGURATOR =
+            REGISTER.register("space_configurator",
+                    () -> new HoloModuleType<>(HoloModuleTarget.POSITION, SpaceConfiguratorModule::new));
     public static final RegistryObject<HoloModuleType<FocusModule>> FOCUS = REGISTER.register(
             "focus", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, FocusModule::new));
     public static final RegistryObject<HoloModuleType<OwnFixEditorModule>> OWN_FIX_EDITOR = REGISTER.register(

@@ -5,7 +5,8 @@
  * <h2>Quel renderer pour quel besoin</h2>
  * <ul>
  *     <li>{@link com.amynna.hololib.client.render.sky.SkyRenderer} : objet dans le ciel (skybox), dessine juste apres
- *     le ciel vanilla : <b>tout le reste du monde passe devant</b>.</li>
+ *     le ciel vanilla : <b>tout le reste du monde passe devant</b>. Peut aussi fixer la couleur du brouillard (horizon,
+ *     terrain lointain, fond de l'ecran).</li>
  *     <li>{@link com.amynna.hololib.client.render.view.ViewRenderer} : dessin dans la vue du joueur, base sur la camera
  *     de rendu, <b>par-dessus le monde</b> mais sous la main et le GUI.</li>
  *     <li>{@link com.amynna.hololib.client.render.world.WorldRenderer} : objet ancre dans le monde, dessine comme une
@@ -22,6 +23,10 @@
  * {@code GameRenderer.renderLevel} appelle {@code LevelRenderer.renderLevel}, qui emet les stages de
  * {@code RenderLevelStageEvent} :
  * <ol>
+ *     <li><b>Couleur du brouillard</b> ({@code ViewportEvent.ComputeFogColor}, poste par {@code FogRenderer.setupColor}
+ *     au debut de {@code LevelRenderer.renderLevel}) : couleur du fond de l'ecran et du brouillard du terrain.
+ *     {@link com.amynna.hololib.client.render.RenderDispatcher} la relaie aux {@code SkyRenderer}
+ *     ({@code fogColor}, ordre d'enregistrement) ; inchangee si aucun ne la modifie.</li>
  *     <li><b>{@code AFTER_SKY}</b> : ciel dessine sans ecrire la profondeur. Le PoseStack de l'evenement contient la
  *     rotation de la camera (roll compris) ; elle est capturee ici par
  *     {@link com.amynna.hololib.client.render.RenderDispatcher}. On y passe les {@code SkyRenderer}, puis la

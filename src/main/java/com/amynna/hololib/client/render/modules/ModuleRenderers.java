@@ -3,6 +3,9 @@ package com.amynna.hololib.client.render.modules;
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.client.render.modules.camera.editor.EditorRenderers;
 import com.amynna.hololib.client.render.modules.dimension.planet1.Planet1Renderers;
+import com.amynna.hololib.client.render.modules.dimension.space.SpaceRenderers;
+import com.amynna.hololib.client.render.modules.monde.spaceconfigurator.SpaceConfiguratorRenderers;
+import com.amynna.hololib.client.render.modules.monde.spacecontroller.SpaceControllerRenderers;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -20,6 +23,9 @@ public final class ModuleRenderers
         event.enqueueWork(() -> {
             Planet1Renderers.register();
             EditorRenderers.register();
+            SpaceRenderers.register();
+            SpaceControllerRenderers.register();
+            SpaceConfiguratorRenderers.register();
         });
     }
 }

@@ -42,6 +42,11 @@ com.amynna.hololib
 ├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
 ├── modules/                     modules du mod (HoloLibModules = registre) : un sous-package par compatibilite
 │   ├── dimension/planet1/       (dimension, monde, camera), un package par module (module + objets, code commun)
+│   ├── dimension/space/         Space Environment (ciel = systeme stellaire, galaxie, pose du monde) + code commun
+│   │                            Space : model/ (galaxie, systemes, corps, orbites, bornes), math/ (orbites, pose,
+│   │                            mouvement, referentiel, entree du pilote)
+│   ├── monde/spacecontroller/   Space Controller (marker) : fenetre de pilotage, SpacePilotPad, cercles du joystick
+│   ├── monde/spaceconfigurator/ Space Configurator (marker, ops) : cube carte / systeme, fenetre, poignees sondees
 │   └── camera/focus|editor|config|quickaction/ modules joueur : mode focus (H) ; editeurs (G)
 │                                own fix/dyn/hud, world/dimension/other + editor_panel (fenetre Config) ; config (ecrou du focus -> liste des modules
 │                                Configurable) ; quickaction (roue d'actions du focus, QuickActionProvider)
@@ -54,6 +59,8 @@ com.amynna.hololib
     │                            boutons des objets edites (HoloEditTarget / Panel / EyeButton)
     ├── modules/camera/          logique client des modules joueur : FocusController, EditorController,
     │                            ConfigController, QuickActionController
+    ├── modules/dimension|monde/ backends client des modules Space (SpaceEnvironmentClient, SpaceControllerClient,
+    │                            SpaceConfiguratorClient : miroir de dimension, joueur local, op local)
     └── render/                  TOUS les renderers du mod (regle d'architecture)
         ├── package-info.java    doc detaillee : ordre de rendu, regles (source de verite)
         ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
@@ -64,7 +71,9 @@ com.amynna.hololib
         ├── hud/                 HudRenderer, HudRenderContext, HudRenderPass
         ├── demo/                DemoCubeRenderer (objets des demos)
         ├── edit/                HoloGizmoRenderer (segments / cercles des objets World edites)
-        ├── modules/             renderers des modules, meme arborescence que modules/ (ModuleRenderers au setup)
+        ├── modules/             renderers des modules, meme arborescence que modules/ (ModuleRenderers au setup) ;
+        │                        Space : SpaceSkyRenderer (SkyRenderer), SpaceJoystickRenderer, SpaceMapCubeRenderer,
+        │                        SpaceHandleRenderer, SpaceOrbitHandleRenderer
         ├── holo/                ponts objets -> familles (HoloRouting, 4 bridges + HoloFocusBridge : fenetre
         │                        d'outils visee au-dessus de tout), HoloObjectRenderer(s), fenetres,
         │                        HoloPicking (objet sous le reticule ; pas un renderer, partage les placements),
@@ -213,6 +222,40 @@ com.amynna.hololib
   sauvegardes par cle `<type du module>/<id>`. Pour apparaitre dans la roue vue par un observateur, le provider doit
   lui etre envoye (`sharedWithObservers()`). Demo : `hololib:demo_quick_actions`.
 
+### Modules Space (`modules/dimension/space`, `modules/monde/space*`)
+
+Conception et decisions (D1-D9, choix C, limites L) : `docs/space/` (le code fait foi). Le monde d'une dimension est
+un vaisseau : sa pose dans un systeme stellaire simule est la camera du ciel.
+- `hololib:space_environment` (dimension) : **seule autorite** sur la galaxie (systemes, corps, orbites de Kepler
+  animees), le systeme courant, la pose du monde (km, quaternion `double`), la vitesse signee, le referentiel, les
+  reglages et le pilote. Aucun objet (`sharedWithObservers()`) ; ciel dessine par `SpaceSkyRenderer` (fond opaque,
+  etoiles de fond = autres systemes, corps a taille apparente reelle, LOD) qui noircit le brouillard (`fogColor`).
+  Acces serveur : `SpaceEnvironmentModule.of(level)` ; client : `client()` (backend). API serveur publique (pilotage,
+  edition qui valide puis incremente la revision, reglages) : Controller et Configurator ne passent que par elle.
+- `hololib:space_controller` (marker) : fenetre `World` (`EVERYONE`, interrupteur "tous / ops" verifie par le
+  serveur) ; clic sur `SpacePilotPad` = capture : Avancer / Reculer = gaz, Gauche / Droite = roulis, Saut = frein,
+  regard = joystick borne a un cone de 30 degres autour de l'axe avant (cercles `SpaceJoystickForward` /
+  `SpaceJoystickAim`, chez le pilote local seulement), Echap rend la main. Actions `BEGIN` / `INPUT` (7 octets,
+  envoyee au changement, battement 20 ticks) / `END` relayees a l'Environment ; un pilote a la fois, libere s'il se
+  tait, part ou si le poste disparait.
+- `hololib:space_configurator` (marker, **ops**, tout masque aux non-ops par `shown()`, verifie d'abord par le
+  serveur) : cube editable (carte galactique, ou systeme edite a temps fige `t_edit`) et fenetre a sa base ; copie
+  en lecture des en-tetes et du systeme edite, rafraichie quand la revision de l'Environment change.
+- **Poignees sondees** : pas de callback d'edition ; `serverTick` compare le transform du cube, de `SpaceMapHandle`
+  (translation de l'etoile selectionnee) et de `SpaceOrbitHandle` (rotation + echelle de l'orbite) a la derniere
+  valeur ecrite par le module et en deduit l'edition. Poignees ajoutees / retirees des deux cotes (serveur au
+  changement d'etat avec `markDirty`, client dans `onSync`, seulement si absentes), memes cles (`handle`, `orbit`).
+- **Sync froid / chaud** (Environment) : chaque envoi est complet ; bloc chaud (tick, pose, vitesse, referentiel,
+  entree, pilote, reglages) puis bloc froid (revision, systeme courant, etoiles de fond) que le client saute si la
+  revision est connue. Envois limites (4 ticks) ; en mouvement, correction toutes les 20 ticks ; rien a l'arret.
+- **Referentiel** : la vitesse est relative a un corps choisi par proximite x regard (delai, cooldown, fondu), qui
+  entraine le monde ; synchronise et sauvegarde. Pose sauvegardee avec son tick (`time`), recalee sur le referentiel
+  au chargement.
+- **Lissage client** : simulation deterministe (`SpaceMotion.step`, `StrictMath`) rejouee par chaque client (dead
+  reckoning) ; horloge d'affichage propre (jamais le `gameTime` vanilla), historique de 32 ticks interpole dans le
+  repere du referentiel, observateur en leger retard, pilote local predit (reconciliation 10 % / tick). Les renderers
+  lisent `pose(partialTick)`, `bodyPositions`, `displayDays`.
+
 ### Capture de controles (independante de l'interaction)
 
 - `HoloControl` : boutons bruts, `SCROLL`, `MOUSE_MOVE`, `ESCAPE`, `ENTER`, `mapping("key.xxx")` (tout `KeyMapping`,
@@ -235,7 +278,7 @@ com.amynna.hololib
 
 | Famille | Stage Forge | Resultat | Gestion de la profondeur |
 |---|---|---|---|
-| `SkyRenderer` | `AFTER_SKY` | dans la skybox, derriere tout le monde | profondeur entre objets du ciel, **videe apres** la passe ; projection du monde sans la translation du bobbing (comme le soleil) |
+| `SkyRenderer` | `AFTER_SKY` (+ `ComputeFogColor` avant) | dans la skybox, derriere tout le monde ; peut fixer la couleur du brouillard (`fogColor` : fond de l'ecran, horizon, terrain lointain) | profondeur entre objets du ciel, **videe apres** la passe ; projection du monde sans la translation du bobbing (comme le soleil) |
 | `WorldRenderer<T>` | `AFTER_ENTITIES` | ancre dans le monde, cache par blocs et entites | profondeur du monde ; buffers **vides par vanilla** avec les entites |
 | `ViewRenderer` | `AFTER_LEVEL` | dans la vue, au-dessus du monde, sous main et GUI | profondeur **videe avant** ; projection `STABLE` (sans bobbing, FOV des options) ou `WORLD` |
 | `HudRenderer` | overlay GUI sous tous les autres | a l'ecran, orthographique, sous le HUD vanilla | profondeur **videe apres** la passe |

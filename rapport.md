@@ -409,6 +409,7 @@ Ordre d'une frame :
 
 | # | Moment | Passe | Ce qui se passe |
 |---|---|---|---|
+| 0 | `ViewportEvent.ComputeFogColor` (posté par `FogRenderer.setupColor`, début de `LevelRenderer.renderLevel`) | `RenderDispatcher.onComputeFogColor` | couleur du brouillard et du fond de l'écran relayée aux `SkyRenderer#fogColor` (ordre d'enregistrement, chacun reçoit celle du précédent) ; événement inchangé sans renderer ou si la couleur n'a pas changé ; exception d'un renderer loguée une fois, couleur reçue conservée |
 | 1 | `AFTER_SKY` | `SkyRenderPass` | capture de la rotation caméra (le PoseStack de ce stage la contient, roll compris) ; renderers du ciel ; profondeur **vidée après** s'ils ont dessiné |
 | 2 | `AFTER_ENTITIES` | `WorldRenderPass` | renderers du monde, dans le `BufferSource` du jeu, **vidé par vanilla** avec les entités ; profondeur du monde |
 | 3 | `AFTER_LEVEL` | `ViewRenderPass` | profondeur **vidée avant**, brouillard neutralisé, model-view à l'identité ; projection `STABLE` (FOV du jeu, sans bobbing) ou `WORLD` ; tout est restauré après |
@@ -422,7 +423,7 @@ alloué par frame.
 
 | Famille | Résultat | Repère de la pile reçue |
 |---|---|---|
-| `SkyRenderer` | dans la skybox, derrière tout le monde ; masqué quand vanilla ne dessine pas le ciel (`hiddenWithSky`) | centré sur l'œil, axes du monde |
+| `SkyRenderer` | dans la skybox, derrière tout le monde ; masqué quand vanilla ne dessine pas le ciel (`hiddenWithSky`) ; peut fixer la couleur du brouillard (`fogColor`) | centré sur l'œil, axes du monde |
 | `WorldRenderer<T>` | ancré dans le monde, caché par blocs et entités ; culling distance + frustum | translaté à la position de l'objet (relative à la caméra), axes du monde |
 | `ViewRenderer` | dans la vue, au-dessus du monde, sous main et GUI ; masqué en F1 par défaut | espace vue : œil, `-Z` devant, `+X` à droite |
 | `HudRenderer` | à l'écran, sous le HUD vanilla ; masqué en F1, aussi dessiné sous un écran ouvert | pixels GUI, origine en haut à gauche, `y` vers le bas, `+Z` vers l'observateur |
@@ -790,6 +791,56 @@ d'inspection de la nouvelle mémoire s'appliquent aussitôt. Aucune commande ne 
    `onCaptureEnd` → `onSubmit` envoie le texte (`sendAction(window, ...)`) ; plus personne ne prend le clavier :
    l'écran se ferme. Le serveur borne le texte (`HoloTextBuffer.sanitize`), le sauvegarde et le renvoie.
 
+### 8.12 Piloter le monde dans un système stellaire (modules Space)
+
+Conception complète : `docs/space/`. Les trois modules sont décrits au [§9](#9-commandes).
+
+**Installation** (op) :
+1. `/hololib_module add dimension here hololib:space_environment` → `HoloContainer.install` → `onLoad` (serveur) crée
+   la galaxie par défaut (Sol + 11 systèmes voisins), choisit Sol comme système courant ; la pose par défaut est
+   calculée au premier `serverTick` (sur la droite Soleil → Terre, à 1,02 fois l'orbite de la Terre, l'avant du monde tourné vers le Soleil). Le module n'a aucun objet mais
+   `sharedWithObservers()` : tous les joueurs de la dimension reçoivent son état. Chez eux, `readSync` lit le bloc
+   chaud (pose, vitesse, référentiel, entrée, pilote, réglages) et le bloc froid (système courant, étoiles de fond) ;
+   à la frame suivante, `SpaceSkyRenderer` (un `SkyRenderer`) recouvre le ciel vanilla d'une sphère noire, dessine les
+   autres systèmes en étoiles de fond et les corps à leur taille apparente, et noircit le brouillard (`fogColor`).
+2. `/hololib_marker create poste` puis `/hololib_module add world poste hololib:space_controller` : fenêtre de
+   contrôle 1,6 bloc au-dessus du marker (vitesse, référentiel et altitude, interrupteur « Pilotage : tous / ops »,
+   zone « Cliquer pour piloter »). L'état est recopié de l'Environment à chaque tick serveur et envoyé au plus 4 fois
+   par seconde, seulement s'il change.
+3. `/hololib_marker create carte` puis `/hololib_module add world carte hololib:space_configurator` : cube de 3 blocs
+   et fenêtre à sa base, visibles des seuls opérateurs (`shown()` via le backend client ; les actions sont refusées
+   par le serveur pour un non-op).
+
+**Pilotage** :
+1. Clic sur la zone → `SpacePilotPad` (trait `HoloPointerInput`) ouvre une capture liée à la fenêtre et envoie
+   `BEGIN` ; le serveur appelle `SpaceEnvironmentModule.claimPilot` (un seul pilote ; refus = message). La caméra est
+   ramenée sur l'axe avant du monde en 0,4 s ; les cercles du joystick n'apparaissent que chez ce pilote.
+2. Chaque frame, `onMouseMove` borne le regard à un cône de 30° autour de l'axe avant ; l'écart au-delà de 2° donne
+   les taux de lacet et de tangage. Avancer / Reculer (touches des options) = gaz, vitesse signée ; Gauche / Droite =
+   roulis ; Saut maintenu = frein. Le pad envoie `INPUT` (7 octets) quand l'entrée quantifiée change (au plus tous les
+   2 ticks, battement toutes les 20) et l'applique aussitôt à la prédiction locale.
+3. Serveur : `SpaceMotion.step` chaque tick (vitesse relative au corps de référence choisi par proximité × regard,
+   freinage d'approche, plancher à 1 % du rayon) ; état envoyé au plus tous les 4 ticks à la nouvelle entrée, toutes
+   les 20 ticks en mouvement, une fois à l'arrêt. Les autres clients rejouent le même calcul (déterministe) depuis
+   l'état reçu, sur leur propre horloge d'affichage : le ciel bouge sans à-coup pour tous.
+4. Échap → fin de la capture → `INPUT` nul puis `END` → `releasePilot` ; le monde garde sa vitesse (freiner avant de
+   rendre la main pour s'arrêter). Un pilote muet 10 s, déconnecté, changé de dimension ou dont le poste disparaît
+   est libéré automatiquement.
+
+**Édition** (op, avec `hololib:world_editor` dans sa mémoire de joueur) :
+1. Fenêtre du Configurator, mode galaxie : clic sur un système = sélection (poignée `SpaceMapHandle` posée sur son
+   étoile), « Ajouter », « Retirer » (deux clics), renommer (champ), « Monde ici » (système courant), « Recadrer »,
+   « Avant du monde ». Chaque bouton envoie une action ; le serveur vérifie l'op, appelle l'API de l'Environment, qui
+   valide, incrémente la révision et se synchronise ; le Configurator recopie la galaxie quand la révision change.
+2. Éditeur (G) : le cube se déplace, tourne et se met à l'échelle (échelle ramenée à l'uniforme) ; la poignée se
+   déplace à la translation. Pas de callback d'édition : le module **sonde** chaque tick serveur le transform de ses
+   objets, compare à la dernière valeur qu'il a écrite et en déduit `moveSystem`.
+3. « Éditer » : mode système, temps figé ; liste des corps, « + Étoile / Planète / Lune », champs (rayon, luminosité,
+   période), palette, phase, « Animer », « Retour ». Le corps sélectionné reçoit une poignée d'orbite
+   (`SpaceOrbitHandle`) : Rotation = plan de l'orbite, Échelle = taille et excentricité (la période suit `a`).
+4. Toute modification du système courant apparaît aussitôt dans le ciel de tous les joueurs de la dimension ; tout
+   est sauvegardé (galaxie et pose dans la mémoire de dimension, cube, cadrage et sélection dans celle du marker).
+
 ---
 
 ## 9. Commandes
@@ -832,6 +883,19 @@ Modules de démonstration (`demo/`) :
   clavier (retour à la ligne automatique, défilement, curseur, flèches, Début / Fin, Ctrl+V, Ctrl+C, 512 caractères) ;
   Échap, ou un regard qui s'éloigne de la zone, valide ; le texte est sauvegardé et visible des joueurs qui
   inspectent.
+
+Modules Space (`modules/dimension/space`, `modules/monde/space*`, conception dans `docs/space/`, scénario au
+[§8.12](#812-piloter-le-monde-dans-un-système-stellaire-modules-space)) :
+- `hololib:space_environment` (dimension) : le monde devient un vaisseau dans un système stellaire simulé. Porte la
+  galaxie de la dimension (systèmes, corps, orbites animées), le système courant et la pose du monde ; seule autorité
+  sur ces données. Remplace le ciel par la vue du système (fond noir, étoiles de fond, astres éclairés) ;
+- `hololib:space_controller` (marker) : poste de pilotage ; un joueur à la fois (tous, ou ops seulement) pilote le
+  monde aux touches de déplacement, au frein (Saut) et au regard (joystick virtuel) ;
+- `hololib:space_configurator` (marker, opérateurs) : cube éditable qui montre la carte galactique (ajouter, déplacer,
+  renommer, retirer des systèmes, choisir celui du monde) ou un système (corps, orbites à la poignée).
+
+Limites connues des modules Space : `docs/space/decisions.md` (L1 à L16), notamment nuages et pluie vanilla dessinés
+par-dessus le ciel spatial et éclairage du monde indépendant de l'étoile.
 
 Un module déjà installé garde ses transforms sauvegardés : réinstaller un module de démo pour voir ses valeurs par
 défaut.
