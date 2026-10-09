@@ -137,8 +137,7 @@ public final class HoloControlCapture
             HoloCaptor captor = EXPLICIT.get(i);
             if (captor.captures(control)) return captor;
         }
-        for (int i = 0; i < PASSIVE.size(); i++) {
-            HoloCaptor captor = PASSIVE.get(i);
+        for (HoloCaptor captor : PASSIVE) {
             if (captor.captures(control)) return captor;
         }
         return null;
@@ -236,12 +235,14 @@ public final class HoloControlCapture
         HoloCaptor captor = captorFor(HoloControl.MOUSE_MOVE);
         if (captor != mouseCaptor) {
             mouseCaptor = captor;
+            assert player != null;
             lockYaw = player.getYRot();
             lockPitch = player.getXRot();
             pendingYaw = 0f;
             pendingPitch = 0f;
         }
         if (mouseCaptor != null) {
+            assert player != null;
             pendingYaw += player.getYRot() - lockYaw;
             pendingPitch += player.getXRot() - lockPitch;
             applyLock(player);
