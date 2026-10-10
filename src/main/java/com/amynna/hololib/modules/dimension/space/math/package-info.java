@@ -1,6 +1,7 @@
 /**
  * Calculs purs et deterministes des modules Space (T02) : unites, orbites de Kepler, pose du monde, pas de mouvement,
- * entree du pilote, referentiel, passage systeme -> ciel. Specification : {@code docs/space/04-mathematiques.md} par. 1 a 5 et
+ * entree du pilote, referentiel, saut, passage systeme -> ciel. Specification :
+ * {@code docs/space/04-mathematiques.md} par. 1 a 5, 8 et
  * {@code 05-synchronisation.md} par. 2 (la meme fonction tourne sur le serveur et sur les clients).
  * <p>
  * Contenu :
@@ -12,15 +13,21 @@
  *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpacePose} : pose du monde dans le systeme
  *     (position km, orientation monde -> systeme), interpolation, reseau, NBT ;</li>
  *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpacePilotInput} : entree quantifiee du pilote (gaz,
- *     roulis, taux de lacet et de tangage, frein, visee) ;</li>
+ *     roulis, taux de lacet et de tangage, frein, visee, saut et sa cible) ;</li>
  *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpaceMotionSettings} : reglages du mouvement et de
- *     l'horloge (axe avant, vitesse max, taux de rotation, echelle de temps) et leurs valeurs par defaut ;</li>
+ *     l'horloge (axe avant, vitesse max, taux de rotation, echelle de temps) et vitesse de distorsion du saut (T15),
+ *     avec leurs valeurs par defaut ;</li>
  *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpaceFrameState} : etat du referentiel (corps de
  *     reference, precedent, ticks depuis la bascule, candidat), reseau, NBT ;</li>
+ *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpaceJump} : etat du saut interstellaire (phase
+ *     charge / voyage, cible, compteur, duree, orientation et positions galactiques figees au debut), progressions,
+ *     reseau, NBT ; fonctions pures : orientation de la charge, duree du voyage, pose d'arrivee (T21, doc 04 par. 8)
+ *     ;</li>
  *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpaceMotion} : un pas de tick (referentiel par score
  *     proximite x regard avec delai, cooldown et fondu, gaz a vitesse signee et frein, rotation, entrainement par le
- *     referentiel, freinage d'approche, garde-fou), pose par defaut d'un systeme (et son referentiel), corps le plus
- *     proche, interpolation d'affichage dans le repere du referentiel ;</li>
+ *     referentiel, freinage d'approche, garde-fou ; variante avec le saut : charge verrouillee, voyage fige), pose
+ *     par defaut d'un systeme (et son referentiel), corps le plus proche, interpolation d'affichage dans le repere du
+ *     referentiel ;</li>
  *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpaceSkyFrame} : repere du ciel d'une frame (point du
  *     systeme -> direction monde + distance, direction d'un autre systeme).</li>
  * </ul>

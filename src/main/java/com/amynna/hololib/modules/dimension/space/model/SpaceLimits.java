@@ -12,8 +12,8 @@ public final class SpaceLimits
 {
     /** Nombre maximal de systemes dans une galaxie. */
     public static final int MAX_SYSTEMS = 256;
-    /** Nombre maximal de corps dans un systeme. */
-    public static final int MAX_BODIES = 32;
+    /** Nombre maximal de corps dans un systeme (48 depuis T16 : Sol en compte 34 ; 32 au lot 1). */
+    public static final int MAX_BODIES = 48;
     /** Longueur maximale d'un nom, en unites UTF-16. */
     public static final int MAX_NAME_LENGTH = 32;
 
@@ -24,20 +24,27 @@ public final class SpaceLimits
     public static final double MIN_RADIUS = 1.0;
     public static final double MAX_RADIUS = 1.0e7;
 
-    /** Demi-grand axe d'une orbite, en UA. */
-    public static final double MIN_SEMI_MAJOR_AXIS = 1.0e-4;
+    /** Demi-grand axe d'une orbite, en UA (minimum 1e-5 depuis T16 : Phobos a 6,27e-5 UA ; 1e-4 au lot 1). */
+    public static final double MIN_SEMI_MAJOR_AXIS = 1.0e-5;
     public static final double MAX_SEMI_MAJOR_AXIS = 1.0e4;
 
     /** Excentricite maximale (ellipse bien formee, Kepler convergent). */
     public static final double MAX_ECCENTRICITY = 0.95;
 
-    /** Periode orbitale, en jours simules. */
+    /**
+     * Periode orbitale, en jours simules (maximum 1e9 depuis T16 : Proxima autour d'Alpha du Centaure A, 2e8 jours ;
+     * 1e7 au lot 1).
+     */
     public static final double MIN_PERIOD = 0.01;
-    public static final double MAX_PERIOD = 1.0e7;
+    public static final double MAX_PERIOD = 1.0e9;
 
     /** Luminosite d'une etoile, relative au Soleil. */
     public static final float MIN_LUMINOSITY = 1.0e-4f;
     public static final float MAX_LUMINOSITY = 1.0e6f;
+
+    /** Vitesse de distorsion du saut interstellaire (reglage de l'Environment, T15), en annees-lumiere par seconde. */
+    public static final double MIN_WARP_SPEED = 0.01;
+    public static final double MAX_WARP_SPEED = 1_000.0;
 
     private SpaceLimits() {}
 
@@ -112,6 +119,12 @@ public final class SpaceLimits
         if (wrapped < 0.0) wrapped += 360.0;
         if (wrapped >= 360.0) wrapped -= 360.0;
         return wrapped;
+    }
+
+    /** Vitesse de distorsion bornee a {@code [MIN_WARP_SPEED, MAX_WARP_SPEED]} (al/s). */
+    public static double sanitizeWarpSpeed(double warpSpeed)
+    {
+        return clamp(warpSpeed, MIN_WARP_SPEED, MAX_WARP_SPEED);
     }
 
     /** Couleur d'un corps : ARGB rendue opaque (l'alpha est ignore pour les corps). */

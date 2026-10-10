@@ -282,81 +282,349 @@ public final class SpaceGalaxy
     // ---------------------------------------------------------------- contenu par defaut
 
     /**
-     * Galaxie de premiere installation (doc 03 par. 7) : Sol (id 1) a l'origine, avec le Soleil, une planete tellurique
-     * bleue et sa lune, une planete rouge et une geante orangee (orbites proches du systeme solaire reel, phases
-     * variees), puis 11 etoiles voisines reelles a leurs directions approchees (ascension droite / declinaison, axe
-     * {@code +Y} vers le pole nord celeste), avec un seul corps chacune. Le systeme courant par defaut est Sol (id 1).
+     * Galaxie de premiere installation (doc 03 par. 7, refaite en T16 : decision D15). Toutes les valeurs sont
+     * recopiees de {@code docs/space/donnees-systemes.md} (sources, conventions, objets non retenus et motifs) :
+     * <ul>
+     *     <li><b>Sol</b> (id 1, systeme courant par defaut) a l'origine galactique, 34 corps : le Soleil, les 8
+     *     planetes, 5 objets mineurs ({@link SpaceBodyKind#MINOR} : Ceres, Pluton, Eris, Haumea, Makemake) et
+     *     20 lunes majeures (dont Charon autour de Pluton) ;</li>
+     *     <li>les <b>11 systemes voisins</b> du lot 1, aux memes positions (ascension droite / declinaison, axe
+     *     {@code +Y} vers le pole nord celeste), avec leurs etoiles compagnes (orbites {@code STAR -> STAR}) et leurs
+     *     planetes confirmees au 2026-10-09.</li>
+     * </ul>
+     * Conventions de l'annexe : orientation d'une orbite = {@code yaw} longitude du periastre (inconnue : 0),
+     * {@code pitch} inclinaison, {@code roll} 0 (noeud ascendant non modelise) ; pour une lune, {@code pitch} =
+     * obliquite du parent + inclinaison sur son equateur (lunes d'Uranus presque verticales, Triton retrograde) ; pour
+     * une compagne ou une exoplanete, inclinaison sur le plan du ciel (0 si inconnue). Phases : anomalie moyenne J2000
+     * approchee pour les planetes de Sol et Pluton, arbitraires ailleurs. Rayons d'exoplanetes sans transit
+     * <b>estimes</b> (relation masse-rayon de l'archive NASA, a partir de la masse minimale). Noms sans accents (C15).
+     * Ids des corps dans l'ordre de l'annexe (l'etoile principale en premier, id 1), ids des systemes de 1 a 12.
+     * <p>
+     * Une galaxie deja sauvegardee n'est jamais remplacee (C51) : seule une nouvelle installation sans archive
+     * (T14) utilise ce contenu.
      */
     public static SpaceGalaxy createDefault()
     {
         SpaceGalaxy galaxy = new SpaceGalaxy();
-        List<SpaceBody> sol = List.of(
-                new SpaceBody(1, SpaceBodyKind.STAR, "Soleil", 0, 696_000.0, 0xFFFFE07A, 1.0f, null),
-                new SpaceBody(2, SpaceBodyKind.PLANET, "Terre", 1, 6_371.0, 0xFF3A6FD8, 1.0f,
-                        new SpaceOrbit(1.0, 0.0167, 102.9, 0.0, 0.0, 365.0, 100.0)),
-                new SpaceBody(3, SpaceBodyKind.MOON, "Lune", 2, 1_737.0, 0xFFB4B4B4, 1.0f,
-                        new SpaceOrbit(0.00257, 0.0549, 45.0, 5.14, 0.0, 27.3, 220.0)),
-                new SpaceBody(4, SpaceBodyKind.PLANET, "Mars", 1, 3_390.0, 0xFFC1440E, 1.0f,
-                        new SpaceOrbit(1.52, 0.0934, -23.9, 1.85, 0.0, 687.0, 300.0)),
-                new SpaceBody(5, SpaceBodyKind.PLANET, "Jupiter", 1, 69_911.0, 0xFFD8A06A, 1.0f,
-                        new SpaceOrbit(5.2, 0.0489, 14.7, 1.3, 0.0, 4_333.0, 40.0)));
-        galaxy.systems.add(new SpaceSystem(1, "Sol", 0.0, 0.0, 0.0, sol, 6));
-        // Nom, ascension droite (h), declinaison (deg), distance (al), luminosite, couleur, rayon (km).
-        galaxy.addNeighbor("Alpha du Centaure", 14.66, -60.83, 4.37, 1.52f, 0xFFFFF1C8, 852_000.0);
-        galaxy.addNeighbor("Barnard", 17.96, 4.69, 5.96, 0.0035f, 0xFFFF8A5C, 136_000.0);
-        galaxy.addNeighbor("Wolf 359", 10.94, 7.01, 7.86, 0.0011f, 0xFFFF7448, 112_000.0);
-        galaxy.addNeighbor("Lalande 21185", 11.06, 35.97, 8.31, 0.02f, 0xFFFF9C66, 274_000.0);
-        galaxy.addNeighbor("Sirius", 6.75, -16.72, 8.60, 25.4f, 0xFFCAD8FF, 1_190_000.0);
-        galaxy.addNeighbor("Epsilon Eridani", 3.55, -9.46, 10.47, 0.34f, 0xFFFFC27A, 512_000.0);
-        galaxy.addNeighbor("61 Cygni", 21.12, 38.75, 11.40, 0.15f, 0xFFFFB46A, 460_000.0);
-        galaxy.addNeighbor("Procyon", 7.66, 5.22, 11.46, 6.93f, 0xFFFFF4E8, 1_430_000.0);
-        galaxy.addNeighbor("Tau Ceti", 1.73, -15.94, 11.91, 0.52f, 0xFFFFE9B0, 550_000.0);
-        galaxy.addNeighbor("Altair", 19.85, 8.87, 16.73, 10.6f, 0xFFF0F4FF, 1_260_000.0);
-        galaxy.addNeighbor("Vega", 18.62, 38.78, 25.04, 40.1f, 0xFFD6E2FF, 1_640_000.0);
+        galaxy.systems.add(sol().build(1, 0.0, 0.0, 0.0));
+        // Ascension droite (h), declinaison (deg), distance (al) : positions du lot 1, inchangees.
+        galaxy.addNeighbor(alphaCentauri(), 14.66, -60.83, 4.37);
+        galaxy.addNeighbor(barnard(), 17.96, 4.69, 5.96);
+        galaxy.addNeighbor(wolf359(), 10.94, 7.01, 7.86);
+        galaxy.addNeighbor(lalande21185(), 11.06, 35.97, 8.31);
+        galaxy.addNeighbor(sirius(), 6.75, -16.72, 8.60);
+        galaxy.addNeighbor(epsilonEridani(), 3.55, -9.46, 10.47);
+        galaxy.addNeighbor(cygni61(), 21.12, 38.75, 11.40);
+        galaxy.addNeighbor(procyon(), 7.66, 5.22, 11.46);
+        galaxy.addNeighbor(tauCeti(), 1.73, -15.94, 11.91);
+        galaxy.addNeighbor(altair(), 19.85, 8.87, 16.73);
+        galaxy.addNeighbor(vega(), 18.62, 38.78, 25.04);
         galaxy.nextSystemId = galaxy.systems.size() + 1;
         return galaxy;
     }
 
-    /** Ajoute un systeme voisin a une etoile, place par ascension droite (heures) et declinaison (degres). */
-    private void addNeighbor(String name, double rightAscension, double declination, double distance,
-                             float luminosity, int color, double radius)
+    /** Ajoute un systeme voisin, place par ascension droite (heures) et declinaison (degres) a {@code distance} al. */
+    private void addNeighbor(DefaultSystem system, double rightAscension, double declination, double distance)
     {
         double ra = Math.toRadians(rightAscension * 15.0);
         double dec = Math.toRadians(declination);
         double horizontal = distance * Math.cos(dec);
-        int id = systems.size() + 1;
-        SpaceBody star = new SpaceBody(1, SpaceBodyKind.STAR, name, 0, radius, color, luminosity, null);
-        systems.add(new SpaceSystem(id, name, horizontal * Math.cos(ra), distance * Math.sin(dec),
-                horizontal * Math.sin(ra), List.of(star), 2));
+        systems.add(system.build(systems.size() + 1, horizontal * Math.cos(ra), distance * Math.sin(dec),
+                horizontal * Math.sin(ra)));
+    }
+
+    /**
+     * Sol, 34 corps. Sources : NASA Planetary Fact Sheets (https://nssdc.gsfc.nasa.gov/planetary/factsheet/), JPL SSD
+     * (elements moyens J2000, https://ssd.jpl.nasa.gov/planets/approx_pos.html), JPL Small-Body Database (Eris,
+     * Haumea, Makemake), JPL Planetary Satellite Mean Elements (https://ssd.jpl.nasa.gov/sats/elem/). Objets mineurs :
+     * {@code yaw = Omega + omega}. Lunes : obliquites des parents Mars 25,19, Jupiter 3,13, Saturne 26,73, Uranus
+     * 97,77, Neptune 28,32, Pluton 119,6 (la Lune est donnee par rapport a l'ecliptique) ; demi-grands axes recopies
+     * en UA ({@code a_km / 149 597 870,7}).
+     */
+    private static DefaultSystem sol()
+    {
+        DefaultSystem s = new DefaultSystem("Sol");
+        // Etoile : nom, rayon (km), couleur, luminosite.
+        int soleil = s.star("Soleil", 695_700.0, 0xFFFFE07A, 1.0f);
+        // Planetes, puis objets mineurs : nom, parent, rayon (km), couleur, a (UA), e, yaw, pitch, periode (j), phase.
+        s.planet("Mercure", soleil, 2_439.7, 0xFF9A9A9A, 0.3871, 0.2056, 77.46, 7.00, 87.969, 174.8);
+        s.planet("Venus", soleil, 6_051.8, 0xFFE6C88A, 0.7233, 0.0068, 131.53, 3.39, 224.701, 50.1);
+        int terre = s.planet("Terre", soleil, 6_371.0, 0xFF3A6FD8, 1.0000, 0.0167, 102.94, 0.00, 365.256, 357.5);
+        int mars = s.planet("Mars", soleil, 3_389.5, 0xFFC1440E, 1.5237, 0.0934, 336.04, 1.85, 686.980, 19.4);
+        int jupiter = s.planet("Jupiter", soleil, 69_911.0, 0xFFD8A06A, 5.2029, 0.0489, 14.75, 1.30, 4_332.59, 20.0);
+        int saturne = s.planet("Saturne", soleil, 58_232.0, 0xFFE3CB8F, 9.5367, 0.0565, 92.43, 2.49, 10_759.22, 317.0);
+        int uranus = s.planet("Uranus", soleil, 25_362.0, 0xFF9FD8E0, 19.189, 0.0457, 170.96, 0.77, 30_688.5, 142.2);
+        int neptune = s.planet("Neptune", soleil, 24_622.0, 0xFF3E66D6, 30.070, 0.0113, 44.97, 1.77, 60_182.0, 256.2);
+
+        s.minor("Ceres", soleil, 469.7, 0xFF8C8C88, 2.767, 0.0758, 153.9, 10.59, 1_680.0, 95.0);
+        int pluton = s.minor("Pluton", soleil, 1_188.3, 0xFFD9B58F, 39.48, 0.2488, 224.07, 17.16, 90_560.0, 14.5);
+        s.minor("Eris", soleil, 1_163.0, 0xFFE8E8E8, 67.86, 0.4407, 187.6, 44.04, 203_830.0, 205.0);
+        // Haumea : rayon moyen (corps tres allonge).
+        s.minor("Haumea", soleil, 780.0, 0xFFDADADA, 43.22, 0.191, 0.9, 28.2, 103_774.0, 218.0);
+        s.minor("Makemake", soleil, 715.0, 0xFFC98E6B, 45.43, 0.159, 16.6, 28.98, 111_845.0, 165.0);
+
+        // Lunes : nom, parent, rayon (km), couleur, a (UA), e, pitch, periode (j), phase (arbitraire).
+        s.moon("Lune", terre, 1_737.4, 0xFFB4B4B4, 0.0025696, 0.0549, 5.145, 27.322, 220.0);
+        s.moon("Phobos", mars, 11.27, 0xFF7A6A5A, 0.00006268, 0.0151, 26.27, 0.3189, 10.0);
+        s.moon("Deimos", mars, 6.2, 0xFF8A7A6A, 0.00015684, 0.0003, 26.98, 1.2624, 190.0);
+        s.moon("Io", jupiter, 1_821.6, 0xFFE8D85A, 0.0028189, 0.0041, 3.18, 1.7691, 30.0);
+        s.moon("Europe", jupiter, 1_560.8, 0xFFD9CBB0, 0.0044856, 0.009, 3.60, 3.5512, 120.0);
+        s.moon("Ganymede", jupiter, 2_634.1, 0xFF9C8F80, 0.0071553, 0.0013, 3.33, 7.1546, 250.0);
+        s.moon("Callisto", jupiter, 2_410.3, 0xFF6E6358, 0.0125851, 0.0074, 3.32, 16.689, 330.0);
+        s.moon("Encelade", saturne, 252.1, 0xFFF4F8FF, 0.0015906, 0.0047, 26.74, 1.3702, 60.0);
+        s.moon("Tethys", saturne, 531.1, 0xFFDCDCDC, 0.0019694, 0.0001, 27.85, 1.8878, 150.0);
+        s.moon("Dione", saturne, 561.4, 0xFFC8C8C8, 0.0025227, 0.0022, 26.76, 2.7369, 240.0);
+        s.moon("Rhea", saturne, 763.8, 0xFFBDBDBD, 0.0035235, 0.0013, 27.08, 4.5182, 300.0);
+        s.moon("Titan", saturne, 2_574.7, 0xFFD9A74A, 0.0081677, 0.0288, 27.08, 15.945, 20.0);
+        s.moon("Japet", saturne, 734.5, 0xFF8F8270, 0.0238026, 0.0286, 42.20, 79.321, 110.0);
+        s.moon("Miranda", uranus, 235.8, 0xFFB0B0B0, 0.0008649, 0.0013, 102.00, 1.4135, 200.0);
+        s.moon("Ariel", uranus, 578.9, 0xFFBEBEBE, 0.0012769, 0.0012, 98.03, 2.5204, 280.0);
+        s.moon("Umbriel", uranus, 584.7, 0xFF707070, 0.0017801, 0.0039, 97.90, 4.1442, 40.0);
+        s.moon("Titania", uranus, 788.4, 0xFFB4A89C, 0.0029139, 0.0011, 98.11, 8.7059, 160.0);
+        s.moon("Oberon", uranus, 761.4, 0xFF9E9086, 0.0039006, 0.0014, 97.83, 13.463, 260.0);
+        // Triton : retrograde (inclinaison 156,885 sur l'equateur de Neptune).
+        s.moon("Triton", neptune, 1_353.4, 0xFFE0C8C0, 0.0023714, 0.000016, -174.80, 5.8769, 70.0);
+        s.moon("Charon", pluton, 606.0, 0xFF9A9090, 0.00013096, 0.0002, 119.68, 6.3872, 0.0);
+        return s;
+    }
+
+    /**
+     * Alpha du Centaure, 5 corps. Sources : https://en.wikipedia.org/wiki/Alpha_Centauri,
+     * https://en.wikipedia.org/wiki/Proxima_Centauri, NASA Exoplanet Archive (Proxima b ; Proxima d, confirmee par
+     * NIRPS en 2025). Rayons de Proxima b et d estimes (1,02 et 0,692 rayon terrestre).
+     */
+    private static DefaultSystem alphaCentauri()
+    {
+        DefaultSystem s = new DefaultSystem("Alpha du Centaure");
+        int a = s.star("Alpha du Centaure A", 851_100.0, 0xFFFFF1C8, 1.52f);
+        // Compagnes : nom, parent, rayon (km), couleur, luminosite, a (UA), e, pitch, periode (j), phase (arbitraire).
+        s.companion("Alpha du Centaure B", a, 600_500.0, 0xFFFFD8A0, 0.50f, 23.3, 0.5195, 79.2, 29_133.0, 0.0);
+        int proxima = s.companion("Proxima du Centaure", a, 107_300.0, 0xFFFF6A3C, 0.0016f, 8_700.0, 0.50, 107.6,
+                199_790_000.0, 180.0);
+        // Planetes : nom, parent, rayon (km), couleur, a (UA), e, yaw, pitch, periode (j), phase (arbitraire).
+        s.planet("Proxima b", proxima, 6_500.0, 0xFF9C7A5A, 0.04848, 0.0, 0.0, 0.0, 11.18465, 40.0);
+        s.planet("Proxima d", proxima, 4_410.0, 0xFF8A7060, 0.02881, 0.0, 0.0, 0.0, 5.12338, 200.0);
+        return s;
+    }
+
+    /**
+     * Barnard, 5 corps. Sources : NASA Exoplanet Archive (b : 2024, ESPRESSO ; c, d, e : Basant et al. 2025, ApJL),
+     * https://www.astronomy.com/science/three-new-planets-found-around-barnards-star. Rayons des planetes estimes ;
+     * inclinaisons inconnues (0).
+     */
+    private static DefaultSystem barnard()
+    {
+        DefaultSystem s = new DefaultSystem("Barnard");
+        int star = s.star("Barnard", 130_100.0, 0xFFFF8A5C, 0.0035f);
+        s.planet("Barnard d", star, 4_420.0, 0xFF8C6E5A, 0.0188, 0.04, 0.0, 0.0, 2.3402, 0.0);
+        s.planet("Barnard b", star, 4_590.0, 0xFF9A7A62, 0.0229, 0.03, 0.0, 0.0, 3.1542, 90.0);
+        s.planet("Barnard c", star, 4_730.0, 0xFF86705E, 0.0274, 0.08, 0.0, 0.0, 4.1244, 180.0);
+        s.planet("Barnard e", star, 4_060.0, 0xFF7E6C60, 0.0381, 0.04, 0.0, 0.0, 6.7392, 270.0);
+        return s;
+    }
+
+    /** Wolf 359, 1 corps (aucune planete confirmee). Source : https://en.wikipedia.org/wiki/Wolf_359. */
+    private static DefaultSystem wolf359()
+    {
+        DefaultSystem s = new DefaultSystem("Wolf 359");
+        s.star("Wolf 359", 100_200.0, 0xFFFF7448, 0.0011f);
+        return s;
+    }
+
+    /**
+     * Lalande 21185, 3 corps. Sources : NASA Exoplanet Archive (GJ 411 b, 2019 ; HD 95735 c, 2021),
+     * https://en.wikipedia.org/wiki/Lalande_21185. Rayons des planetes estimes ; inclinaisons inconnues (0).
+     */
+    private static DefaultSystem lalande21185()
+    {
+        DefaultSystem s = new DefaultSystem("Lalande 21185");
+        int star = s.star("Lalande 21185", 272_700.0, 0xFFFF9C66, 0.021f);
+        s.planet("Lalande 21185 b", star, 9_240.0, 0xFFA08A70, 0.07879, 0.063, 0.0, 0.0, 12.9394, 60.0);
+        s.planet("Lalande 21185 c", star, 23_950.0, 0xFF7FA6C8, 2.94, 0.132, 0.0, 0.0, 2_946.0, 230.0);
+        return s;
+    }
+
+    /** Sirius, 2 corps. Sources : https://en.wikipedia.org/wiki/Sirius, https://en.wikipedia.org/wiki/Sirius_B. */
+    private static DefaultSystem sirius()
+    {
+        DefaultSystem s = new DefaultSystem("Sirius");
+        int a = s.star("Sirius A", 1_190_000.0, 0xFFCAD8FF, 25.4f);
+        // Sirius B : naine blanche.
+        s.companion("Sirius B", a, 5_634.0, 0xFFE8EEFF, 0.056f, 19.8, 0.5914, 136.3, 18_309.0, 120.0);
+        return s;
+    }
+
+    /**
+     * Epsilon Eridani, 2 corps. Sources : NASA Exoplanet Archive (eps Eri b : a, e, i, periode ; rayon estime),
+     * https://en.wikipedia.org/wiki/Epsilon_Eridani_b (orbite revisee en 2025).
+     */
+    private static DefaultSystem epsilonEridani()
+    {
+        DefaultSystem s = new DefaultSystem("Epsilon Eridani");
+        int star = s.star("Epsilon Eridani", 511_300.0, 0xFFFFC27A, 0.34f);
+        s.planet("Epsilon Eridani b", star, 87_900.0, 0xFFC8A47A, 3.53, 0.06, 0.0, 40.0, 2_680.0, 300.0);
+        return s;
+    }
+
+    /** 61 Cygni, 2 corps. Source : https://en.wikipedia.org/wiki/61_Cygni (ajustement le plus recent de l'orbite). */
+    private static DefaultSystem cygni61()
+    {
+        DefaultSystem s = new DefaultSystem("61 Cygni");
+        int a = s.star("61 Cygni A", 462_600.0, 0xFFFFB46A, 0.153f);
+        s.companion("61 Cygni B", a, 413_900.0, 0xFFFFA860, 0.085f, 86.8, 0.442, 53.0, 258_260.0, 45.0);
+        return s;
+    }
+
+    /**
+     * Procyon, 2 corps. Sources : Bond et al. 2015 (ApJ 813, 106 : periode, masses),
+     * https://en.wikipedia.org/wiki/Procyon (a, e, rayon de B).
+     */
+    private static DefaultSystem procyon()
+    {
+        DefaultSystem s = new DefaultSystem("Procyon");
+        int a = s.star("Procyon A", 1_424_800.0, 0xFFFFF4E8, 6.93f);
+        // Procyon B : naine blanche.
+        s.companion("Procyon B", a, 8_585.0, 0xFFF0F0FF, 0.00049f, 15.14, 0.3979, 31.1, 14_917.0, 210.0);
+        return s;
+    }
+
+    /**
+     * Tau Ceti, 4 corps. Source : NASA Exoplanet Archive, table {@code pscomppars} (tau Cet g, h, f ; Feng et al.
+     * 2017 ; tau Cet e n'y figure plus). Rayons des planetes estimes ; inclinaisons inconnues (0).
+     */
+    private static DefaultSystem tauCeti()
+    {
+        DefaultSystem s = new DefaultSystem("Tau Ceti");
+        int star = s.star("Tau Ceti", 551_700.0, 0xFFFFE9B0, 0.52f);
+        s.planet("Tau Ceti g", star, 7_520.0, 0xFFB08A6A, 0.133, 0.06, 0.0, 0.0, 20.00, 15.0);
+        s.planet("Tau Ceti h", star, 7_580.0, 0xFF9C8C78, 0.243, 0.23, 0.0, 0.0, 49.41, 130.0);
+        s.planet("Tau Ceti f", star, 11_530.0, 0xFF8AA0B8, 1.334, 0.16, 0.0, 0.0, 636.13, 250.0);
+        return s;
+    }
+
+    /** Altair, 1 corps (aucune planete connue ; etoile du lot 1 inchangee). */
+    private static DefaultSystem altair()
+    {
+        DefaultSystem s = new DefaultSystem("Altair");
+        s.star("Altair", 1_260_000.0, 0xFFF0F4FF, 10.6f);
+        return s;
+    }
+
+    /** Vega, 1 corps (aucune planete confirmee ; etoile du lot 1 inchangee). */
+    private static DefaultSystem vega()
+    {
+        DefaultSystem s = new DefaultSystem("Vega");
+        s.star("Vega", 1_640_000.0, 0xFFD6E2FF, 40.1f);
+        return s;
+    }
+
+    /**
+     * Systeme par defaut en construction : un appel par corps, dans l'ordre de l'annexe ; chaque appel rend l'id du
+     * corps cree (1, 2, 3... dans l'ordre des appels), a passer comme parent aux corps suivants. Les angles sont en
+     * degres, les rayons en km, les demi-grands axes en UA, les periodes en jours. Les planetes n'utilisent pas la
+     * luminosite (1).
+     */
+    private static final class DefaultSystem
+    {
+        private final String name;
+        private final List<SpaceBody> bodies = new ArrayList<>();
+
+        DefaultSystem(String name) { this.name = name; }
+
+        /** Etoile principale, au centre du systeme (premier appel). */
+        int star(String name, double radius, int color, float luminosity)
+        {
+            return add(SpaceBodyKind.STAR, name, 0, radius, color, luminosity, null);
+        }
+
+        /** Etoile compagne en orbite autour de l'etoile {@code parent} ({@code yaw} et {@code roll} inconnus : 0). */
+        int companion(String name, int parent, double radius, int color, float luminosity, double a, double e,
+                      double pitch, double period, double phase)
+        {
+            return add(SpaceBodyKind.STAR, name, parent, radius, color, luminosity,
+                    new SpaceOrbit(a, e, 0.0, pitch, 0.0, period, phase));
+        }
+
+        /** Planete autour de l'etoile {@code parent} ; {@code yaw} = longitude du periastre. */
+        int planet(String name, int parent, double radius, int color, double a, double e, double yaw, double pitch,
+                   double period, double phase)
+        {
+            return add(SpaceBodyKind.PLANET, name, parent, radius, color, 1.0f,
+                    new SpaceOrbit(a, e, yaw, pitch, 0.0, period, phase));
+        }
+
+        /** Objet mineur autour de l'etoile {@code parent} ; {@code yaw} = longitude du perihelie. */
+        int minor(String name, int parent, double radius, int color, double a, double e, double yaw, double pitch,
+                  double period, double phase)
+        {
+            return add(SpaceBodyKind.MINOR, name, parent, radius, color, 1.0f,
+                    new SpaceOrbit(a, e, yaw, pitch, 0.0, period, phase));
+        }
+
+        /**
+         * Lune autour de la planete ou de l'objet mineur {@code parent} ; {@code pitch} = obliquite du parent +
+         * inclinaison sur son equateur ; {@code yaw} inconnu : 0.
+         */
+        int moon(String name, int parent, double radius, int color, double a, double e, double pitch, double period,
+                 double phase)
+        {
+            return add(SpaceBodyKind.MOON, name, parent, radius, color, 1.0f,
+                    new SpaceOrbit(a, e, 0.0, pitch, 0.0, period, phase));
+        }
+
+        private int add(SpaceBodyKind kind, String name, int parent, double radius, int color, float luminosity,
+                        SpaceOrbit orbit)
+        {
+            int id = bodies.size() + 1;
+            bodies.add(new SpaceBody(id, kind, name, parent, radius, color, luminosity, orbit));
+            return id;
+        }
+
+        /** Systeme d'id {@code id} a la position galactique donnee (al) ; prochain id de corps = corps + 1. */
+        SpaceSystem build(int id, double x, double y, double z)
+        {
+            return new SpaceSystem(id, name, x, y, z, bodies, bodies.size() + 1);
+        }
     }
 
     // ---------------------------------------------------------------- etoile de fond
 
     /**
-     * Vue reseau d'un systeme vu de loin : position galactique (al, en {@code float} : precision suffisante pour une
-     * direction), couleur et luminosite de l'etoile principale. La direction et l'eclat vus depuis le systeme courant
-     * sont calcules par le client.
+     * Vue reseau d'un systeme vu de loin : identite du systeme (id et nom, T15 : surcouche du pilote, cible du saut),
+     * position galactique (al, en {@code float} : precision suffisante pour une direction), couleur et luminosite de
+     * l'etoile principale. La direction et l'eclat vus depuis le systeme courant sont calcules par le client.
+     *
+     * @param id   id du systeme ({@code > 0}), unique dans la galaxie
+     * @param name nom du systeme, nettoye ({@link SpaceLimits#sanitizeName})
      */
-    public record BackgroundStar(float x, float y, float z, int color, float luminosity)
+    public record BackgroundStar(int id, String name, float x, float y, float z, int color, float luminosity)
     {
         public BackgroundStar
         {
+            if (id <= 0) throw new IllegalArgumentException("Id de systeme invalide : " + id);
+            name = SpaceLimits.sanitizeName(name);
             if (!SpaceLimits.finite(x, y, z)) throw new IllegalArgumentException("Position non finie");
             color = SpaceLimits.sanitizeColor(color);
             luminosity = SpaceLimits.sanitizeLuminosity(luminosity);
         }
 
-        /** Etoile de fond d'un systeme (son etoile principale). */
+        /** Etoile de fond d'un systeme (son id, son nom, son etoile principale). */
         public static BackgroundStar of(SpaceSystem system)
         {
             SpaceBody star = system.primaryStar();
-            return new BackgroundStar((float) system.x(), (float) system.y(), (float) system.z(), star.color(),
-                    star.luminosity());
+            return new BackgroundStar(system.id(), system.name(), (float) system.x(), (float) system.y(),
+                    (float) system.z(), star.color(), star.luminosity());
         }
 
-        // Ordre : x, y, z, color, lum.
+        /**
+         * Ordre : id (varint), name (UTF, au plus {@link SpaceLimits#MAX_NAME_LENGTH} caracteres), x, y, z (float),
+         * color (int), lum (float). Taille : 20 octets + id (1 a 2 octets en pratique) + nom (1 octet de longueur +
+         * octets UTF-8 du nom).
+         */
         public void write(FriendlyByteBuf buf)
         {
+            buf.writeVarInt(id);
+            buf.writeUtf(name, SpaceLimits.MAX_NAME_LENGTH);
             buf.writeFloat(x);
             buf.writeFloat(y);
             buf.writeFloat(z);
@@ -364,15 +632,17 @@ public final class SpaceGalaxy
             buf.writeFloat(luminosity);
         }
 
-        /** Lecture stricte. */
+        /** Lecture stricte (meme ordre que {@link #write}) : leve sur un id invalide ou une position non finie. */
         public static BackgroundStar read(FriendlyByteBuf buf)
         {
+            int id = buf.readVarInt();
+            String name = buf.readUtf(SpaceLimits.MAX_NAME_LENGTH);
             float x = buf.readFloat();
             float y = buf.readFloat();
             float z = buf.readFloat();
             int color = buf.readInt();
             float luminosity = buf.readFloat();
-            return new BackgroundStar(x, y, z, color, luminosity);
+            return new BackgroundStar(id, name, x, y, z, color, luminosity);
         }
 
         /** Ecrit une liste d'etoiles de fond (nombre en varint, puis chaque etoile). */

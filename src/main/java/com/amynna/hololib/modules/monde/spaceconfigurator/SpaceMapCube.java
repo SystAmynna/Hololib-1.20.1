@@ -27,6 +27,11 @@ public final class SpaceMapCube extends HoloObject implements HoloEditTranslatio
     public static final float DEFAULT_HEIGHT = 2f;
     /** Echelle par defaut (demi-arete en blocs). */
     public static final float DEFAULT_SCALE = 1.5f;
+    /**
+     * Couleur du monde (T25) : vaisseau du mode systeme, anneau du systeme courant en mode galaxie, systeme courant dans
+     * la liste de la fenetre (distincte du jaune de la selection).
+     */
+    public static final int WORLD_COLOR = 0xFF50F070;
     /** Rayon de la sphere englobante locale : demi-diagonale du cube. */
     private static final float BOUNDING_RADIUS = (float) Math.sqrt(3.0) * HALF_SIZE;
 

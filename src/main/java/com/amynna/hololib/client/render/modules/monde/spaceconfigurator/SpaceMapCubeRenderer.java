@@ -8,7 +8,9 @@ import com.amynna.hololib.holo.edit.HoloEditMath;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
 import com.amynna.hololib.modules.camera.config.ConfigWindow;
+import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
 import com.amynna.hololib.modules.dimension.space.math.SpaceOrbits;
+import com.amynna.hololib.modules.dimension.space.math.SpacePose;
 import com.amynna.hololib.modules.dimension.space.math.SpaceUnits;
 import com.amynna.hololib.modules.dimension.space.model.SpaceBody;
 import com.amynna.hololib.modules.dimension.space.model.SpaceBodyKind;
@@ -17,6 +19,7 @@ import com.amynna.hololib.modules.dimension.space.model.SpaceOrbit;
 import com.amynna.hololib.modules.dimension.space.model.SpaceSystem;
 import com.amynna.hololib.modules.dimension.space.model.SpaceSystem.SystemHeader;
 import com.amynna.hololib.modules.monde.spaceconfigurator.SpaceConfiguratorModule;
+import com.amynna.hololib.modules.monde.spaceconfigurator.SpaceCoordinates;
 import com.amynna.hololib.modules.monde.spaceconfigurator.SpaceMapCube;
 import com.amynna.hololib.modules.monde.spaceconfigurator.SpaceSystemScale;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -27,6 +30,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.network.chat.Style;
+import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.util.FormattedCharSink;
 import net.minecraft.util.Mth;
 import org.joml.Matrix4f;
 import org.joml.Quaterniond;
@@ -55,22 +61,42 @@ import java.util.WeakHashMap;
  *       gauche). Chaque regle compte la distance depuis son debut ; etiquettes « 5 al » (zero omis) ;</li>
  *   <li>etoiles : billboard face camera, taille constante en blocs (echelle du cube compensee), rayon et couleur
  *       selon la luminosite et la couleur de l'etoile principale (coeur plein + halo degrade) ; systeme courant de
- *       l'Environment entoure d'un anneau blanc, systeme selectionne en surbrillance (anneau jaune, halo renforce,
- *       nom jaune) ; un systeme hors du cadrage n'est pas dessine (« Recadrer » le ramene) ;</li>
+ *       l'Environment (celui du monde) entoure d'un <b>double anneau vert</b> ({@link SpaceMapCube#WORLD_COLOR}, nom
+ *       vert, T25), systeme selectionne en surbrillance (anneau jaune plus large, halo renforce, nom jaune) ; un
+ *       systeme hors du cadrage n'est pas dessine (« Recadrer » le ramene) ;</li>
  *   <li>noms et etiquettes : texte billboard ({@code font.drawInBatch}) : orientation et echelle de l'objet
  *       compensees, puis rotation de la camera, puis echelle {@code (-s, -s, s)} comme les etiquettes de nom vanilla
  *       ; seulement en famille {@code WORLD} et a moins de {@value #LABEL_DISTANCE} blocs.</li>
  * </ul>
- * <b>Mode systeme</b> ({@link #renderSystem}, doc 04 par. 7, echelle de {@code SpaceSystemScale}) :
+ * <b>Mode systeme</b> ({@link #renderSystem}, doc 04 par. 7, echelle de {@code SpaceSystemScale} : tout a l'echelle
+ * depuis T25, vue du systeme entier ou zoom sur un corps) :
  * <ul>
- *   <li>graduations en UA (memes regles que la galaxie, demi-etendue {@code H_sys}) ;</li>
+ *   <li>graduations en UA (memes regles que la galaxie, demi-etendue de la vue) ;</li>
  *   <li>orbites : ellipses en rubans croises (un ruban dans le plan de l'orbite, un perpendiculaire), couleur du corps
  *       attenuee, autour de la position affichee du parent ; l'orbite du corps selectionne est dessinee par sa poignee
- *       ({@code SpaceOrbitHandleRenderer}) ;</li>
+ *       ({@code SpaceOrbitHandleRenderer}). En zoom, seules les orbites des descendants du corps zoome (a l'echelle de
+ *       la vue), plus un <b>arc local</b> de l'orbite du corps zoome, recalcule chaque frame autour de lui ; un segment
+ *       entierement hors du cube n'est pas dessine ;</li>
  *   <li>corps : billboards a leurs positions de Kepler au temps d'affichage du module ({@code t_edit}, ou le temps
- *       anime), rayon affiche borne en unites du cube (il suit l'echelle du cube), etoiles avec halo, selection
- *       entouree d'un anneau jaune, noms comme en mode galaxie.</li>
+ *       anime), rayon affiche en unites du cube (il suit l'echelle du cube ; formule exageree, ou rayon reel s'il est
+ *       plus grand), etoiles avec halo, selection entouree d'un anneau jaune, noms comme en mode galaxie ; en zoom, un
+ *       corps hors du cube n'est pas dessine ;</li>
+ *   <li><b>vaisseau</b> (T25, C49) si le systeme edite est le systeme courant de l'Environment (miroir client) :
+ *       disque vert de rayon fixe en unites du cube ({@value #SHIP_RADIUS}), avance de {@value #SHIP_LIFT} bloc vers la
+ *       camera (lisible devant le corps qu'il frole), en {@code P_ref(t_aff) + (s - P_ref(maintenant))} (meme
+ *       referentiel que la pose affichee, {@code t_aff} = temps du cube), et segment de {@value #SHIP_SEGMENT} unite
+ *       du cube selon l'axe avant {@code Q . F_W}. Pose et positions lues a chaque frame (interpolees), sans
+ *       allocation ; jamais dans le cache. Masque hors du cube.</li>
  * </ul>
+ * <b>Croix de selection et coordonnees</b> (T26, C50, doc 04 par. 7), dans les deux modes : pour l'objet selectionne
+ * dessine (systeme dans le cadrage, corps visible), trois segments fins de la couleur de la selection, paralleles aux
+ * axes du cube, passent par lui et vont jusqu'aux six faces ; a chaque extremite, une etiquette face camera donne la
+ * coordonnee de l'axe du segment, {@code « X -1,617 al »} ({@link SpaceCoordinates}, 3 decimales) : en mode galaxie
+ * relative a l'origine des coordonnees du module ({@code originHeader()}), en mode systeme en UA relative a l'etoile
+ * principale (au temps d'affichage). L'etiquette est poussee au-dela de l'extremite dans la direction de l'axe vue a
+ * l'ecran (elle ne recouvre jamais le segment), a l'echelle des graduations. Texte ecrit sans allocation dans un
+ * {@link FormattedCharSequence} reutilise ({@link CoordinateText}), largeur sommee depuis une table des largeurs de
+ * caracteres remplie au premier dessin. Les regles graduees restent relatives a leur coin (C34).
  * <p>
  * <b>Ordre et profondeur</b> : aretes, graduations, coeurs et anneaux des etoiles dans
  * {@link HoloRenderTypes#TRANSLUCENT_QUADS} (ecrit la profondeur), puis le texte, puis halos et faces dans un
@@ -81,7 +107,9 @@ import java.util.WeakHashMap;
  * <p>
  * Le renderer lit la copie synchronisee du module ({@code cube.configurator()}) et ne fait que la mise en page. Tout ce
  * qui ne change qu'a la synchronisation (positions locales, rayons, couleurs, largeurs des noms, graduations et leurs
- * chaines) est mis en cache par module ({@link Layout}), reconstruit quand la liste d'en-tetes ou le cadrage change.
+ * chaines) est mis en cache par module ({@link Layout}), reconstruit quand la liste d'en-tetes ou le cadrage change
+ * (galaxie), ou quand la copie du systeme, la demi-etendue ou le zoom change (systeme) ; le vaisseau et l'arc du zoom
+ * ne le reconstruisent pas.
  * Aucune allocation par frame dans ce code (le {@code Font} vanilla cree son petit objet de sortie a chaque texte,
  * comme pour les etiquettes de nom), aucun etat GL modifie.
  */
@@ -138,7 +166,10 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
     private static final float RING_MIN = 0.035f;
     /** Demi-epaisseur des anneaux, en blocs. */
     private static final float RING_THICKNESS = 0.004f;
-    private static final int CURRENT_RING_COLOR = 0xE0FFFFFF;
+    /** Systeme courant (monde) : double anneau vert, second anneau a cet ecart du premier, en blocs. */
+    private static final float CURRENT_RING_GAP = 0.009f;
+    private static final int CURRENT_RING_COLOR = 0xE0000000 | SpaceMapCube.WORLD_COLOR & 0xFFFFFF;
+    private static final int CURRENT_NAME_COLOR = SpaceMapCube.WORLD_COLOR;
     private static final int HIGHLIGHT = 0xFFFFE040;
     /** Tolerance du test « dans le cube ». */
     private static final float INSIDE_EPSILON = 1e-4f;
@@ -180,8 +211,43 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
     /** Demi-epaisseur des orbites, en blocs. */
     private static final float ORBIT_THICKNESS = 0.004f;
     private static final int ORBIT_ALPHA = 0x90;
+    /** Marge du test « dans la vue » du zoom, en fraction de la demi-arete. */
+    private static final float VIEW_MARGIN = 0.05f;
+    /** Segments de l'arc local de l'orbite du corps zoome. */
+    private static final int ARC_SEGMENTS = 32;
+    /** Etendue de l'arc local : chemin parcouru d'environ {@code ARC_REACH x H} de chaque cote du corps. */
+    private static final double ARC_REACH = 2.0;
+
+    // ---------------------------------------------------------------- vaisseau (T25)
+
+    /** Rayon du vaisseau, en unites du cube (suit l'echelle du cube). */
+    private static final float SHIP_RADIUS = 0.01f;
+    /** Avance du disque du vaisseau vers la camera, en blocs (devant le disque du corps qu'il frole). */
+    private static final float SHIP_LIFT = 0.06f;
+    /** Longueur du segment de l'axe avant, en unites du cube. */
+    private static final float SHIP_SEGMENT = 0.12f;
+    /** Demi-epaisseur du segment, en blocs. */
+    private static final float SHIP_THICKNESS = 0.003f;
+    private static final int SHIP_RIM = SpaceMapCube.WORLD_COLOR;
+    private static final int SHIP_CORE = 0xFFC8FFD0;
+    private static final int SHIP_SEGMENT_COLOR = 0xE0000000 | SpaceMapCube.WORLD_COLOR & 0xFFFFFF;
     private static final String UNIT_LIGHT_YEAR = " al";
     private static final String UNIT_AU = " UA";
+
+    // ---------------------------------------------------------------- croix de selection (T26)
+
+    /** Demi-epaisseur des segments de la croix, en blocs (plus fins que les aretes). */
+    private static final float CROSS_THICKNESS = 0.0025f;
+    /** Couleur de la croix : celle de la selection, un peu transparente. */
+    private static final int CROSS_COLOR = 0xB0000000 | HIGHLIGHT & 0xFFFFFF;
+    private static final int CROSS_LABEL_COLOR = HIGHLIGHT;
+    /** Echelle du texte des coordonnees (comme les graduations). */
+    private static final float CROSS_TEXT_SCALE = TICK_TEXT_SCALE;
+    /** Ecart entre l'extremite d'un segment et le bord de son etiquette, en blocs. */
+    private static final float CROSS_LABEL_GAP = 0.03f;
+    /** Demi-hauteur d'une ligne de texte, en pixels de police. */
+    private static final float TEXT_HALF_HEIGHT = 4.5f;
+    private static final char[] AXIS_NAMES = {'X', 'Y', 'Z'};
 
     /** Mise en page par module (cle faible : un module oublie libere son cache). */
     private final Map<SpaceConfiguratorModule, Layout> layouts = new WeakHashMap<>();
@@ -194,6 +260,21 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
     private final Matrix4f textMatrix = new Matrix4f();
     /** Rotation qui ramene le repere de l'objet a celui de la camera : {@code R^-1 . C}. */
     private final Quaternionf facing = new Quaternionf();
+    /** Corps visibles de la frame (zoom : dans le cube). */
+    private final boolean[] visible = new boolean[SpaceLimits.MAX_BODIES];
+    /** Arc local de l'orbite du corps zoome (unites du cube, relatif au corps) et directions laterales. */
+    private final float[] arcPoints = new float[(ARC_SEGMENTS + 1) * 3];
+    private final float[] arcSides = new float[(ARC_SEGMENTS + 1) * 3];
+    private final Vector3d arcCenter = new Vector3d();
+    /** Pose affichee du monde, positions des corps du systeme courant de l'Environment, axe avant (vaisseau). */
+    private final SpacePose shipPose = new SpacePose();
+    private final Vector3d[] envBodies = SpaceOrbits.newPositionArray();
+    private final Vector3d ship = new Vector3d();
+    private final Vector3d shipForward = new Vector3d();
+    /** Croix : texte d'une etiquette, coordonnees affichees, direction d'un axe dans le repere du billboard. */
+    private final CoordinateText coordinate = new CoordinateText();
+    private final double[] crossValues = new double[3];
+    private final Vector3f crossDirection = new Vector3f();
 
     @Override
     public void render(SpaceMapCube cube, PoseStack pose, MultiBufferSource buffers, int packedLight,
@@ -241,10 +322,18 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
             float r = layout.radius[i];
             disc(solid, billboard, r, layout.core[i], layout.color[i], light);
             int id = layout.ids[i];
-            if (id == current) ring(solid, billboard, Math.max(RING_MIN, r * CURRENT_RING_FACTOR),
-                    CURRENT_RING_COLOR, light);
+            if (id == current) {
+                float ringRadius = Math.max(RING_MIN, r * CURRENT_RING_FACTOR);
+                ring(solid, billboard, ringRadius, CURRENT_RING_COLOR, light);
+                ring(solid, billboard, ringRadius + CURRENT_RING_GAP, CURRENT_RING_COLOR, light);
+            }
             if (id == selected) ring(solid, billboard, Math.max(RING_MIN + 0.02f, r * SELECTED_RING_FACTOR),
                     HIGHLIGHT, light);
+        }
+        int crossIndex = selectedStar(layout, selected);
+        if (crossIndex >= 0) {
+            cross(solid, matrix, layout.qx[crossIndex], layout.qy[crossIndex], layout.qz[crossIndex],
+                    CROSS_THICKNESS / scale, light);
         }
 
         // Textes : famille monde seulement, a portee de lecture.
@@ -256,11 +345,22 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
                 if (!readable(billboard)) continue;
                 textMatrix.set(billboard).translate(0f, layout.radius[i] + NAME_GAP, 0f)
                         .scale(-TEXT_SCALE, -TEXT_SCALE, TEXT_SCALE);
-                font.drawInBatch(layout.names[i], -0.5f * layout.widths[i], -8f,
-                        layout.ids[i] == selected ? HIGHLIGHT : NAME_COLOR, false, textMatrix, buffers,
-                        Font.DisplayMode.NORMAL, 0, light);
+                int nameColor = layout.ids[i] == selected ? HIGHLIGHT
+                        : layout.ids[i] == current ? CURRENT_NAME_COLOR : NAME_COLOR;
+                font.drawInBatch(layout.names[i], -0.5f * layout.widths[i], -8f, nameColor, false, textMatrix,
+                        buffers, Font.DisplayMode.NORMAL, 0, light);
             }
             tickLabels(font, matrix, layout, buffers, scale, invX, invY, invZ, light);
+            if (crossIndex >= 0) {
+                // Coordonnees galactiques relatives a l'origine (al).
+                SystemHeader star = layout.headers.get(crossIndex);
+                SystemHeader origin = module.originHeader();
+                crossValues[0] = star.x() - (origin != null ? origin.x() : 0.0);
+                crossValues[1] = star.y() - (origin != null ? origin.y() : 0.0);
+                crossValues[2] = star.z() - (origin != null ? origin.z() : 0.0);
+                crossLabels(font, matrix, buffers, layout.qx[crossIndex], layout.qy[crossIndex],
+                        layout.qz[crossIndex], UNIT_LIGHT_YEAR, invX, invY, invZ, light);
+            }
         }
 
         // Lot sans profondeur : halos.
@@ -275,19 +375,25 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
 
     /**
      * Mode systeme : dessin du systeme edite ({@code module.editedSystem()}, copie complete) dans le repere du cube,
-     * au temps d'affichage du module. Appele entre les aretes (deja dans {@link HoloRenderTypes#TRANSLUCENT_QUADS}) et
-     * les faces ({@link GlowType#GLOW_QUADS}) ; la pile n'est pas modifiee.
+     * au temps d'affichage du module, dans la vue courante (systeme entier ou zoom sur un corps, T25). Appele entre les
+     * aretes (deja dans {@link HoloRenderTypes#TRANSLUCENT_QUADS}) et les faces ({@link GlowType#GLOW_QUADS}) ; la
+     * pile n'est pas modifiee.
      */
     private void renderSystem(SpaceMapCube cube, SpaceConfiguratorModule module, SpaceSystem system,
                               PoseStack pose, MultiBufferSource buffers, int light, HoloDrawContext ctx)
     {
         Font font = Minecraft.getInstance().font;
-        double half = module.systemHalf();
-        double magnifier = module.moonMagnifier();
+        double half = module.viewHalf();
+        int zoom = module.zoomIndex();
         Layout layout = layoutOf(module);
-        layout.ensureBodies(system, half, magnifier, font);
+        layout.ensureBodies(system, half, zoom, font);
         layout.ensureGraduations(half, UNIT_AU, font);
-        SpaceSystemScale.positions(system, module.displayDays(ctx.partialTick()), half, magnifier, positions, work);
+        double days = module.displayDays(ctx.partialTick());
+        SpaceSystemScale.positions(system, days, half, zoom, positions);
+        for (int i = 0; i < layout.bodyCount; i++) {
+            Vector3d p = positions[i];
+            visible[i] = zoom < 0 || inside((float) p.x, (float) p.y, (float) p.z);
+        }
 
         Matrix4f matrix = pose.last().pose();
         HoloTransform t = cube.transform();
@@ -301,26 +407,45 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
         // L'orbite du corps selectionne est dessinee par sa poignee.
         int skipped = module.orbitHandle() != null ? selected : 0;
 
-        // Lot avec profondeur : graduations, orbites, corps et anneau de selection.
+        // Lot avec profondeur : graduations, orbites, corps, anneau de selection, vaisseau.
         VertexConsumer solid = buffers.getBuffer(HoloRenderTypes.TRANSLUCENT_QUADS);
         ticks(solid, matrix, layout, THICKNESS / scale, TICK_LENGTH / scale, light);
         float width = ORBIT_THICKNESS / scale;
+        int stride = (ORBIT_SEGMENTS + 1) * 3;
         for (int i = 0; i < layout.bodyCount; i++) {
-            if (layout.parent[i] < 0 || layout.bodyIds[i] == skipped) continue;
+            if (!layout.orbitShown[i] || layout.bodyIds[i] == skipped) continue;
             Vector3d p = positions[layout.parent[i]];
-            orbit(solid, matrix, layout, i, (float) p.x, (float) p.y, (float) p.z, width, light);
+            ribbon(solid, matrix, layout.orbitPoints, layout.orbitSides, i * stride, ORBIT_SEGMENTS,
+                    layout.orbitNormals, i * 3, (float) p.x, (float) p.y, (float) p.z, width, layout.orbitColor[i],
+                    light);
+        }
+        if (zoom >= 0 && layout.parent[zoom] >= 0) {
+            // Orbite du corps zoome : arc local autour de lui (centre de la vue), au temps affiche.
+            zoomArc(system.bodies().get(zoom).orbit(), days, half, layout.orbitNormals, zoom * 3);
+            ribbon(solid, matrix, arcPoints, arcSides, 0, ARC_SEGMENTS, layout.orbitNormals, zoom * 3, 0f, 0f, 0f,
+                    width, layout.orbitColor[zoom], light);
         }
         for (int i = 0; i < layout.bodyCount; i++) {
+            if (!visible[i]) continue;
             Vector3d p = positions[i];
             placeBillboard(matrix, (float) p.x, (float) p.y, (float) p.z, invX, invY, invZ);
             float r = layout.bodyRadius[i] * scale;
             disc(solid, billboard, r, layout.bodyCore[i], layout.bodyColor[i], light);
             if (layout.bodyIds[i] == selected) ring(solid, billboard, r + 0.02f, HIGHLIGHT, light);
         }
+        int crossIndex = selectedBody(layout, selected);
+        if (crossIndex >= 0) {
+            Vector3d p = positions[crossIndex];
+            cross(solid, matrix, (float) p.x, (float) p.y, (float) p.z, CROSS_THICKNESS / scale, light);
+        }
+        if (shipPosition(system, zoom, half, ctx.partialTick())) {
+            drawShip(solid, matrix, scale, invX, invY, invZ, light);
+        }
 
         // Textes : famille monde seulement, a portee de lecture.
         if (ctx.family() == HoloAnchor.Family.WORLD) {
             for (int i = 0; i < layout.bodyCount; i++) {
+                if (!visible[i]) continue;
                 Vector3d p = positions[i];
                 placeBillboard(matrix, (float) p.x, (float) p.y, (float) p.z, invX, invY, invZ);
                 if (!readable(billboard)) continue;
@@ -331,12 +456,24 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
                         Font.DisplayMode.NORMAL, 0, light);
             }
             tickLabels(font, matrix, layout, buffers, scale, invX, invY, invZ, light);
+            if (crossIndex >= 0) {
+                // Position relative a l'etoile principale (indice 0, a l'origine du systeme), en UA : l'ecart des
+                // positions affichees ne depend pas du centre de la vue (zoom).
+                Vector3d p = positions[crossIndex];
+                Vector3d star = positions[0];
+                double toAu = half / SpaceMapCube.HALF_SIZE;
+                crossValues[0] = (p.x - star.x) * toAu;
+                crossValues[1] = (p.y - star.y) * toAu;
+                crossValues[2] = (p.z - star.z) * toAu;
+                crossLabels(font, matrix, buffers, (float) p.x, (float) p.y, (float) p.z, UNIT_AU, invX, invY, invZ,
+                        light);
+            }
         }
 
         // Lot sans profondeur : halos des etoiles.
         VertexConsumer glow = buffers.getBuffer(GlowType.GLOW_QUADS);
         for (int i = 0; i < layout.bodyCount; i++) {
-            if (!layout.star[i]) continue;
+            if (!layout.star[i] || !visible[i]) continue;
             Vector3d p = positions[i];
             placeBillboard(matrix, (float) p.x, (float) p.y, (float) p.z, invX, invY, invZ);
             halo(glow, billboard, layout.bodyRadius[i] * scale, layout.bodyColor[i],
@@ -344,21 +481,27 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
         }
     }
 
-    /**
-     * Orbite du corps {@code i} autour du point {@code (px, py, pz)} (parent affiche, unites du cube) : deux rubans
-     * continus de demi-largeur {@code w}, l'un dans le plan de l'orbite, l'autre selon sa normale.
-     */
-    private static void orbit(VertexConsumer consumer, Matrix4f matrix, Layout layout, int i, float px, float py,
-                              float pz, float w, int light)
+    /** Vrai si le point local {@code (x, y, z)} est dans le cube, a {@value #VIEW_MARGIN} demi-arete pres. */
+    private static boolean inside(float x, float y, float z)
     {
-        int color = layout.orbitColor[i];
-        float[] points = layout.orbitPoints;
-        float[] sides = layout.orbitSides;
-        int base = i * (ORBIT_SEGMENTS + 1) * 3;
-        float nx = layout.orbitNormals[i * 3] * w;
-        float ny = layout.orbitNormals[i * 3 + 1] * w;
-        float nz = layout.orbitNormals[i * 3 + 2] * w;
-        for (int k = 0; k < ORBIT_SEGMENTS; k++) {
+        float limit = SpaceMapCube.HALF_SIZE * (1f + VIEW_MARGIN);
+        return Math.abs(x) <= limit && Math.abs(y) <= limit && Math.abs(z) <= limit;
+    }
+
+    /**
+     * Ruban d'une courbe de {@code segments} segments ({@code points} et {@code sides} a partir de {@code base}, trois
+     * flottants par point, relatifs a {@code (px, py, pz)}) : deux rubans de demi-largeur {@code w}, l'un dans le plan
+     * de l'orbite (directions laterales), l'autre selon sa normale ({@code normals[n..n+2]}). Un segment dont les deux
+     * extremites sont hors du cube n'est pas dessine.
+     */
+    private static void ribbon(VertexConsumer consumer, Matrix4f matrix, float[] points, float[] sides, int base,
+                               int segments, float[] normals, int n, float px, float py, float pz, float w, int color,
+                               int light)
+    {
+        float nx = normals[n] * w;
+        float ny = normals[n + 1] * w;
+        float nz = normals[n + 2] * w;
+        for (int k = 0; k < segments; k++) {
             int a = base + k * 3;
             int b = a + 3;
             float ax = px + points[a];
@@ -367,6 +510,7 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
             float bx = px + points[b];
             float by = py + points[b + 1];
             float bz = pz + points[b + 2];
+            if (!inside(ax, ay, az) && !inside(bx, by, bz)) continue;
             float sax = sides[a] * w;
             float say = sides[a + 1] * w;
             float saz = sides[a + 2] * w;
@@ -382,6 +526,278 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
             vertex(consumer, matrix, bx + nx, by + ny, bz + nz, color, light);
             vertex(consumer, matrix, ax + nx, ay + ny, az + nz, color, light);
         }
+    }
+
+    /**
+     * {@link #arcPoints} / {@link #arcSides} : arc de l'orbite du corps zoome, relatif au corps (centre de la vue),
+     * en unites du cube, au temps {@code days}. Anomalie excentrique du corps {@code E0}, puis
+     * {@value #ARC_SEGMENTS} segments reguliers en {@code E} sur {@code E0 +/- dE}, avec
+     * {@code dE = min(pi, ARC_REACH . H / (a (1 - e)))} (la vitesse le long de l'ellipse vaut au moins
+     * {@code a (1 - e)} par radian : l'arc sort du cube des deux cotes). Sans allocation.
+     */
+    private void zoomArc(SpaceOrbit orbit, double days, double half, float[] normals, int n)
+    {
+        double unit = SpaceSystemScale.unit(half);
+        double e = orbit.eccentricity();
+        double aKm = orbit.semiMajorAxis() * SpaceUnits.AU_KM;
+        double spread = Math.min(Math.PI, ARC_REACH * half * SpaceUnits.AU_KM / Math.max(1e-9, aKm * (1.0 - e)));
+        double e0 = SpaceOrbits.eccentricAnomaly(SpaceOrbits.meanAnomaly(orbit, days), e);
+        SpaceOrbits.orbitPoint(orbit, e0, arcCenter);
+        for (int k = 0; k <= ARC_SEGMENTS; k++) {
+            SpaceOrbits.orbitPoint(orbit, e0 + spread * (2.0 * k / ARC_SEGMENTS - 1.0), work);
+            arcPoints[k * 3] = (float) ((work.x - arcCenter.x) * unit);
+            arcPoints[k * 3 + 1] = (float) ((work.y - arcCenter.y) * unit);
+            arcPoints[k * 3 + 2] = (float) ((work.z - arcCenter.z) * unit);
+        }
+        lateral(arcPoints, arcSides, 0, ARC_SEGMENTS, false, normals[n], normals[n + 1], normals[n + 2], work);
+    }
+
+    /**
+     * Directions laterales unitaires d'une courbe ({@code segments + 1} points a partir de {@code base}) : tangente par
+     * difference centree (courbe fermee : le dernier point est le premier ; ouverte : difference simple aux bouts),
+     * croisee avec la normale du plan {@code (nx, ny, nz)}. {@code tmp} : vecteur de travail.
+     */
+    private static void lateral(float[] points, float[] sides, int base, int segments, boolean closed, double nx,
+                                double ny, double nz, Vector3d tmp)
+    {
+        for (int k = 0; k <= segments; k++) {
+            int next = base + (closed ? (k + 1) % segments : Math.min(k + 1, segments)) * 3;
+            int previous = base + (closed ? (k + segments - 1) % segments : Math.max(k - 1, 0)) * 3;
+            double tx = points[next] - points[previous];
+            double ty = points[next + 1] - points[previous + 1];
+            double tz = points[next + 2] - points[previous + 2];
+            // Laterale = tangente x normale, unitaire.
+            tmp.set(ty * nz - tz * ny, tz * nx - tx * nz, tx * ny - ty * nx);
+            double length = tmp.length();
+            if (length > 0.0) tmp.div(length);
+            int at = base + k * 3;
+            sides[at] = (float) tmp.x;
+            sides[at + 1] = (float) tmp.y;
+            sides[at + 2] = (float) tmp.z;
+        }
+    }
+
+    // ---------------------------------------------------------------- croix de selection (T26)
+
+    /** Indice dans la mise en page du systeme selectionne {@code id}, s'il est dans le cadrage ; {@code -1} sinon. */
+    private static int selectedStar(Layout layout, int id)
+    {
+        if (id == 0) return -1;
+        for (int i = 0; i < layout.count; i++) {
+            if (layout.ids[i] == id) return layout.inside[i] ? i : -1;
+        }
+        return -1;
+    }
+
+    /** Indice du corps selectionne {@code id}, s'il est dessine (zoom : dans le cube) ; {@code -1} sinon. */
+    private int selectedBody(Layout layout, int id)
+    {
+        if (id == 0) return -1;
+        for (int i = 0; i < layout.bodyCount; i++) {
+            if (layout.bodyIds[i] == id) return visible[i] ? i : -1;
+        }
+        return -1;
+    }
+
+    /**
+     * Croix de la selection en {@code (x, y, z)} (unites du cube) : un segment par axe, d'une face a l'autre, en deux
+     * bandes croisees de demi-largeur {@code t}.
+     */
+    private static void cross(VertexConsumer consumer, Matrix4f matrix, float x, float y, float z, float t, int light)
+    {
+        float h = SpaceMapCube.HALF_SIZE;
+        for (int i = 0; i < 3; i++) {
+            float[] a = AXES[i];
+            float[] u = AXES[(i + 1) % 3];
+            float[] v = AXES[(i + 2) % 3];
+            // Debut sur la face -h de l'axe, les deux autres coordonnees sont celles de l'objet.
+            float sx = a[0] != 0f ? -h : x;
+            float sy = a[1] != 0f ? -h : y;
+            float sz = a[2] != 0f ? -h : z;
+            float dx = 2f * h * a[0];
+            float dy = 2f * h * a[1];
+            float dz = 2f * h * a[2];
+            band(consumer, matrix, sx, sy, sz, dx, dy, dz, t * u[0], t * u[1], t * u[2], CROSS_COLOR, light);
+            band(consumer, matrix, sx, sy, sz, dx, dy, dz, t * v[0], t * v[1], t * v[2], CROSS_COLOR, light);
+        }
+    }
+
+    /**
+     * Etiquettes des six extremites de la croix en {@code (x, y, z)} : pour chaque axe, sa coordonnee
+     * ({@link #crossValues}) suivie de {@code unit}, aux deux faces.
+     */
+    private void crossLabels(Font font, Matrix4f matrix, MultiBufferSource buffers, float x, float y, float z,
+                             String unit, float invX, float invY, float invZ, int light)
+    {
+        float h = SpaceMapCube.HALF_SIZE;
+        for (int i = 0; i < 3; i++) {
+            coordinate.set(AXIS_NAMES[i], crossValues[i], unit, font);
+            float[] a = AXES[i];
+            for (int side = -1; side <= 1; side += 2) {
+                float ex = a[0] != 0f ? side * h : x;
+                float ey = a[1] != 0f ? side * h : y;
+                float ez = a[2] != 0f ? side * h : z;
+                crossLabel(font, matrix, buffers, ex, ey, ez, side * a[0], side * a[1], side * a[2], invX, invY, invZ,
+                        light);
+            }
+        }
+    }
+
+    /**
+     * Etiquette {@link #coordinate} a l'extremite {@code (ex, ey, ez)} d'un segment dont la direction sortante est
+     * {@code (ax, ay, az)} (axes du cube). Direction vue a l'ecran = axe exprime dans le repere du billboard
+     * ({@code facing^-1 . a}, composantes X / Y) ; le centre du texte est pousse dans cette direction de l'ecart plus la
+     * demi-etendue de la boite du texte dans cette direction : la boite ne touche ni l'extremite ni le segment. Axe
+     * presque face a la camera : etiquette au-dessus (face {@code +}) ou au-dessous (face {@code -}).
+     */
+    private void crossLabel(Font font, Matrix4f matrix, MultiBufferSource buffers, float ex, float ey, float ez,
+                            float ax, float ay, float az, float invX, float invY, float invZ, int light)
+    {
+        placeBillboard(matrix, ex, ey, ez, invX, invY, invZ);
+        if (!readable(billboard)) return;
+        facing.transformInverse(crossDirection.set(ax, ay, az));
+        float dx = crossDirection.x;
+        float dy = crossDirection.y;
+        float length = Mth.sqrt(dx * dx + dy * dy);
+        if (length < 1e-3f) {
+            dx = 0f;
+            dy = ax + ay + az >= 0f ? 1f : -1f;
+        } else {
+            dx /= length;
+            dy /= length;
+        }
+        float halfWidth = 0.5f * coordinate.width * CROSS_TEXT_SCALE;
+        float halfHeight = TEXT_HALF_HEIGHT * CROSS_TEXT_SCALE;
+        float d = CROSS_LABEL_GAP + Math.abs(dx) * halfWidth + Math.abs(dy) * halfHeight;
+        textMatrix.set(billboard).translate(dx * d, dy * d, 0f)
+                .scale(-CROSS_TEXT_SCALE, -CROSS_TEXT_SCALE, CROSS_TEXT_SCALE);
+        font.drawInBatch(coordinate, -0.5f * coordinate.width, -4f, CROSS_LABEL_COLOR, false, textMatrix, buffers,
+                Font.DisplayMode.NORMAL, 0, light);
+    }
+
+    /**
+     * Texte d'une etiquette de coordonnee, reutilise ({@code « X -1,617 al »}) : caracteres ASCII dans un tableau
+     * fixe, livres a la police comme {@link FormattedCharSequence} ; largeur sommee depuis une table des largeurs des
+     * caracteres ASCII remplie au premier usage. Sans allocation ensuite. Fil de rendu seulement.
+     */
+    private static final class CoordinateText implements FormattedCharSequence
+    {
+        private final char[] chars = new char[2 + SpaceCoordinates.MAX_LENGTH + 8];
+        private int length;
+        /** Largeur du texte, en pixels de police. */
+        private int width;
+        /** Largeur de chaque caractere ASCII imprimable, en pixels de police ; {@code null} avant le premier usage. */
+        private int[] charWidths;
+
+        /** {@code axis}, espace, {@code value} au format de {@link SpaceCoordinates#write}, puis {@code unit}. */
+        void set(char axis, double value, String unit, Font font)
+        {
+            if (charWidths == null) {
+                charWidths = new int[128];
+                for (int c = 32; c < 127; c++) charWidths[c] = font.width(String.valueOf((char) c));
+            }
+            int at = 0;
+            chars[at++] = axis;
+            chars[at++] = ' ';
+            at = SpaceCoordinates.write(value, chars, at);
+            for (int i = 0; i < unit.length() && at < chars.length; i++) chars[at++] = unit.charAt(i);
+            length = at;
+            int sum = 0;
+            for (int i = 0; i < length; i++) {
+                char c = chars[i];
+                sum += c < 128 ? charWidths[c] : 0;
+            }
+            width = sum;
+        }
+
+        @Override
+        public boolean accept(FormattedCharSink sink)
+        {
+            for (int i = 0; i < length; i++) {
+                if (!sink.accept(i, Style.EMPTY, chars[i])) return false;
+            }
+            return true;
+        }
+    }
+
+    // ---------------------------------------------------------------- vaisseau (T25)
+
+    /**
+     * {@link #ship} (unites du cube) et {@link #shipForward} (axes du systeme = axes locaux du cube) du vaisseau, si le
+     * systeme edite est le systeme courant du miroir client de l'Environment (bloc froid recu) : position
+     * {@code P_ref(t_aff) + (s - P_ref(maintenant))} (C49) dans la vue courante, ou {@code s} sans referentiel (vue du
+     * systeme entier seulement) ; faux sinon, ou hors du cube. Le referentiel et la pose sont ceux de l'affichage du
+     * ciel ({@code referenceBodyId}, {@code pose(partialTick)}). Sans allocation.
+     */
+    private boolean shipPosition(SpaceSystem system, int zoom, double half, float partialTick)
+    {
+        SpaceEnvironmentModule env = SpaceEnvironmentModule.client();
+        if (env == null || !env.synced()) return false;
+        SpaceSystem current = env.currentSystem();
+        if (current == null || current.id() != system.id()) return false;
+        env.pose(partialTick, shipPose);
+        Vector3d s = shipPose.position();
+        double unit = SpaceSystemScale.unit(half);
+        int reference = env.referenceBodyId();
+        int now = reference == 0 ? -1 : current.indexOf(reference);
+        int shown = reference == 0 ? -1 : system.indexOf(reference);
+        if (now >= 0 && shown >= 0) {
+            env.bodyPositions(partialTick, envBodies);
+            Vector3d r = envBodies[now];
+            Vector3d q = positions[shown];
+            ship.set(q.x + (s.x - r.x) * unit, q.y + (s.y - r.y) * unit, q.z + (s.z - r.z) * unit);
+        } else if (zoom < 0) {
+            ship.set(s.x * unit, s.y * unit, s.z * unit);
+        } else {
+            return false;
+        }
+        if (!inside((float) ship.x, (float) ship.y, (float) ship.z)) return false;
+        shipPose.orientation().transform(env.settings().forward(shipForward));
+        return true;
+    }
+
+    /**
+     * Vaisseau : disque vert (rayon {@value #SHIP_RADIUS} unite du cube) avance de {@value #SHIP_LIFT} bloc vers la
+     * camera, puis segment de l'axe avant ({@value #SHIP_SEGMENT} unite du cube, deux bandes croisees) dans le repere
+     * local du cube.
+     */
+    private void drawShip(VertexConsumer consumer, Matrix4f matrix, float scale, float invX, float invY, float invZ,
+                          int light)
+    {
+        float x = (float) ship.x;
+        float y = (float) ship.y;
+        float z = (float) ship.z;
+        float fx = (float) shipForward.x;
+        float fy = (float) shipForward.y;
+        float fz = (float) shipForward.z;
+        // Deux directions perpendiculaires a l'axe : u = f x (Y ou X), v = f x u.
+        float ux;
+        float uy;
+        float uz;
+        if (Math.abs(fy) < 0.9f) {
+            ux = -fz;
+            uy = 0f;
+            uz = fx;
+        } else {
+            ux = 0f;
+            uy = fz;
+            uz = -fy;
+        }
+        float length = Mth.sqrt(ux * ux + uy * uy + uz * uz);
+        float w = SHIP_THICKNESS / scale / Math.max(1e-6f, length);
+        ux *= w;
+        uy *= w;
+        uz *= w;
+        float vx = (fy * uz - fz * uy);
+        float vy = (fz * ux - fx * uz);
+        float vz = (fx * uy - fy * ux);
+        float d = SHIP_SEGMENT * SpaceMapCube.HALF_SIZE;
+        band(consumer, matrix, x, y, z, fx * d, fy * d, fz * d, ux, uy, uz, SHIP_SEGMENT_COLOR, light);
+        band(consumer, matrix, x, y, z, fx * d, fy * d, fz * d, vx, vy, vz, SHIP_SEGMENT_COLOR, light);
+        placeBillboard(matrix, x, y, z, invX, invY, invZ);
+        // Repere de la camera : +Z regarde vers la scene, -Z revient vers l'oeil.
+        billboard.translate(0f, 0f, -SHIP_LIFT);
+        disc(consumer, billboard, SHIP_RADIUS * SpaceMapCube.HALF_SIZE * scale, SHIP_CORE, SHIP_RIM, light);
     }
 
     /**
@@ -578,7 +994,8 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
 
         private SpaceSystem system;
         private double systemHalf = Double.NaN;
-        private double systemMagnifier = Double.NaN;
+        /** Indice du corps zoome de la mise en page, {@code -1} = systeme entier. */
+        private int systemZoom = -1;
         private int bodyCount;
         private final int[] bodyIds = new int[SpaceLimits.MAX_BODIES];
         /** Indice du parent, {@code -1} pour un corps sans orbite (centre). */
@@ -591,7 +1008,9 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
         private final String[] bodyNames = new String[SpaceLimits.MAX_BODIES];
         private final int[] bodyWidths = new int[SpaceLimits.MAX_BODIES];
         private final int[] orbitColor = new int[SpaceLimits.MAX_BODIES];
-        /** Points des orbites relatifs au parent (unites du cube, loupe comprise), {@code SEGMENTS + 1} par corps. */
+        /** Orbite dessinee a l'echelle de la vue (sans zoom : toutes ; zoom : descendants du corps zoome). */
+        private final boolean[] orbitShown = new boolean[SpaceLimits.MAX_BODIES];
+        /** Points des orbites relatifs au parent (unites du cube, a l'echelle de la vue), {@code SEGMENTS + 1} par corps. */
         private final float[] orbitPoints = new float[SpaceLimits.MAX_BODIES * (ORBIT_SEGMENTS + 1) * 3];
         /** Direction unitaire dans le plan de l'orbite, perpendiculaire a la courbe, en chaque point. */
         private final float[] orbitSides = new float[SpaceLimits.MAX_BODIES * (ORBIT_SEGMENTS + 1) * 3];
@@ -603,14 +1022,15 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
 
         /**
          * Corps du systeme edite (rayons affiches, couleurs, noms) et courbes des orbites relativement au parent,
-         * recalcules seulement quand la copie (nouvelle instance a chaque synchro), l'echelle ou la loupe change.
+         * recalcules seulement quand la copie (nouvelle instance a chaque synchro), la demi-etendue ou le zoom change.
          */
-        void ensureBodies(SpaceSystem edited, double half, double magnifier, Font font)
+        void ensureBodies(SpaceSystem edited, double half, int zoom, Font font)
         {
-            if (edited == system && half == systemHalf && magnifier == systemMagnifier) return;
+            if (edited == system && half == systemHalf && zoom == systemZoom) return;
             system = edited;
             systemHalf = half;
-            systemMagnifier = magnifier;
+            systemZoom = zoom;
+            double unit = SpaceSystemScale.unit(half);
             List<SpaceBody> bodies = edited.bodies();
             bodyCount = Math.min(bodies.size(), SpaceLimits.MAX_BODIES);
             for (int i = 0; i < bodyCount; i++) {
@@ -619,14 +1039,14 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
                 SpaceOrbit orbit = body.orbit();
                 parent[i] = orbit != null ? edited.parentIndex(i) : -1;
                 star[i] = body.kind() == SpaceBodyKind.STAR;
-                bodyRadius[i] = (float) SpaceSystemScale.displayRadius(body.radius());
+                bodyRadius[i] = (float) SpaceSystemScale.displayRadius(body.radius(), half);
                 bodyColor[i] = body.color() | 0xFF000000;
                 bodyCore[i] = mixWhite(bodyColor[i], star[i] ? CORE_WHITE : 0.25f);
                 orbitColor[i] = ORBIT_ALPHA << 24 | body.color() & 0xFFFFFF;
                 bodyNames[i] = body.name();
                 bodyWidths[i] = font.width(bodyNames[i]);
-                if (parent[i] >= 0) curve(i, orbit, SpaceSystemScale.factor(body, magnifier) * SpaceMapCube.HALF_SIZE
-                        / (SpaceUnits.AU_KM * half));
+                orbitShown[i] = parent[i] >= 0 && SpaceSystemScale.orbitInView(edited, zoom, i);
+                if (parent[i] >= 0) curve(i, orbit, unit);
             }
             for (int i = bodyCount; i < bodyNames.length; i++) bodyNames[i] = null;
         }
@@ -647,22 +1067,8 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
             orbitNormals[i * 3] = (float) normal.x;
             orbitNormals[i * 3 + 1] = (float) normal.y;
             orbitNormals[i * 3 + 2] = (float) normal.z;
-            for (int k = 0; k <= ORBIT_SEGMENTS; k++) {
-                // Tangente par difference centree (courbe fermee : le point SEGMENTS est le point 0).
-                int next = base + ((k + 1) % ORBIT_SEGMENTS) * 3;
-                int previous = base + ((k + ORBIT_SEGMENTS - 1) % ORBIT_SEGMENTS) * 3;
-                double tx = orbitPoints[next] - orbitPoints[previous];
-                double ty = orbitPoints[next + 1] - orbitPoints[previous + 1];
-                double tz = orbitPoints[next + 2] - orbitPoints[previous + 2];
-                // Laterale = tangente x normale, unitaire.
-                point.set(ty * normal.z - tz * normal.y, tz * normal.x - tx * normal.z, tx * normal.y - ty * normal.x);
-                double length = point.length();
-                if (length > 0.0) point.div(length);
-                int at = base + k * 3;
-                orbitSides[at] = (float) point.x;
-                orbitSides[at + 1] = (float) point.y;
-                orbitSides[at + 2] = (float) point.z;
-            }
+            // Courbe fermee : le point SEGMENTS est le point 0.
+            lateral(orbitPoints, orbitSides, base, ORBIT_SEGMENTS, true, normal.x, normal.y, normal.z, point);
         }
 
         private static int mixWhite(int argb, float white)

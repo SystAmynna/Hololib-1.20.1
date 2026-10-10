@@ -8,19 +8,22 @@
  *     <li>{@link com.amynna.hololib.modules.monde.spacecontroller.SpaceControllerModule} : etat synchronise (au plus
  *     4 envois par seconde), actions serveur {@code BEGIN} / {@code INPUT} / {@code END} / {@code OPS_ONLY}, reglage
  *     sauvegarde « pilotage reserve aux ops » (verifie par le serveur : {@code HoloAccess} ne sait pas l'exprimer) ;
- *     backend client (joueur local, op) ;</li>
+ *     backend client (module Space Pilot du joueur local, op, fraction de tick de la derniere frame) ;</li>
  *     <li>{@link com.amynna.hololib.modules.monde.spacecontroller.SpaceControllerWindow} : fenetre {@code World}
  *     au-dessus du marker, editable par les operateurs, interrupteur « Pilotage : tous / ops » ;</li>
  *     <li>{@link com.amynna.hololib.modules.monde.spacecontroller.SpacePilotPad} : zone de la fenetre dont le clic
  *     capture les controles du pilote (traits {@code HoloPointerInput}) : gaz (vitesse signee, Reculer = marche
  *     arriere) et roulis aux touches de deplacement, frein prioritaire a la touche Saut maintenue, joystick au
  *     regard borne a un cone autour de l'axe avant du monde, envoi des entrees quantifiees et prediction locale
- *     ({@code docs/space/04-mathematiques.md} par. 5 et 6) ;</li>
- *     <li>{@link com.amynna.hololib.modules.monde.spacecontroller.SpaceJoystickForward} (cercle avant, {@code Local}
- *     relatif sur l'axe avant) et {@link com.amynna.hololib.modules.monde.spacecontroller.SpaceJoystickAim} (cercle
- *     de visee, {@code Local} follow au centre de l'ecran) : mini-interface du joystick, dessinee seulement chez le
- *     pilote local de ce poste ({@code shown()}), par {@code client.render.modules.monde.spacecontroller}.</li>
+ *     ({@code docs/space/04-mathematiques.md} par. 5 et 6), zone morte deduite des cercles du joystick (C48) ;
+ *     saut interstellaire a la touche Accroupi maintenue (T22 : cible au reticule choisie a l'appui, drapeau et
+ *     cible envoyes tant que la touche est tenue, joystick inactif pendant le saut) ; pad du pilote local lu par
+ *     Space Pilot ({@code SpacePilotPad.localPilot()}).</li>
  * </ul>
- * Code commun : aucune classe client (le client passe par {@code SpaceControllerModule.Backend}).
+ * Pendant un saut, la fenetre affiche « Saut vers X » puis « Distorsion : n s » a la place de l'etat (lu par chaque
+ * client dans le miroir de l'Environment, T22).
+ * Pilotage refuse sans module Space Pilot dans la memoire active du joueur (D11, T19) ; les cercles du joystick sont
+ * des objets de Space Pilot ({@code modules.camera.spacepilot}) depuis T19. Code commun : aucune classe client (le
+ * client passe par {@code SpaceControllerModule.Backend}).
  */
 package com.amynna.hololib.modules.monde.spacecontroller;

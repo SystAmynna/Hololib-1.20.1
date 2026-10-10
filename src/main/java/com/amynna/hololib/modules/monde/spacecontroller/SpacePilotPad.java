@@ -8,11 +8,18 @@ import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloWidget;
 import com.amynna.hololib.holo.widget.control.HoloDirections;
 import com.amynna.hololib.holo.widget.control.HoloPointerInput;
+import com.amynna.hololib.modules.camera.spacepilot.SpaceJoystickAim;
+import com.amynna.hololib.modules.camera.spacepilot.SpaceJoystickForward;
 import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
+import com.amynna.hololib.modules.dimension.space.math.SpaceJump;
 import com.amynna.hololib.modules.dimension.space.math.SpaceMotionSettings;
 import com.amynna.hololib.modules.dimension.space.math.SpacePilotInput;
+import com.amynna.hololib.modules.dimension.space.math.SpacePose;
+import com.amynna.hololib.modules.dimension.space.math.SpaceSkyFrame;
+import com.amynna.hololib.modules.dimension.space.model.SpaceSystem;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
+import org.joml.Vector3f;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -31,9 +38,19 @@ import java.util.UUID;
  *     Avancer / Reculer = gaz (vitesse signee : Reculer fait partir le monde en arriere), Gauche / Droite = roulis,
  *     Saut maintenu = frein vers l'arret, prioritaire sur les gaz (le pad envoie le drapeau et les gaz tels quels,
  *     le calcul est dans {@code SpaceMotion.step}) ;</li>
+ *     <li>saut interstellaire (T22, {@code docs/space/04-mathematiques.md} par. 8, C39 a C41) : le mapping Accroupi
+ *     ({@link #JUMP}, la touche choisie par le joueur) est pris aussi ; a l'appui, la cible est l'etoile de fond la
+ *     plus proche du centre de l'ecran a moins de {@value SpaceJump#TARGET_CONE} degres
+ *     ({@link SpaceJump#pickTarget}, ciel affiche a la derniere frame), figee ensuite ; tant que la touche est tenue,
+ *     l'entree porte le drapeau du saut et cette cible ({@link SpacePilotInput#jumpTarget()}) ; relachee, le drapeau
+ *     tombe (le serveur annule une charge). Aucune cible : rien (pas de message). Pas de nouvelle cible pendant un
+ *     voyage. Pendant un saut (touche tenue avec une cible, ou charge / voyage affiches), les taux du joystick sont
+ *     envoyes nuls (la camera reste bornee au cone, la visee continue). Echap pendant le voyage rend la main sans
+ *     l'arreter (C40) ;</li>
  *     <li>joystick au regard : la camera est bornee a un cone de {@value #CONE_ANGLE} degres autour de l'axe avant du
- *     monde (reglage de l'Environment, fixe dans le monde) ; l'ecart au centre, au-dela d'une zone morte de
- *     {@value #DEAD_ZONE} degres, donne les taux de lacet et de tangage. A la prise, le regard est ramene sur l'axe
+ *     monde (reglage de l'Environment, fixe dans le monde) ; l'ecart au centre, au-dela de la zone morte
+ *     {@link #DEAD_ZONE} (C48 : rayon angulaire du cercle avant moins celui du cercle de visee, 2,0 degres), donne
+ *     les taux de lacet et de tangage, continus au bord de la zone morte. A la prise, le regard est ramene sur l'axe
  *     avant en {@value #RECENTER_SECONDS} s (taux nuls pendant ce retour) ;</li>
  *     <li>visee (choix du referentiel, {@code docs/space/04-mathematiques.md} par. 5 point 0, D8) : l'ecart <b>reel</b>
  *     du regard (y compris dans la zone morte, nul pendant le retour) est quantifie dans l'entree
@@ -49,10 +66,14 @@ import java.util.UUID;
  * pilotage devient reserve aux ops et que le joueur local ne l'est pas, ou si l'etat ne designe toujours pas le
  * joueur local {@value #CLAIM_TIMEOUT} ticks apres la demande (refus du serveur, pilote libere). En mode « ops », un
  * non-op voit « Reserve aux operateurs » et la zone ne prend pas son clic (le serveur refuse aussi {@code BEGIN}).
+ * Sans module Space Pilot dans la memoire active du joueur local (D11), le clic est pris sans capture et le message
+ * « Module Space Pilot requis » s'affiche (le serveur refuse aussi {@code BEGIN}, la main est alors rendue apres
+ * {@value #CLAIM_TIMEOUT} ticks comme pour un autre refus).
  * <p>
- * Lecture pour la mini-interface du joystick (T08, client) : {@link #piloting()}, {@link #recentering()},
- * {@link #deviationYaw()}, {@link #deviationPitch()}, {@link #deflection()}, {@link #beyondDeadZone()}. Ne pas
- * redefinir {@code intercepts} (regle des traits).
+ * Lecture pour le joystick de Space Pilot (T19, client) : {@link #localPilot()} (pad du pilote local),
+ * {@link #piloting()}, {@link #recentering()}, {@link #deviationYaw()}, {@link #deviationPitch()},
+ * {@link #deflection()}, {@link #beyondDeadZone()} ; pour le reperage de la cible du saut (T22) : {@link #jumpHeld()},
+ * {@link #jumpTarget()}, {@link #jumpLocked()}. Ne pas redefinir {@code intercepts} (regle des traits).
  */
 public class SpacePilotPad extends HoloWidget implements HoloPointerInput
 {
@@ -77,14 +98,27 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     public static final int SEND_INTERVAL = 2;
     /** Demi-angle du cone du joystick {@code A}, en degres (ecart maximal du regard a l'axe avant). */
     public static final float CONE_ANGLE = 30f;
-    /** Zone morte du joystick {@code D}, en degres : en dessous, aucun taux de rotation. */
-    public static final float DEAD_ZONE = 2f;
+    /**
+     * Zone morte du joystick {@code D}, en degres : en dessous, aucun taux de rotation. Rayon angulaire du cercle avant
+     * moins celui du cercle de visee (C48, {@code docs/space/04-mathematiques.md} par. 6), tous deux a
+     * {@link SpaceJoystickForward#DISTANCE} blocs : aucune rotation tant que le cercle de visee est entierement dans le
+     * cercle avant. Vaut 2,0 degres ({@link SpaceJoystickForward#RADIUS} 0,105, {@link SpaceJoystickAim#RADIUS}
+     * 0,035).
+     */
+    public static final double DEAD_ZONE = StrictMath.toDegrees(
+            StrictMath.atan((double) SpaceJoystickForward.RADIUS / SpaceJoystickForward.DISTANCE)
+                    - StrictMath.atan((double) SpaceJoystickAim.RADIUS / SpaceJoystickForward.DISTANCE));
     /** Duree du retour du regard sur l'axe avant a la prise du pilotage, en secondes. */
     public static final float RECENTER_SECONDS = 0.4f;
     /** Ecart (degres) sous lequel le retour sur l'axe avant est inutile. */
     private static final float RECENTER_EPSILON = 0.05f;
     /** Controle du frein : le mapping Saut (Espace par defaut, la touche choisie par le joueur). */
     public static final HoloControl BRAKE = HoloControl.mapping("key.jump");
+    /**
+     * Controle du saut interstellaire : le mapping Accroupi (Maj gauche par defaut, la touche choisie par le joueur).
+     * Pris par la capture, il ne va ni au jeu (le joueur ne s'accroupit pas) ni au double appui qui ferme le focus.
+     */
+    public static final HoloControl JUMP = HoloControl.mapping("key.sneak");
 
     private static final int ACCENT = 0x40C0FF;
     private static final Component IDLE_TEXT = Component.literal("Cliquer pour piloter");
@@ -94,6 +128,12 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     private static final Component ELSEWHERE_TEXT = Component.literal("Pilote depuis un autre poste");
     private static final Component UNAVAILABLE_TEXT = Component.literal("Indisponible");
     private static final Component RESERVED_TEXT = Component.literal("Reserve aux operateurs");
+
+    /**
+     * Client : pad dont la capture de pilotage est en cours (une capture de pilotage a la fois chez un client), ou
+     * {@code null}. Pose au debut de la capture, retire a la fin ; jamais pose cote serveur (aucune capture).
+     */
+    private static SpacePilotPad capturing;
 
     private final Link link;
     private boolean hovered;
@@ -118,6 +158,16 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     private final HoloDirections directions = new HoloDirections();
     /** Touche Saut enfoncee (appui pris par la capture) : frein. */
     private boolean braking;
+    /** Touche du saut (Accroupi) enfoncee (appui pris par la capture). */
+    private boolean jumpHeld;
+    /** Cible du saut choisie a l'appui et tenue avec la touche ({@code 0} : aucune). */
+    private int jumpTarget;
+    /** Vrai pendant un saut (touche tenue avec une cible, ou charge / voyage affiches) : taux du joystick nuls. */
+    private boolean jumpLocked;
+    /** Recherche de la cible (client, crees au premier appui). */
+    private SpacePose aimPose;
+    private SpaceSkyFrame aimFrame;
+    private Vector3f aimWork;
     /** Derniere entree envoyee (et predite) ; renvoyee par le battement. */
     private SpacePilotInput sent = SpacePilotInput.ZERO;
     /** Vrai jusqu'au premier mouvement de souris de la capture (debut du retour sur l'axe avant). */
@@ -163,6 +213,18 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     /** Vrai si l'etat recu designe le joueur local comme pilote (pendant la capture). */
     public final boolean confirmed() { return piloting && self != null && self.equals(pilot); }
 
+    /**
+     * Client : pad depuis lequel le joueur local pilote, ou {@code null}. Meme regle que le lot 1 (C29) : capture en
+     * cours ({@code HoloCaptures.isCapturing}) et etat recu du poste qui designe le joueur local comme pilote passant
+     * par ce poste. Lu par le joystick de Space Pilot (affichage, zone morte franchie).
+     */
+    public static SpacePilotPad localPilot()
+    {
+        SpacePilotPad pad = capturing;
+        if (pad == null || !pad.confirmed() || !pad.pilotHere) return null;
+        return HoloCaptures.isCapturing(pad) ? pad : null;
+    }
+
     // ---------------------------------------------------------------- traits
 
     @Override
@@ -181,12 +243,19 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
         return available && allowed() && HoloPointerInput.super.clickableBy(button);
     }
 
-    /** Pas de capture si un autre joueur pilote deja, ni pour un non-op en mode « ops ». */
+    /**
+     * Pas de capture si un autre joueur pilote deja, ni pour un non-op en mode « ops », ni sans module Space Pilot dans
+     * la memoire active du joueur local (D11 : message dans la barre d'action).
+     */
     @Override
     public void onClick(HoloInteraction ctx, HoloControl button)
     {
         if (!available || pilot != null && !pilot.equals(ctx.player().getUUID())) return;
         if (opsOnly && !ctx.player().hasPermissions(SpaceControllerModule.OP_LEVEL)) return;
+        if (!SpaceControllerModule.localSpacePilot()) {
+            ctx.player().displayClientMessage(SpaceControllerModule.SPACE_PILOT_REQUIRED, true);
+            return;
+        }
         HoloPointerInput.super.onClick(ctx, button);
     }
 
@@ -213,6 +282,7 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     public void onCaptureStart(HoloCapture ctx)
     {
         piloting = true;
+        capturing = this;
         self = ctx.player().getUUID();
         sinceSend = 0;
         unconfirmed = 0;
@@ -226,6 +296,7 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
         onPilotEnd(ctx);
         link.end();
         piloting = false;
+        if (capturing == this) capturing = null;
         self = null;
     }
 
@@ -317,27 +388,72 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     // ---------------------------------------------------------------- pilotage (T07)
 
     /**
-     * Controles du pilote : les quatre mappings de deplacement (gaz, roulis), le mapping Saut (frein) et les clics
-     * bruts (pris sans effet : pas d'attaque ni d'utilisation d'objet pendant le pilotage, la camera visant le monde).
+     * Controles du pilote : les quatre mappings de deplacement (gaz, roulis), le mapping Saut (frein), le mapping
+     * Accroupi (saut interstellaire, T22) et les clics bruts (pris sans effet : pas d'attaque ni d'utilisation d'objet
+     * pendant le pilotage, la camera visant le monde).
      */
     protected boolean capturesPilotControl(HoloControl control)
     {
-        return HoloDirections.isDirection(control) || control.equals(BRAKE) || control.equals(HoloControl.LEFT_CLICK)
-                || control.equals(HoloControl.RIGHT_CLICK) || control.equals(HoloControl.MIDDLE_CLICK);
+        return HoloDirections.isDirection(control) || control.equals(BRAKE) || control.equals(JUMP)
+                || control.equals(HoloControl.LEFT_CLICK) || control.equals(HoloControl.RIGHT_CLICK)
+                || control.equals(HoloControl.MIDDLE_CLICK);
     }
 
-    /** Appui d'une touche de deplacement ou du frein (les clics sont ignores). */
+    /**
+     * Appui d'une touche de deplacement, du frein ou du saut (cible cherchee a l'appui, {@link #findJumpTarget}) ; les
+     * clics sont ignores.
+     */
     protected void onPilotPress(HoloCapture ctx, HoloControl control)
     {
-        if (control.equals(BRAKE)) braking = true;
-        else directions.set(control, true);
+        if (control.equals(BRAKE)) {
+            braking = true;
+        } else if (control.equals(JUMP)) {
+            jumpHeld = true;
+            jumpTarget = findJumpTarget(ctx);
+        } else {
+            directions.set(control, true);
+        }
     }
 
-    /** Relachement d'une touche de deplacement ou du frein. */
+    /** Relachement d'une touche de deplacement, du frein ou du saut (le drapeau du saut tombe). */
     protected void onPilotRelease(HoloCapture ctx, HoloControl control)
     {
-        if (control.equals(BRAKE)) braking = false;
-        else directions.set(control, false);
+        if (control.equals(BRAKE)) {
+            braking = false;
+        } else if (control.equals(JUMP)) {
+            jumpHeld = false;
+            jumpTarget = 0;
+        } else {
+            directions.set(control, false);
+        }
+    }
+
+    /**
+     * Cible du saut au centre de l'ecran (C41) : etoile de fond la plus proche du regard du joueur a moins de
+     * {@value SpaceJump#TARGET_CONE} degres, directions du ciel affiche a la derniere frame
+     * ({@code pose(partialTick)}, {@link SpaceJump#pickTarget}) ; {@code 0} sans Environment synchronise, sans systeme
+     * courant, pendant un voyage (une cible tenue jusqu'a l'arrivee relancerait un saut) ou si aucune etoile n'est
+     * assez proche.
+     */
+    private int findJumpTarget(HoloCapture ctx)
+    {
+        SpaceEnvironmentModule env = SpaceEnvironmentModule.client();
+        if (env == null || !env.synced() || env.currentSystem() == null) return 0;
+        if (env.jump().phase() == SpaceJump.Phase.TRAVEL) return 0;
+        if (aimFrame == null) {
+            aimPose = new SpacePose();
+            aimFrame = new SpaceSkyFrame();
+            aimWork = new Vector3f();
+        }
+        aimFrame.set(env.pose(SpaceControllerModule.partialTick(), aimPose));
+        double yaw = Math.toRadians(ctx.yaw());
+        double pitch = Math.toRadians(ctx.pitch());
+        double cosPitch = Math.cos(pitch);
+        float lookX = (float) (-Math.sin(yaw) * cosPitch);
+        float lookY = (float) -Math.sin(pitch);
+        float lookZ = (float) (Math.cos(yaw) * cosPitch);
+        return SpaceJump.pickTarget(aimFrame, env.currentSystem(), env.backgroundStars(), lookX, lookY, lookZ,
+                aimWork);
     }
 
     /**
@@ -348,6 +464,9 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     {
         directions.clear();
         braking = false;
+        jumpHeld = false;
+        jumpTarget = 0;
+        jumpLocked = false;
         sent = SpacePilotInput.ZERO;
         recenterPending = true;
         recentering = false;
@@ -355,11 +474,17 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
         predict(SpacePilotInput.ZERO);
     }
 
-    /** Fin du pilotage : entree nulle (frein leve) envoyee (avant {@code END}) et predite, etat remis a zero. */
+    /**
+     * Fin du pilotage : entree nulle (frein et drapeau du saut leves : une charge est annulee, un voyage continue, C40)
+     * envoyee (avant {@code END}) et predite, etat remis a zero.
+     */
     protected void onPilotEnd(HoloCapture ctx)
     {
         directions.clear();
         braking = false;
+        jumpHeld = false;
+        jumpTarget = 0;
+        jumpLocked = false;
         recenterPending = false;
         recentering = false;
         deviationYaw = deviationPitch = 0f;
@@ -381,17 +506,25 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
      * depuis les touches, taux depuis l'ecart du regard ({@code docs/space/04-mathematiques.md} par. 6) :
      * {@code k = clamp((m - D) / (A - D), 0, 1) / m}, {@code yawRate = dYaw k}, {@code pitchRate = -dPitch k} (regarder
      * plus haut = pitch Minecraft negatif = nez qui monte) ; visee = ecart lui-meme ({@code aimYaw = dYaw},
-     * {@code aimPitch = -dPitch}, positif au-dessus), avec la tolerance d'un pas ({@link #aim}).
+     * {@code aimPitch = -dPitch}, positif au-dessus), avec la tolerance d'un pas ({@link #aim}) ; drapeau et cible du
+     * saut tant que la touche est tenue avec une cible. Pendant un saut ({@link #jumpLocked()}), taux nuls ; gaz,
+     * roulis et frein restent transmis tels quels (le pas les ignore pendant la charge, C40).
      */
     private SpacePilotInput computeInput()
     {
+        SpaceEnvironmentModule env = SpaceEnvironmentModule.client();
+        // Arrivee alors que la touche est encore tenue : la cible est devenue le systeme courant, le drapeau tombe.
+        SpaceSystem current = env != null ? env.currentSystem() : null;
+        if (jumpTarget > 0 && current != null && current.id() == jumpTarget) jumpTarget = 0;
+        jumpLocked = jumpTarget > 0 || env != null && env.jump().active();
         int throttle = -(int) Math.signum(directions.dy());
         int roll = (int) Math.signum(directions.dx());
         double magnitude = Math.sqrt(deviationYaw * deviationYaw + deviationPitch * deviationPitch);
-        double k = magnitude > 0.0 ? deflection(magnitude) / magnitude : 0.0;
+        double k = !jumpLocked && magnitude > 0.0 ? deflection(magnitude) / magnitude : 0.0;
         byte aimYaw = aim(deviationYaw, sent.aimYaw(), sent.aimYawDegrees());
         byte aimPitch = aim(-deviationPitch, sent.aimPitch(), sent.aimPitchDegrees());
-        return SpacePilotInput.of(throttle, roll, deviationYaw * k, -deviationPitch * k, braking, aimYaw, aimPitch);
+        return SpacePilotInput.of(throttle, roll, deviationYaw * k, -deviationPitch * k, braking, aimYaw, aimPitch,
+                jumpTarget);
     }
 
     /**
@@ -433,14 +566,32 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     /** Ecart en tangage du regard a l'axe avant, degres (positif : en dessous, convention Minecraft). */
     public final float deviationPitch() { return deviationPitch; }
 
-    /** Deflexion du joystick, {@code [0, 1]} : 0 dans la zone morte, 1 au bord du cone. */
+    /**
+     * Deflexion du joystick, {@code [0, 1]} : 0 dans la zone morte, 1 au bord du cone ; 0 pendant un saut (aucune
+     * rotation commandee).
+     */
     public final float deflection()
     {
+        if (jumpLocked) return 0f;
         return deflection(Math.sqrt(deviationYaw * deviationYaw + deviationPitch * deviationPitch));
     }
 
     /** Vrai si l'ecart depasse la zone morte (une rotation est commandee). */
     public final boolean beyondDeadZone() { return deflection() > 0f; }
+
+    // ---------------------------------------------------------------- lecture du saut (T22, client)
+
+    /** Vrai tant que la touche du saut (Accroupi) est tenue pendant la capture. */
+    public final boolean jumpHeld() { return jumpHeld; }
+
+    /**
+     * Cible du saut choisie a l'appui et tenue avec la touche ({@code 0} : touche relachee, ou aucune etoile au
+     * reticule) : reperee par Space Pilot jusqu'a ce que la charge soit affichee.
+     */
+    public final int jumpTarget() { return jumpTarget; }
+
+    /** Vrai pendant un saut (touche tenue avec une cible, ou charge / voyage affiches) : taux du joystick nuls. */
+    public final boolean jumpLocked() { return jumpLocked; }
 
     // ---------------------------------------------------------------- dessin
 

@@ -14,6 +14,7 @@ import com.amynna.hololib.modules.camera.editor.OwnHudEditorModule;
 import com.amynna.hololib.modules.camera.editor.WorldEditorModule;
 import com.amynna.hololib.modules.camera.focus.FocusModule;
 import com.amynna.hololib.modules.camera.quickaction.QuickActionModule;
+import com.amynna.hololib.modules.camera.spacepilot.SpacePilotModule;
 import com.amynna.hololib.modules.dimension.planet1.Planet1Module;
 import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
 import com.amynna.hololib.modules.monde.spaceconfigurator.SpaceConfiguratorModule;
@@ -36,6 +37,8 @@ public final class HoloLibModules
     public static final RegistryObject<HoloModuleType<SpaceConfiguratorModule>> SPACE_CONFIGURATOR =
             REGISTER.register("space_configurator",
                     () -> new HoloModuleType<>(HoloModuleTarget.POSITION, SpaceConfiguratorModule::new));
+    public static final RegistryObject<HoloModuleType<SpacePilotModule>> SPACE_PILOT = REGISTER.register(
+            "space_pilot", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, SpacePilotModule::new));
     public static final RegistryObject<HoloModuleType<FocusModule>> FOCUS = REGISTER.register(
             "focus", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, FocusModule::new));
     public static final RegistryObject<HoloModuleType<OwnFixEditorModule>> OWN_FIX_EDITOR = REGISTER.register(

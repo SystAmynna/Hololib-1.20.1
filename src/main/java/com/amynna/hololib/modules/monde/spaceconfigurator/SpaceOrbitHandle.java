@@ -16,9 +16,10 @@ import com.amynna.hololib.modules.dimension.space.model.SpaceLimits;
  * <p>
  * Placement ecrit par le module ({@code docs/space/04-mathematiques.md} par. 7) : translation = parent affiche du
  * corps (au temps fige {@code t_edit}), rotation = {@code R_cube . R_orbite}, echelle
- * {@code (a_aff . sigma, a_aff . sigma, b_aff . sigma)} (demi-axes affiches, loupe des lunes comprise). Le renderer
- * dessine dans le repere local la courbe {@code (cos t - e, 0, sin t)} : avec l'echelle, l'ellipse de l'orbite, parent
- * au foyer. L'excentricite se lit dans le rapport {@code scaleZ / scaleX} ({@link #eccentricity}).
+ * {@code (a_aff . sigma, a_aff . sigma, b_aff . sigma)} (demi-axes affiches, a l'echelle de la vue : systeme entier
+ * ou zoom sur un corps, T25 ; en zoom, la poignee n'existe que si le parent est dans le voisinage du corps zoome).
+ * Le renderer dessine dans le repere local la courbe {@code (cos t - e, 0, sin t)} : avec l'echelle, l'ellipse de
+ * l'orbite, parent au foyer. L'excentricite se lit dans le rapport {@code scaleZ / scaleX} ({@link #eccentricity}).
  * <p>
  * N'existe que si un corps a orbite est selectionne en mode systeme : le module la cree et la retire des deux cotes
  * (cle {@link #KEY}). Pas de callback d'edition : le module compare chaque tick serveur sa rotation et son echelle aux

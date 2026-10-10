@@ -35,6 +35,10 @@ import java.util.List;
  * jamais partagee. Apres {@link #step}, {@link #defaultPose}, {@link #refreshReference} ou
  * {@link #nearestBody(SpacePose, SpaceSystem, double)}, {@link #bodyPositions()} contient les positions des corps au
  * temps demande (fin du pas pour {@link #step}).
+ * <p>
+ * <b>Saut</b> (T21, doc 04 par. 8) : la variante de {@link #step} qui recoit un {@link SpaceJump} demarre, avance ou
+ * annule la charge, fige la pose pendant le voyage ; meme fonction sur le serveur et sur les clients. L'arrivee
+ * (changement de systeme) n'est pas dans le pas : elle est decidee par le serveur.
  */
 public final class SpaceMotion
 {
@@ -69,8 +73,13 @@ public final class SpaceMotion
     public static final int SWITCH_COOLDOWN = 60;
     /** Referentiel, fondu : ticks pour passer du mouvement d'entrainement de l'ancien au nouveau (2 s). */
     public static final int BLEND_TICKS = 40;
-    /** Pose par defaut : distance au parent de la premiere planete, en demi-grands axes de son orbite. */
+    /** Pose par defaut : distance au parent de la planete de depart, en demi-grands axes de son orbite. */
     public static final double DEFAULT_ORBIT_FACTOR = 1.02;
+    /**
+     * Pose par defaut : demi-grand axe vise pour la planete de depart, en UA (la Terre dans Sol) ; la planete retenue
+     * est celle dont le demi-grand axe en est le plus proche en echelle logarithmique ({@link #startPlanet}).
+     */
+    public static final double START_SEMI_MAJOR_AXIS = 1.0;
     /** Pose par defaut sans planete : distance a l'etoile principale, en UA (au moins hors de la marge). */
     public static final double DEFAULT_DISTANCE_AU = 1.0;
     /** Pose par defaut : altitude minimale au-dessus de chaque corps, en rayons du corps. */
@@ -94,6 +103,10 @@ public final class SpaceMotion
     private final Vector3d direction = new Vector3d();
     private final Vector3d aim = new Vector3d();
     private final Quaterniond rotation = new Quaterniond();
+    /** Position galactique d'une cible de saut ({@link SpaceJump.Targets}). */
+    private final Vector3d jumpTarget = new Vector3d();
+    /** Vecteur de travail des calculs du saut. */
+    private final Vector3d jumpWork = new Vector3d();
     private int bodyCount;
     private double nearestAltitude = Double.POSITIVE_INFINITY;
     private int referenceId;
@@ -183,6 +196,76 @@ public final class SpaceMotion
     public double step(SpacePose pose, double speed, SpaceFrameState frame, SpacePilotInput input, SpaceSystem system,
                        double startDays, double endDays, SpaceMotionSettings settings, SpacePose dest)
     {
+        return move(pose, speed, frame, input, system, startDays, endDays, settings, dest, false);
+    }
+
+    /**
+     * Un pas de tick avec le <b>saut</b> (doc 04 par. 8, T21), etat {@code jump} mis a jour en place ; meme suite
+     * d'operations sur le serveur et sur les clients :
+     * <ul>
+     *     <li>{@code NONE} : drapeau du saut dans {@code input} et cible valide ({@code targets}, id different du
+     *     systeme courant) -> debut de la charge ({@link SpaceJump#begin}, {@code Q0} = orientation au debut du pas),
+     *     puis pas de charge ci-dessous ; sinon pas normal ({@link #step(SpacePose, double, SpaceFrameState,
+     *     SpacePilotInput, SpaceSystem, double, double, SpaceMotionSettings, SpacePose) step}) ;</li>
+     *     <li>{@code CHARGE} (la cible reste celle du debut, meme si l'entree en designe une autre) : drapeau perdu ->
+     *     {@code NONE} (orientation atteinte gardee) et pas normal ; sinon pas
+     *     <b>verrouille</b> (frein force, gaz / roulis / taux ignores ; referentiel, entrainement, freinage
+     *     d'approche et garde-fou comme d'habitude, avec l'orientation du debut du pas), puis orientation de fin de pas
+     *     {@link SpaceJump#chargeOrientation} au pas {@code n} de la charge ; au pas {@value SpaceJump#CHARGE_TICKS}
+     *     -> {@code TRAVEL}, {@code V = 0} ;</li>
+     *     <li>{@code TRAVEL} : pose figee ({@code dest = pose}), referentiel inchange, {@code V = 0}, compteur borne a
+     *     la duree. L'arrivee ({@link SpaceJump#arrived()}) est faite par le serveur <b>hors</b> du pas ; un client
+     *     reste au bout du compte. {@link #bodyPositions()} n'est pas recalcule pendant le voyage.</li>
+     * </ul>
+     * Sans allocation.
+     *
+     * @param jump    etat du saut au debut du pas, <b>mis a jour en place</b>
+     * @param targets recherche de la cible ({@code null} : aucun saut ne peut commencer)
+     * @return la vitesse nominale signee {@code V} a la fin du pas
+     */
+    public double step(SpacePose pose, double speed, SpaceFrameState frame, SpaceJump jump, SpaceJump.Targets targets,
+                       SpacePilotInput input, SpaceSystem system, double startDays, double endDays,
+                       SpaceMotionSettings settings, SpacePose dest)
+    {
+        if (jump.phase() == SpaceJump.Phase.NONE) {
+            int target = input.jumpTarget();
+            if (target > 0 && system != null && target != system.id() && targets != null
+                    && targets.position(target, jumpTarget)) {
+                jump.begin(target, pose.orientation(), system.x(), system.y(), system.z(), jumpTarget,
+                        settings.warpSpeed());
+            }
+        }
+        switch (jump.phase()) {
+            case CHARGE -> {
+                if (input.jumpTarget() <= 0) {
+                    jump.reset();
+                    return move(pose, speed, frame, input, system, startDays, endDays, settings, dest, false);
+                }
+                double v = move(pose, speed, frame, input, system, startDays, endDays, settings, dest, true);
+                int n = jump.advanceCharge();
+                jump.chargeOrientation(n, settings, jumpWork, dest.orientation());
+                return jump.phase() == SpaceJump.Phase.TRAVEL ? 0.0 : v;
+            }
+            case TRAVEL -> {
+                if (dest != pose) dest.set(pose);
+                jump.advanceTravel();
+                return 0.0;
+            }
+            default -> {
+                return move(pose, speed, frame, input, system, startDays, endDays, settings, dest, false);
+            }
+        }
+    }
+
+    /**
+     * Corps du pas (voir {@link #step(SpacePose, double, SpaceFrameState, SpacePilotInput, SpaceSystem, double,
+     * double, SpaceMotionSettings, SpacePose) step}) ; {@code locked} (charge du saut) : frein force, gaz et rotations
+     * ignores (la visee de {@code input} compte toujours pour le referentiel).
+     */
+    private double move(SpacePose pose, double speed, SpaceFrameState frame, SpacePilotInput input, SpaceSystem system,
+                        double startDays, double endDays, SpaceMotionSettings settings, SpacePose dest,
+                        boolean locked)
+    {
         double maxSpeed = settings.maxSpeed();
         double v = Double.isFinite(speed) ? Math.max(-maxSpeed, Math.min(speed, maxSpeed)) : 0.0;
         Vector3dc start = pose.position();
@@ -212,8 +295,8 @@ public final class SpaceMotion
         boolean frameMoving = refMoving || blending;
 
         // 1. Gaz, vitesse signee : le frein prime ; un gaz oppose au sens de V freine d'abord jusqu'a 0.
-        int throttle = input.throttleSign();
-        if (input.brake() || throttle > 0 && v < 0.0 || throttle < 0 && v > 0.0) {
+        int throttle = locked ? 0 : input.throttleSign();
+        if (locked || input.brake() || throttle > 0 && v < 0.0 || throttle < 0 && v > 0.0) {
             v *= DECELERATION;
             if (Math.abs(v) < MIN_SPEED) v = 0.0;
         } else if (throttle != 0) {
@@ -226,13 +309,13 @@ public final class SpaceMotion
         settings.up(up);
         rotation.set(pose.orientation());
         double turn = Math.toRadians(settings.turnRate());
-        if (input.yaw() != 0) {
+        if (!locked && input.yaw() != 0) {
             SpaceRotations.multiplyAxisAngle(rotation, up.x, up.y, up.z, -input.yawRate() * turn);
         }
-        if (input.pitch() != 0) {
+        if (!locked && input.pitch() != 0) {
             SpaceRotations.multiplyAxisAngle(rotation, right.x, right.y, right.z, input.pitchRate() * turn);
         }
-        int roll = input.rollSign();
+        int roll = locked ? 0 : input.rollSign();
         if (roll != 0) {
             SpaceRotations.multiplyAxisAngle(rotation, forward.x, forward.y, forward.z,
                     roll * Math.toRadians(settings.rollSpeed()));
@@ -365,9 +448,10 @@ public final class SpaceMotion
     // ---------------------------------------------------------------- pose par defaut
 
     /**
-     * Pose par defaut d'un systeme (doc 04 par. 5) au temps {@code tDays} : sur la droite parent -> premiere planete
-     * (premier corps {@code PLANET} de la liste), a {@code 1,02 a} de son parent ; sans planete, a 1 UA de l'etoile
-     * principale sur {@code +X}. Puis ecartee de chaque corps a une altitude d'au moins 20 rayons (4 passes
+     * Pose par defaut d'un systeme (doc 04 par. 5) au temps {@code tDays} : sur la droite parent -> planete de depart
+     * ({@link #startPlanet} : la planete dont le demi-grand axe est le plus proche de 1 UA, la Terre dans Sol, quel que
+     * soit son rang dans la liste), a {@code 1,02 a} de son parent ; sans planete, a 1 UA de l'etoile principale sur
+     * {@code +X}. Puis ecartee de chaque corps a une altitude d'au moins 20 rayons (4 passes
      * radiales, dans l'ordre des corps). Orientation : avant du monde {@code Q F_W} tourne vers l'etoile principale,
      * haut du monde au plus pres de {@code +Y} du systeme (sinon de {@code -Z} si l'etoile est a la verticale).
      * La vitesse associee est {@code 0} (a poser par l'appelant). Fixe aussi le referentiel
@@ -389,8 +473,7 @@ public final class SpaceMotion
         double sx;
         double sy;
         double sz;
-        int planet = -1;
-        for (int i = 0; i < bodyCount && planet < 0; i++) if (list.get(i).kind() == SpaceBodyKind.PLANET) planet = i;
+        int planet = startPlanet(list, bodyCount);
         if (planet >= 0) {
             Vector3d parent = bodies[system.parentIndex(planet)];
             Vector3d p = bodies[planet];
@@ -483,6 +566,29 @@ public final class SpaceMotion
         dest.position().set(sx, sy, sz);
         setReference(dest.position(), system, score(dest, SpacePilotInput.ZERO, system, bodies, settings), bodies);
         return dest;
+    }
+
+    /**
+     * Indice de la planete de depart d'une pose par defaut : parmi les corps {@code PLANET} (ni etoile, ni lune, ni
+     * objet mineur), celui dont le demi-grand axe {@code a} est le plus proche de {@link #START_SEMI_MAJOR_AXIS} en
+     * echelle logarithmique ({@code |ln a|} minimal), le premier dans l'ordre du systeme en cas d'egalite ;
+     * {@code -1} sans planete. Ne depend ni du rang de la planete ni de son nom : la Terre reste la planete de depart
+     * de Sol meme avec Mercure et Venus avant elle. Deterministe ({@link StrictMath}).
+     */
+    private static int startPlanet(List<SpaceBody> list, int count)
+    {
+        int best = -1;
+        double bestGap = Double.POSITIVE_INFINITY;
+        for (int i = 0; i < count; i++) {
+            SpaceBody body = list.get(i);
+            if (body.kind() != SpaceBodyKind.PLANET || body.orbit() == null) continue;
+            double gap = StrictMath.abs(StrictMath.log(body.orbit().semiMajorAxis() / START_SEMI_MAJOR_AXIS));
+            if (gap < bestGap) {
+                bestGap = gap;
+                best = i;
+            }
+        }
+        return best;
     }
 
     // ---------------------------------------------------------------- corps le plus proche

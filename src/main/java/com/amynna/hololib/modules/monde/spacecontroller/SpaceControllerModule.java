@@ -3,10 +3,13 @@ package com.amynna.hololib.modules.monde.spacecontroller;
 import com.amynna.hololib.holo.memory.HoloScope;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloObject;
+import com.amynna.hololib.modules.camera.spacepilot.SpacePilotModule;
 import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
-import com.amynna.hololib.modules.dimension.space.math.SpaceMotionSettings;
+import com.amynna.hololib.modules.dimension.space.SpaceFormat;
+import com.amynna.hololib.modules.dimension.space.math.SpaceJump;
 import com.amynna.hololib.modules.dimension.space.math.SpacePilotInput;
 import com.amynna.hololib.modules.dimension.space.model.SpaceBody;
+import com.amynna.hololib.modules.dimension.space.model.SpaceGalaxy.BackgroundStar;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -28,10 +31,11 @@ import java.util.UUID;
  * reste {@code EVERYONE} et le serveur refuse {@code BEGIN} aux non-ops, et rend le pilotage d'un pilote non-op de ce
  * poste. Seul un operateur peut changer ce reglage (verifie par le serveur).
  * <p>
- * <b>Mini-interface du joystick</b> (T08) : deux objets {@code Local} du module, dessines seulement chez le pilote
- * local de ce poste ({@link #localPilotHere()}) : {@link SpaceJoystickForward} (cercle avant, fixe dans le monde,
- * place par le client a chaque tick d'apres l'axe avant de l'Environment) et {@link SpaceJoystickAim} (cercle de
- * visee au centre de l'ecran).
+ * <b>Space Pilot requis</b> (D11, T19) : {@code BEGIN} est refuse (message « Module Space Pilot requis ») si la
+ * memoire active du joueur n'a pas de module {@code hololib:space_pilot} ; le client le verifie aussi avant de
+ * capturer ({@link Backend#localSpacePilot()}). Les cercles du joystick sont des objets de Space Pilot
+ * ({@code modules.camera.spacepilot}), plus de ce module : une ancienne sauvegarde de marker qui les contient encore
+ * est relue sans erreur (le framework ignore les objets absents).
  * <p>
  * <b>Etat synchronise</b> ({@link #writeSync}, envoye au plus tous les {@value #SYNC_INTERVAL} ticks et seulement si
  * une valeur affichee change ; vitesse et altitude arrondies a trois chiffres significatifs) :
@@ -43,14 +47,20 @@ import java.util.UUID;
  * <b>Actions</b> ({@code sendAction(window, ...)}, source = la fenetre, acces et portee verifies par le framework),
  * premier octet = type :
  * <pre>
- * 0 BEGIN                 -> claimPilot(joueur, marker) ; refus (poste occupe, reserve aux ops) = message dans la
- *                            barre d'action
- * 1 INPUT + 7 octets      -> pilotInput(joueur, SpacePilotInput.read) si le pilote passe par ce poste
+ * 0 BEGIN                 -> claimPilot(joueur, marker) ; refus (reserve aux ops, Space Pilot absent, poste
+ *                            occupe) = message dans la barre d'action
+ * 1 INPUT + 7 a 12 octets -> pilotInput(joueur, SpacePilotInput.read) si le pilote passe par ce poste (7 octets,
+ *                            + varint de la cible si le drapeau du saut est leve, T21)
  * 2 END                   -> releasePilot(joueur) si le pilote passe par ce poste
  * 3 OPS_ONLY + boolean    -> acces au pilotage reserve aux ops (vrai) ou ouvert a tous (faux), operateurs seulement
  * </pre>
  * Sans Environment dans la dimension, les actions de pilotage sont ignorees. Si le module est retire alors que le
  * pilote passe par lui, le pilotage est rendu.
+ * <p>
+ * <b>Saut</b> (T22) : l'etat du saut n'est pas dans l'etat synchronise de ce module ; chaque client le lit dans le
+ * miroir de l'Environment de sa dimension ({@link #clientTick}, au temps d'affichage) et la fenetre remplace la ligne
+ * d'etat par « Saut vers nom » pendant la charge et « Distorsion : n s » (temps restant) pendant le voyage, puis
+ * revient a l'etat normal. Texte reconstruit seulement quand la phase, la cible ou la seconde affichee change.
  * <p>
  * Le client passe par un {@link Backend} installe au setup client ({@code client.modules.monde.spacecontroller}).
  */
@@ -59,8 +69,8 @@ public final class SpaceControllerModule extends HoloModule
     /** Type d'action : demande du pilotage. */
     public static final int ACTION_BEGIN = 0;
     /**
-     * Type d'action : entree du pilote ({@link SpacePilotInput}, 7 octets : gaz, roulis, lacet, tangage, frein, visee
-     * en lacet et en tangage).
+     * Type d'action : entree du pilote ({@link SpacePilotInput}, 7 octets : gaz, roulis, lacet, tangage, drapeaux
+     * (frein, saut), visee en lacet et en tangage ; + id de la cible du saut en varint si son drapeau est leve).
      */
     public static final int ACTION_INPUT = 1;
     /** Type d'action : fin du pilotage. */
@@ -74,6 +84,8 @@ public final class SpaceControllerModule extends HoloModule
     /** Longueur maximale des noms synchronises (joueur, corps). */
     private static final int NAME_LENGTH = 64;
     private static final Component OPS_ONLY_REFUSED = Component.literal("Pilotage reserve aux operateurs");
+    /** Refus du pilotage sans module Space Pilot dans la memoire active du joueur (D11). */
+    public static final Component SPACE_PILOT_REQUIRED = Component.literal("Module Space Pilot requis");
     private static final Component SETTING_REFUSED =
             Component.literal("Seul un operateur peut changer l'acces au pilotage");
 
@@ -105,8 +117,13 @@ public final class SpaceControllerModule extends HoloModule
     private SpaceEnvironmentModule lastEnvironment;
 
     private SpaceControllerWindow window;
-    private SpaceJoystickForward forward;
-    private SpaceJoystickAim aim;
+
+    // ---------------------------------------------------------------- client : saut affiche (T22)
+
+    /** Phase, cible et seconde restante du saut affiche par la fenetre (texte reconstruit seulement s'ils changent). */
+    private SpaceJump.Phase shownJumpPhase = SpaceJump.Phase.NONE;
+    private int shownJumpTarget;
+    private int shownJumpSeconds;
 
     private final SpacePilotPad.Link link = new SpacePilotPad.Link()
     {
@@ -125,11 +142,17 @@ public final class SpaceControllerModule extends HoloModule
     /** Pont vers le client, installe au setup client. */
     public interface Backend
     {
-        /** UUID du joueur local, ou {@code null}. */
-        UUID localPlayer();
+        /** Vrai si la memoire active du joueur local a un module Space Pilot (D11, verifie avant la capture). */
+        boolean localSpacePilot();
 
         /** Vrai si le joueur local est operateur (niveau {@value SpaceControllerModule#OP_LEVEL}). */
         boolean localOp();
+
+        /**
+         * Fraction de tick de la derniere frame dessinee (T22) : le pad cherche la cible du saut avec la pose du ciel
+         * affichee ({@code pose(partialTick)}).
+         */
+        float partialTick();
     }
 
     /** Branche le client (setup client). */
@@ -138,15 +161,22 @@ public final class SpaceControllerModule extends HoloModule
     /** Vrai si le joueur local est operateur ; faux sans backend (serveur dedie). */
     static boolean localOp() { return backend != null && backend.localOp(); }
 
+    /** Vrai si le joueur local a un module Space Pilot ; faux sans backend (serveur dedie). */
+    static boolean localSpacePilot() { return backend != null && backend.localSpacePilot(); }
+
+    /** Fraction de tick de la derniere frame dessinee ; {@code 0} sans backend (serveur dedie). */
+    static float partialTick() { return backend != null ? backend.partialTick() : 0f; }
+
     // ---------------------------------------------------------------- cycle de vie
 
-    /** Cree la fenetre et les cercles du joystick (deux cotes, memes cles) et affiche l'etat courant. */
+    /**
+     * Cree la fenetre (deux cotes, meme cle) et affiche l'etat courant. Les objets {@code joystick_forward} /
+     * {@code joystick_aim} d'une sauvegarde d'avant T19 sont ignores (migres dans Space Pilot).
+     */
     @Override
     public void onLoad()
     {
         window = addObject(new SpaceControllerWindow("window", link, this::requestOpsOnly));
-        forward = addObject(new SpaceJoystickForward("joystick_forward"));
-        aim = addObject(new SpaceJoystickAim("joystick_aim"));
         refresh();
     }
 
@@ -207,11 +237,11 @@ public final class SpaceControllerModule extends HoloModule
                 newPilotName = player != null ? player.getGameProfile().getName() : "?";
                 newHere = Objects.equals(markerId(), env.pilotMarker());
             }
-            newSpeed = round3(env.speed());
+            newSpeed = SpaceFormat.round3(env.speed());
             SpaceBody body = env.referenceBody();
             if (body != null) {
                 newBody = body.name();
-                newAltitude = round3(env.referenceAltitude());
+                newAltitude = SpaceFormat.round3(env.referenceAltitude());
             }
         }
         boolean changed = newEnvironment != environment || !Objects.equals(newPilot, pilot)
@@ -226,14 +256,6 @@ public final class SpaceControllerModule extends HoloModule
         bodyName = newBody;
         altitude = newAltitude;
         return changed;
-    }
-
-    /** Arrondi a trois chiffres significatifs (valeurs affichees : evite un envoi par tick en mouvement). */
-    static double round3(double value)
-    {
-        if (!Double.isFinite(value) || value == 0.0) return value;
-        double step = Math.pow(10.0, Math.floor(Math.log10(Math.abs(value))) - 2.0);
-        return Math.round(value / step) * step;
     }
 
     /** Mode « ops » : rend le pilotage d'un pilote de ce poste qui n'est pas (ou plus) operateur. */
@@ -265,6 +287,10 @@ public final class SpaceControllerModule extends HoloModule
             case ACTION_BEGIN -> {
                 if (opsOnly && !player.hasPermissions(OP_LEVEL)) {
                     player.displayClientMessage(OPS_ONLY_REFUSED, true);
+                    return;
+                }
+                if (SpacePilotModule.of(player) == null) {
+                    player.displayClientMessage(SPACE_PILOT_REQUIRED, true);
                     return;
                 }
                 if (!env.claimPilot(player, marker)) refuse(player, env);
@@ -313,6 +339,43 @@ public final class SpaceControllerModule extends HoloModule
 
     // ---------------------------------------------------------------- client
 
+    /**
+     * Client : etat du saut lu dans le miroir de l'Environment de la dimension ({@code jumpAt(0)}, temps d'affichage
+     * du ciel, prediction du pilote local comprise) ; la fenetre n'est mise a jour que si la phase, la cible ou la
+     * seconde restante affichee change. Sans Environment synchronise : pas de saut affiche.
+     */
+    @Override
+    public void clientTick()
+    {
+        if (window == null) return;
+        SpaceEnvironmentModule env = environment ? SpaceEnvironmentModule.client() : null;
+        SpaceJump.Phase phase = SpaceJump.Phase.NONE;
+        int target = 0;
+        int seconds = 0;
+        if (env != null && env.synced()) {
+            SpaceJump jump = env.jumpAt(0f);
+            phase = jump.phase();
+            target = jump.target();
+            if (phase == SpaceJump.Phase.TRAVEL) seconds = SpaceFormat.wholeSeconds(env.jumpRemainingSeconds(0f));
+        }
+        if (phase == shownJumpPhase && target == shownJumpTarget && seconds == shownJumpSeconds) return;
+        shownJumpPhase = phase;
+        shownJumpTarget = target;
+        shownJumpSeconds = seconds;
+        switch (phase) {
+            case CHARGE -> window.showJump(Component.literal("Saut vers " + targetName(env, target)), false);
+            case TRAVEL -> window.showJump(Component.literal("Distorsion : " + SpaceFormat.seconds(seconds)), true);
+            default -> window.showJump(null, false);
+        }
+    }
+
+    /** Nom de l'etoile de fond du systeme cible, ou {@code "?"} (inconnue du client). */
+    private static String targetName(SpaceEnvironmentModule env, int target)
+    {
+        BackgroundStar star = env.backgroundStar(target);
+        return star != null ? star.name() : "?";
+    }
+
     /** Demande du client (interrupteur de la fenetre) : acces au pilotage reserve aux ops ou ouvert a tous. */
     private void requestOpsOnly(boolean value)
     {
@@ -321,20 +384,6 @@ public final class SpaceControllerModule extends HoloModule
             buf.writeByte(ACTION_OPS_ONLY);
             buf.writeBoolean(value);
         });
-    }
-
-    /**
-     * Client : place le cercle avant sur l'axe avant du monde (reglage de l'Environment de la dimension du joueur
-     * local). Le serveur ne le deplace pas : rien n'est envoye.
-     */
-    @Override
-    public void clientTick()
-    {
-        if (forward == null) return;
-        SpaceEnvironmentModule env = SpaceEnvironmentModule.client();
-        if (env == null || !env.synced()) return;
-        SpaceMotionSettings settings = env.settings();
-        forward.place((float) settings.forwardYaw(), (float) settings.forwardPitch());
     }
 
     /** Action typee au nom de la fenetre (client). */
@@ -414,20 +463,4 @@ public final class SpaceControllerModule extends HoloModule
 
     /** Vrai si le pilotage est reserve aux operateurs (etat synchronise). */
     public boolean opsOnly() { return opsOnly; }
-
-    /** Cercle avant du joystick (deux cotes). */
-    public SpaceJoystickForward joystickForward() { return forward; }
-
-    /** Cercle de visee du joystick (deux cotes). */
-    public SpaceJoystickAim joystickAim() { return aim; }
-
-    /**
-     * Client : vrai si le joueur local pilote depuis ce poste, d'apres l'etat recu (pilote = joueur local, passe par
-     * ce poste) et tant que sa capture de pilotage dure (rien ne reste affiche apres Echap en attendant l'etat).
-     */
-    public boolean localPilotHere()
-    {
-        if (!host().clientSide() || backend == null || window == null || pilot == null || !pilotHere) return false;
-        return window.pad().piloting() && pilot.equals(backend.localPlayer());
-    }
 }

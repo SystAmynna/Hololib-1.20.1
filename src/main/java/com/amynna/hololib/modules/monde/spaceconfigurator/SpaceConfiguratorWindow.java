@@ -1,6 +1,9 @@
 package com.amynna.hololib.modules.monde.spaceconfigurator;
 
 import com.amynna.hololib.holo.capture.HoloControl;
+import com.amynna.hololib.holo.edit.HoloEditRotation;
+import com.amynna.hololib.holo.edit.HoloEditTranslation;
+import com.amynna.hololib.holo.edit.HoloEditVisibility;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
 import com.amynna.hololib.holo.object.HoloVisibility;
@@ -15,6 +18,7 @@ import com.amynna.hololib.holo.widget.control.HoloWidgetTextBox;
 import com.amynna.hololib.holo.widget.control.HoloWidgetValueBar;
 import com.amynna.hololib.holo.window.HoloWindow;
 import com.amynna.hololib.modules.camera.config.ConfigWindow;
+import com.amynna.hololib.modules.dimension.space.math.SpaceOrbits;
 import com.amynna.hololib.modules.dimension.space.model.SpaceBody;
 import com.amynna.hololib.modules.dimension.space.model.SpaceBodyKind;
 import com.amynna.hololib.modules.dimension.space.model.SpaceLimits;
@@ -22,6 +26,7 @@ import com.amynna.hololib.modules.dimension.space.model.SpaceOrbit;
 import com.amynna.hololib.modules.dimension.space.model.SpaceSystem;
 import com.amynna.hololib.modules.dimension.space.model.SpaceSystem.SystemHeader;
 import net.minecraft.network.chat.Component;
+import org.joml.Vector3d;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -32,30 +37,50 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
- * Fenetre du Space Configurator, posee devant la base du cube et tournee comme lui (lacet seulement) : le module la
- * replace quand le cube bouge ({@link SpaceConfiguratorModule}). Ancrage {@code World}, {@code PUBLIC}, <b>non
- * editable</b>, affichee seulement chez un operateur ({@link #shown()}) ; acces = operateurs connectes (tenu a jour
- * par le module). Clics gauche et droit interceptes sur toute la fenetre (viser le fond ne casse pas de bloc).
+ * Fenetre du Space Configurator, <b>detachee du cube</b> (T24, D14) : placee a sa creation devant la base du cube par
+ * defaut et tournee comme lui (lacet seulement, {@link SpaceConfiguratorModule}), puis independante : le module ne la
+ * replace plus quand le cube bouge, son transform est le sien (sauvegarde et synchronise par le framework). Ancrage
+ * {@code World}, {@code PUBLIC}, affichee seulement chez un operateur ({@link #shown()}) ; acces = operateurs connectes
+ * (tenu a jour par le module). Clics gauche et droit interceptes sur toute la fenetre (viser le fond ne casse pas de
+ * bloc).
+ * <p>
+ * <b>Edition</b> (comme le cube : {@link #opRequired()} vrai, {@link #ownRequired()} faux, {@code world_editor}) :
+ * translation, rotation et affichage ({@link HoloEditVisibility}, bouton oeil) ; a {@code OFF}, la fenetre n'est plus
+ * dessinee ni visable hors session d'edition et seul le cube reste. RESET la remet devant la base du cube <b>par
+ * defaut</b> (transform du constructeur).
  * <p>
  * <b>Mode galaxie</b> (T11) : liste des systemes (un {@link HoloWidgetButton} par systeme ; clic = selection, second
- * clic = deselection ; ligne selectionnee surlignee, systeme courant du monde precede de « * »), champ du nom du
+ * clic = deselection ; ligne selectionnee surlignee, systeme courant du monde precede de « * » et ecrit en vert, la
+ * couleur de son anneau sur le cube, legende sur la ligne d'information, T25), champ du nom du
  * systeme selectionne ({@link HoloWidgetTextBox}, valide a la fin de la saisie : Entree, Echap ou regard qui s'eloigne,
  * comme tout champ du mod), boutons « Ajouter » (au centre du cadrage, puis selectionne), « Retirer » (second clic de
  * confirmation dans les {@value #CONFIRM_TICKS} ticks), « Editer » (mode systeme), « Monde ici » (le systeme
  * selectionne devient celui du monde ; desactive sur le systeme deja courant, que l'Environment remettrait a sa pose
- * par defaut), « Recadrer », et ligne « Avant du monde » ({@link HoloWidgetMultiButton} : clic gauche = choix
- * suivant, droit = precedent, parmi nord, est, sud, ouest, haut, bas). Un bouton sans objet (pas d'Environment, pas
+ * par defaut), « Recadrer », « Definir comme origine » (T26, C50 : le systeme selectionne devient l'origine des
+ * coordonnees ; desactive sur l'origine actuelle ; l'origine est precedee de « @ » dans la liste), ligne « Avant du monde » ({@link HoloWidgetMultiButton} : clic gauche = choix
+ * suivant, droit = precedent, parmi nord, est, sud, ouest, haut, bas) et ligne « Distorsion (al/s) » (T24 : vitesse
+ * de distorsion du saut, champ numerique, valeur lue dans l'Environment par la copie du module). Ligne d'information :
+ * sans selection, nombre de systemes, cadre et legendes ; avec une selection (T26), ses coordonnees galactiques
+ * relatives a l'origine ({@code X / Y / Z} en al, {@link SpaceCoordinates}), les memes que la croix du cube. Un bouton sans objet (pas d'Environment, pas
  * de selection, dernier systeme pour « Retirer ») est desactive : aucun clic pris, couleurs eteintes.
  * <p>
  * <b>Mode systeme</b> (T12) : liste des corps du systeme edite (indentee par parente ; clic = selection, second clic
  * = deselection), « Retour » (mode galaxie) et interrupteur « Animer » (temps d'affichage local, rien n'est envoye) ;
- * a droite, nom du corps selectionne, « + Etoile », « + Planete », « + Lune » (parent = premier corps compatible en
- * remontant depuis la selection, sinon l'etoile principale pour une etoile ou une planete ; « + Lune » desactive
- * sans planete dans la selection), « Retirer » (descendants compris, second clic de confirmation), rayon (km) et
+ * a droite, nom du corps selectionne, « +Etoile », « +Planete », « +Lune », « +Mineur » (objet mineur, T16 ; parent
+ * = premier corps compatible en remontant depuis la selection, sinon l'etoile principale pour une etoile, une planete
+ * ou un objet mineur ; « +Lune » desactive sans planete ni objet mineur dans la selection), « Retirer » (descendants
+ * compris, second clic de confirmation), « Zoom » (T25, D17 : recadre le cube sur le corps selectionne et ses lunes,
+ * a l'echelle ; devient « Dezoom » tant qu'un zoom est actif, qui revient au systeme entier ; desactive sans corps
+ * selectionne ou sur un corps sans parent), rayon (km) et
  * luminosite (etoiles) puis periode (jours) dans des champs texte, couleur par une palette, phase par une
  * {@link HoloWidgetValueBar} (0..1 converti en 0-360 degres, pas de 1 % = 3,6 degres ; un {@link HoloLabel} voisin
  * affiche les degres), et ligne de lecture de l'orbite ({@code a} en UA, {@code e}). L'orbite elle-meme s'edite avec
- * la poignee d'orbite ({@link SpaceOrbitHandle}, outils Rotation et Echelle).
+ * la poignee d'orbite ({@link SpaceOrbitHandle}, outils Rotation et Echelle). Ligne d'information : sans selection,
+ * systeme, corps (ou corps zoome), cadre et legende du vaisseau ; avec un corps selectionne (T26), ses coordonnees en
+ * UA relatives a l'etoile principale au temps affiche ({@code « Mars : X 1,234  Y -0,456  Z 0,012 UA »}), memes
+ * calculs et meme format que les etiquettes de la croix du cube. Comme le reste de la fenetre, elle n'est recalculee
+ * qu'a la synchronisation et au basculement de « Animer » : pendant l'animation elle garde la valeur du dernier
+ * rafraichissement.
  * <p>
  * <b>Champs numeriques</b> : texte libre valide a la fin de la saisie (Entree, Echap ou regard qui s'eloigne), virgule
  * ou point decimal, notation {@code 1e5} acceptee ; une valeur illisible, non finie ou negative remet la valeur
@@ -66,6 +91,7 @@ import java.util.function.Consumer;
  * les lignes de la liste ne sont recreees que si les systemes (ids, noms, systeme courant) changent.
  */
 public final class SpaceConfiguratorWindow extends HoloWindow
+        implements HoloEditTranslation, HoloEditRotation, HoloEditVisibility
 {
     public static final int WIDTH = 320;
     public static final int HEIGHT = 154;
@@ -100,6 +126,10 @@ public final class SpaceConfiguratorWindow extends HoloWindow
     /** Largeur utile d'une ligne de la liste (bordure, marge et barre de defilement deduites). */
     private static final int ROW_TEXT_WIDTH = LIST_WIDTH - 6 - 5 - 6;
     private static final String CURRENT_PREFIX = "* ";
+    /** Prefixe de l'origine des coordonnees dans la liste (T26), apres celui du systeme courant. */
+    private static final String ORIGIN_PREFIX = "@ ";
+    /** Largeur du bouton « Recadrer », en pixels (« Definir comme origine » prend le reste de la ligne). */
+    private static final int REFRAME_WIDTH = 60;
     private static final String ELLIPSIS = "...";
     /** Retrait d'un niveau de parente dans la liste des corps. */
     private static final String INDENT = "  ";
@@ -115,10 +145,18 @@ public final class SpaceConfiguratorWindow extends HoloWindow
             0xFF3A6FD8, 0xFF4CA050, 0xFFC1440E, 0xFFD8A06A, 0xFFB4B4B4};
     /** Longueur maximale d'un champ numerique, en caracteres. */
     private static final int NUMBER_LENGTH = 16;
+    /** Largeur du libelle « Distorsion (al/s) », en pixels. */
+    private static final int WARP_LABEL_WIDTH = 92;
+    /** Largeur du bouton « Zoom » / « Dezoom », en pixels (a cote de « Retirer »). */
+    private static final int ZOOM_WIDTH = 40;
+    /** Systeme courant du monde dans la liste (couleur de son anneau sur le cube). */
+    private static final int CURRENT_TEXT = SpaceMapCube.WORLD_COLOR;
 
     private static final Component NO_ENVIRONMENT = Component.literal("Aucun Space Environment ici");
     private static final Component REMOVE = Component.literal("Retirer");
     private static final Component REMOVE_CONFIRM = Component.literal("Retirer ?");
+    private static final Component ZOOM = Component.literal("Zoom");
+    private static final Component UNZOOM = Component.literal("Dezoom");
     /** Libelles des choix de l'axe avant, dans l'ordre de {@link SpaceConfiguratorModule#FORWARD_YAW}. */
     private static final Component[] FORWARD_NAMES = {
             Component.literal("Nord"), Component.literal("Est"), Component.literal("Sud"),
@@ -138,13 +176,16 @@ public final class SpaceConfiguratorWindow extends HoloWindow
     private final HoloWidgetButton editButton;
     private final HoloWidgetButton worldHereButton;
     private final HoloWidgetButton reframeButton;
+    private final HoloWidgetButton originButton;
     private final HoloWidgetMultiButton forwardButton;
+    private final HoloWidgetTextBox warpBox;
 
     /** Lignes de la liste, dans l'ordre des en-tetes. */
     private final List<HoloWidgetButton> rows = new ArrayList<>();
     private int[] rowIds = new int[0];
     private String[] rowNames = new String[0];
     private int rowCurrent = -1;
+    private int rowOrigin = -1;
 
     /** Systeme dont le retrait attend sa confirmation ({@code 0} = aucun) et ticks restants (client). */
     private int armedId;
@@ -160,7 +201,9 @@ public final class SpaceConfiguratorWindow extends HoloWindow
     private final HoloWidgetButton addStarButton;
     private final HoloWidgetButton addPlanetButton;
     private final HoloWidgetButton addMoonButton;
+    private final HoloWidgetButton addMinorButton;
     private final HoloWidgetButton removeBodyButton;
+    private final HoloWidgetButton zoomButton;
     private final HoloLabel radiusLabel;
     private final HoloWidgetTextBox radiusBox;
     private final HoloLabel luminosityLabel;
@@ -180,11 +223,16 @@ public final class SpaceConfiguratorWindow extends HoloWindow
     /** Corps dont le retrait attend sa confirmation ({@code 0} = aucun) et ticks restants (client). */
     private int armedBody;
     private int armedBodyTicks;
+    /** Positions affichees des corps (coordonnees de la ligne d'information du mode systeme), tableau reutilise. */
+    private final Vector3d[] bodyPoints = SpaceOrbits.newPositionArray();
 
-    /** @param module module qui porte la fenetre (demandes envoyees au serveur, etat lu a la synchronisation) */
-    SpaceConfiguratorWindow(String key, SpaceConfiguratorModule module)
+    /**
+     * @param module    module qui porte la fenetre (demandes envoyees au serveur, etat lu a la synchronisation)
+     * @param transform placement initial (devant la base du cube par defaut), aussi placement de RESET
+     */
+    SpaceConfiguratorWindow(String key, SpaceConfiguratorModule module, HoloTransform transform)
     {
-        super(key, new HoloAnchor.World(), new HoloTransform(), WIDTH, HEIGHT, PIXEL_SCALE);
+        super(key, new HoloAnchor.World(), transform, WIDTH, HEIGHT, PIXEL_SCALE);
         this.module = Objects.requireNonNull(module);
         setVisibility(HoloVisibility.PUBLIC);
         setInterceptedInputs(HoloControl.LEFT_CLICK, HoloControl.RIGHT_CLICK);
@@ -212,12 +260,21 @@ public final class SpaceConfiguratorWindow extends HoloWindow
                 b -> module.requestMode(SpaceConfiguratorModule.Mode.SYSTEM)));
         worldHereButton = galaxyPanel.add(button(column + half + GAP, row2, half, "Monde ici",
                 b -> module.requestSetCurrent(module.selectedSystem())));
-        reframeButton = galaxyPanel.add(button(column, row3, columnWidth, "Recadrer", b -> module.requestReframe()));
+        reframeButton = galaxyPanel.add(button(column, row3, REFRAME_WIDTH, "Recadrer", b -> module.requestReframe()));
+        originButton = galaxyPanel.add(button(column + REFRAME_WIDTH + GAP, row3, columnWidth - REFRAME_WIDTH - GAP,
+                "Definir comme origine", b -> pressOrigin()));
         float row4 = row3 + BUTTON_HEIGHT + GAP;
         galaxyPanel.add(new HoloLabel(column, row4, columnWidth, 10, Component.literal("Avant du monde"))
                 .setColor(MUTED));
         forwardButton = galaxyPanel.add(new HoloWidgetMultiButton(column, row4 + 12, columnWidth, BUTTON_HEIGHT,
                 FORWARD_OTHER));
+        // Derniere ligne du panneau (bord bas du champ = bas du panneau).
+        float row5 = row4 + 12 + BUTTON_HEIGHT + GAP;
+        galaxyPanel.add(new HoloLabel(column, row5 + 4, WARP_LABEL_WIDTH, 10, Component.literal("Distorsion (al/s)"))
+                .setColor(MUTED));
+        warpBox = galaxyPanel.add(new HoloWidgetTextBox(column + WARP_LABEL_WIDTH, row5,
+                columnWidth - WARP_LABEL_WIDTH, FIELD_HEIGHT, NUMBER_LENGTH, false));
+        warpBox.setPlaceholder(Component.literal("-")).setOnSubmit((box, text) -> submitWarp(text));
 
         systemPanel = root().add(new HoloPanel(0, PANEL_TOP, WIDTH, panelHeight));
         float bottom = panelHeight - BUTTON_HEIGHT;
@@ -229,14 +286,17 @@ public final class SpaceConfiguratorWindow extends HoloWindow
         bodyNameBox = systemPanel.add(new HoloWidgetTextBox(column, 0, columnWidth, FIELD_HEIGHT,
                 SpaceLimits.MAX_NAME_LENGTH, false));
         bodyNameBox.setPlaceholder(Component.literal("Nom du corps")).setOnSubmit((box, text) -> submitBodyName(text));
-        float third = (columnWidth - 2 * GAP) / 3f;
+        // Un bouton par type de corps (quatre depuis T16 : libelles sans espace pour tenir dans 44 px).
+        float quarter = (columnWidth - 3 * GAP) / 4f;
         float addRow = FIELD_HEIGHT + GAP;
-        addStarButton = systemPanel.add(button(column, addRow, third, "+ Etoile",
+        addStarButton = systemPanel.add(button(column, addRow, quarter, "+Etoile",
                 b -> pressAdd(SpaceBodyKind.STAR)));
-        addPlanetButton = systemPanel.add(button(column + third + GAP, addRow, third, "+ Planete",
+        addPlanetButton = systemPanel.add(button(column + quarter + GAP, addRow, quarter, "+Planete",
                 b -> pressAdd(SpaceBodyKind.PLANET)));
-        addMoonButton = systemPanel.add(button(column + 2 * (third + GAP), addRow, third, "+ Lune",
+        addMoonButton = systemPanel.add(button(column + 2 * (quarter + GAP), addRow, quarter, "+Lune",
                 b -> pressAdd(SpaceBodyKind.MOON)));
+        addMinorButton = systemPanel.add(button(column + 3 * (quarter + GAP), addRow, quarter, "+Mineur",
+                b -> pressAdd(SpaceBodyKind.MINOR)));
         float right = column + half + GAP;
         float fieldRow1 = addRow + BUTTON_HEIGHT + GAP;
         radiusLabel = systemPanel.add(fieldLabel(column, fieldRow1, "Rayon km"));
@@ -249,7 +309,10 @@ public final class SpaceConfiguratorWindow extends HoloWindow
         periodLabel = systemPanel.add(fieldLabel(column, fieldRow2, "Periode j"));
         periodBox = systemPanel.add(numberBox(column + FIELD_LABEL_WIDTH, fieldRow2, half - FIELD_LABEL_WIDTH,
                 SpaceConfiguratorModule.FIELD_PERIOD));
-        removeBodyButton = systemPanel.add(button(right, fieldRow2 + 1, half, "Retirer", b -> pressRemoveBody()));
+        removeBodyButton = systemPanel.add(button(right, fieldRow2 + 1, half - ZOOM_WIDTH - GAP, "Retirer",
+                b -> pressRemoveBody()));
+        zoomButton = systemPanel.add(button(right + half - ZOOM_WIDTH, fieldRow2 + 1, ZOOM_WIDTH, "Zoom",
+                b -> pressZoom()));
         float paletteRow = fieldRow2 + FIELD_HEIGHT + GAP;
         float swatchWidth = (columnWidth - (PALETTE.length - 1) * SWATCH_GAP) / (float) PALETTE.length;
         for (int i = 0; i < PALETTE.length; i++) {
@@ -291,6 +354,14 @@ public final class SpaceConfiguratorWindow extends HoloWindow
     @Override
     public boolean shown() { return SpaceConfiguratorModule.localOp(); }
 
+    /** Reservee aux operateurs, comme le cube. */
+    @Override
+    public boolean opRequired() { return true; }
+
+    /** Tout operateur peut la deplacer ou la masquer, pas seulement le createur du module. */
+    @Override
+    public boolean ownRequired() { return false; }
+
     /** Fin des delais de confirmation de « Retirer » (client). */
     @Override
     public void tick()
@@ -316,7 +387,11 @@ public final class SpaceConfiguratorWindow extends HoloWindow
 
     public HoloWidgetButton reframeButton() { return reframeButton; }
 
+    public HoloWidgetButton originButton() { return originButton; }
+
     public HoloWidgetMultiButton forwardButton() { return forwardButton; }
+
+    public HoloWidgetTextBox warpBox() { return warpBox; }
 
     public HoloWidgetButton backButton() { return backButton; }
 
@@ -327,6 +402,8 @@ public final class SpaceConfiguratorWindow extends HoloWindow
     public HoloWidgetTextBox bodyNameBox() { return bodyNameBox; }
 
     public HoloWidgetButton removeBodyButton() { return removeBodyButton; }
+
+    public HoloWidgetButton zoomButton() { return zoomButton; }
 
     public HoloWidgetValueBar phaseBar() { return phaseBar; }
 
@@ -363,6 +440,14 @@ public final class SpaceConfiguratorWindow extends HoloWindow
         return module.environmentPresent() && module.selectedHeader() != null && module.headers().size() > 1;
     }
 
+    /** « Definir comme origine » : le systeme selectionne devient l'origine des coordonnees (s'il ne l'est pas deja). */
+    private void pressOrigin()
+    {
+        SystemHeader selected = module.selectedHeader();
+        SystemHeader origin = module.originHeader();
+        if (selected != null && (origin == null || origin.id() != selected.id())) module.requestOrigin(selected.id());
+    }
+
     /** Nom valide : renommage demande s'il change ; sinon (vide, inchange, pas de selection) le champ est remis. */
     private void submitName(String text)
     {
@@ -379,6 +464,25 @@ public final class SpaceConfiguratorWindow extends HoloWindow
         module.requestRename(selected.id(), clean);
     }
 
+    /**
+     * « Distorsion (al/s) » validee : valeur lue (virgule ou point, notation {@code 1e5}) ; illisible, non finie,
+     * negative ou nulle, inchangee ou sans Environment : la valeur courante est remise ; sinon bornee comme le fera
+     * l'Environment ({@link SpaceLimits#sanitizeWarpSpeed}), affichee et envoyee.
+     */
+    private void submitWarp(String text)
+    {
+        double current = module.warpSpeed();
+        double value = parse(text);
+        if (!module.environmentPresent() || !(value > 0.0) || !Double.isFinite(value)) {
+            warpBox.setText(module.environmentPresent() ? format(current) : "");
+            return;
+        }
+        value = SpaceLimits.sanitizeWarpSpeed(value);
+        warpBox.setText(format(value));
+        if (Math.abs(value - current) <= 1e-9 * Math.abs(current)) return;
+        module.requestWarpSpeed(value);
+    }
+
     // ---------------------------------------------------------------- reactions du mode systeme (client)
 
     /** Ajout d'un corps de type {@code kind} autour du parent compatible ({@link #parentFor}). */
@@ -392,7 +496,8 @@ public final class SpaceConfiguratorWindow extends HoloWindow
 
     /**
      * Parent d'un corps ajoute : premier corps compatible en remontant depuis la selection (elle comprise) ; sans
-     * selection compatible, l'etoile principale pour une etoile ou une planete, aucun ({@code 0}) pour une lune.
+     * selection compatible, l'etoile principale pour une etoile, une planete ou un objet mineur, aucun ({@code 0})
+     * pour une lune (parent planete ou objet mineur requis).
      */
     private static int parentFor(SpaceSystem system, SpaceBody selected, SpaceBodyKind kind)
     {
@@ -436,6 +541,17 @@ public final class SpaceConfiguratorWindow extends HoloWindow
         SpaceSystem system = module.editedSystem();
         SpaceBody body = module.selectedBodyData();
         return system != null && body != null && !(body.isRoot() && system.rootCount() <= 1);
+    }
+
+    /** « Zoom » sur le corps selectionne, ou « Dezoom » (retour au systeme entier) si un zoom est actif. */
+    private void pressZoom()
+    {
+        if (module.zoomBody() != 0) {
+            module.requestZoom(0);
+            return;
+        }
+        SpaceBody body = module.selectedBodyData();
+        if (body != null && !body.isRoot()) module.requestZoom(body.id());
     }
 
     private void pressColor(int color)
@@ -521,18 +637,25 @@ public final class SpaceConfiguratorWindow extends HoloWindow
             infoLine.setText(NO_ENVIRONMENT).setColor(MISSING);
         } else if (system) {
             infoLine.setText(Component.literal(systemInfo(selected))).setColor(TEXT);
+        } else if (selected != null) {
+            infoLine.setText(Component.literal(fit(coordinates(selected, module.originHeader()), WIDTH - 2 * MARGIN)))
+                    .setColor(TEXT);
         } else {
             int count = headers.size();
-            infoLine.setText(Component.literal(count + (count > 1 ? " systemes" : " systeme") + " - cadre +/- "
+            infoLine.setText(Component.literal(fit(count + (count > 1 ? " systemes" : " systeme") + " - cadre +/- "
                     + number(module.frameHalf() > 0.0 ? module.frameHalf() : SpaceConfiguratorModule.MIN_HALF_EXTENT)
-                    + " al")).setColor(MUTED);
+                    + " al - vert : monde ici - @ : origine", WIDTH - 2 * MARGIN))).setColor(MUTED);
         }
 
-        syncRows(headers, module.currentSystemId());
+        SystemHeader origin = module.originHeader();
+        int originId = origin != null ? origin.id() : 0;
+        syncRows(headers, module.currentSystemId(), originId);
         int selectedId = selected != null ? selected.id() : 0;
+        int current = module.currentSystemId();
         for (int i = 0; i < rows.size(); i++) {
             boolean on = rowIds[i] == selectedId;
-            rows.get(i).setColors(on ? ROW_SELECTED : ROW, ConfigWindow.ACCENT, on ? SELECTED_TEXT : BUTTON_TEXT);
+            int text = on ? SELECTED_TEXT : rowIds[i] == current ? CURRENT_TEXT : BUTTON_TEXT;
+            rows.get(i).setColors(on ? ROW_SELECTED : ROW, ConfigWindow.ACCENT, text);
         }
 
         if (armedId != 0 && armedId != selectedId) disarm();
@@ -542,22 +665,61 @@ public final class SpaceConfiguratorWindow extends HoloWindow
         enable(editButton, environment && selected != null);
         enable(worldHereButton, environment && selected != null && selected.id() != module.currentSystemId());
         enable(reframeButton, true);
+        enable(originButton, environment && selected != null && selected.id() != originId);
         enable(backButton, true);
         showForward(environment, module.forwardChoice());
+        warpBox.setText(environment ? format(module.warpSpeed()) : "");
         showSystem(environment && system ? module.editedSystem() : null);
     }
 
-    /** Ligne d'information du mode systeme : nom, nombre de corps, echelle du cube, loupe des lunes. */
+    /**
+     * Ligne d'information du mode galaxie avec une selection (T26) : coordonnees galactiques du systeme relatives a
+     * l'origine, {@code « Sirius : X -1,617  Y -1,600  Z -8,300 al »} (memes valeurs que la croix du cube).
+     */
+    private static String coordinates(SystemHeader selected, SystemHeader origin)
+    {
+        double ox = origin != null ? origin.x() : 0.0;
+        double oy = origin != null ? origin.y() : 0.0;
+        double oz = origin != null ? origin.z() : 0.0;
+        return selected.name() + " : X " + SpaceCoordinates.format(selected.x() - ox)
+                + "  Y " + SpaceCoordinates.format(selected.y() - oy)
+                + "  Z " + SpaceCoordinates.format(selected.z() - oz) + " al";
+    }
+
+    /**
+     * Ligne d'information du mode systeme : nom, nombre de corps (ou corps zoome), echelle du cube, legende du
+     * vaisseau si le systeme edite est celui du monde.
+     */
     private String systemInfo(SystemHeader selected)
     {
         SpaceSystem edited = module.editedSystem();
         String name = edited != null ? edited.name()
                 : selected != null ? selected.name() : "#" + module.selectedSystem();
         if (edited == null) return "Systeme : " + name;
-        int count = edited.bodies().size();
-        String text = name + " : " + count + " corps, cadre +/- " + format(module.systemHalf()) + " UA";
-        double magnifier = module.moonMagnifier();
-        return magnifier > 1.0 ? text + ", lunes x " + format(magnifier) : text;
+        SpaceBody body = module.selectedBodyData();
+        if (body != null) return bodyCoordinates(edited, body);
+        SpaceBody zoomed = module.zoomBodyData();
+        String text = zoomed != null ? name + " > " + zoomed.name() + " : cadre +/- " + format(module.viewHalf()) + " UA"
+                : name + " : " + edited.bodies().size() + " corps, cadre +/- " + format(module.viewHalf()) + " UA";
+        return edited.id() == module.currentSystemId() ? text + " - vaisseau en vert" : text;
+    }
+
+    /**
+     * Coordonnees du corps selectionne (T26) en UA, relatives a l'etoile principale (indice 0, origine du systeme), au
+     * temps affiche du module : memes calculs que la croix du cube ({@link SpaceSystemScale#positions} dans la vue
+     * courante, puis ecart a l'etoile fois {@code H / HALF_SIZE} : exact en zoom) et meme format.
+     */
+    private String bodyCoordinates(SpaceSystem system, SpaceBody body)
+    {
+        int index = system.indexOf(body.id());
+        double half = module.viewHalf();
+        SpaceSystemScale.positions(system, module.displayDays(0f), half, module.zoomIndex(), bodyPoints);
+        Vector3d p = bodyPoints[index];
+        Vector3d star = bodyPoints[0];
+        double toAu = half / SpaceMapCube.HALF_SIZE;
+        return fit(body.name() + " : X " + SpaceCoordinates.format((p.x - star.x) * toAu)
+                + "  Y " + SpaceCoordinates.format((p.y - star.y) * toAu)
+                + "  Z " + SpaceCoordinates.format((p.z - star.z) * toAu) + " UA", WIDTH - 2 * MARGIN);
     }
 
     /** Panneau du mode systeme : lignes, boutons et champs du corps selectionne ({@code system} nul : tout eteint). */
@@ -577,7 +739,11 @@ public final class SpaceConfiguratorWindow extends HoloWindow
         enable(addStarButton, !full && parentFor(system, body, SpaceBodyKind.STAR) != 0);
         enable(addPlanetButton, !full && parentFor(system, body, SpaceBodyKind.PLANET) != 0);
         enable(addMoonButton, !full && parentFor(system, body, SpaceBodyKind.MOON) != 0);
+        enable(addMinorButton, !full && parentFor(system, body, SpaceBodyKind.MINOR) != 0);
         if (armedBody == 0) enable(removeBodyButton, removeBodyAllowed());
+        boolean zoomed = system != null && module.zoomBody() != 0;
+        zoomButton.setText(zoomed ? UNZOOM : ZOOM);
+        enable(zoomButton, zoomed || body != null && !body.isRoot());
 
         boolean star = body != null && body.kind() == SpaceBodyKind.STAR;
         SpaceOrbit orbit = body != null ? body.orbit() : null;
@@ -647,10 +813,12 @@ public final class SpaceConfiguratorWindow extends HoloWindow
         bodyList.scrollTo(first);
     }
 
-    /** Recree les lignes si les systemes (ids, noms) ou le systeme courant ont change ; garde le defilement. */
-    private void syncRows(List<SystemHeader> headers, int current)
+    /**
+     * Recree les lignes si les systemes (ids, noms), le systeme courant ou l'origine ont change ; garde le defilement.
+     */
+    private void syncRows(List<SystemHeader> headers, int current, int origin)
     {
-        boolean same = headers.size() == rowIds.length && current == rowCurrent;
+        boolean same = headers.size() == rowIds.length && current == rowCurrent && origin == rowOrigin;
         for (int i = 0; same && i < headers.size(); i++) {
             same = headers.get(i).id() == rowIds[i] && headers.get(i).name().equals(rowNames[i]);
         }
@@ -661,12 +829,14 @@ public final class SpaceConfiguratorWindow extends HoloWindow
         rowIds = new int[headers.size()];
         rowNames = new String[headers.size()];
         rowCurrent = current;
+        rowOrigin = origin;
         for (int i = 0; i < headers.size(); i++) {
             SystemHeader header = headers.get(i);
             int id = header.id();
             rowIds[i] = id;
             rowNames[i] = header.name();
-            String text = fit((id == current ? CURRENT_PREFIX : "") + header.name(), ROW_TEXT_WIDTH);
+            String text = fit((id == current ? CURRENT_PREFIX : "") + (id == origin ? ORIGIN_PREFIX : "")
+                    + header.name(), ROW_TEXT_WIDTH);
             rows.add(list.addItem(new HoloWidgetButton(0, 0, 1, ROW_HEIGHT, Component.literal(text),
                     b -> module.requestSelectSystem(module.selectedSystem() == id ? 0 : id))));
         }

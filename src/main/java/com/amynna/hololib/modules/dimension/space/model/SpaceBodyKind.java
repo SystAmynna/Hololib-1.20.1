@@ -2,16 +2,23 @@ package com.amynna.hololib.modules.dimension.space.model;
 
 /**
  * Type d'un corps celeste et regles de parente (voir {@code docs/space/03-modele-donnees.md} par. 2) : {@code STAR} sans
- * parent ou autour d'une {@code STAR} (binaires simples), {@code PLANET} autour d'une {@code STAR}, {@code MOON}
- * autour d'une {@code PLANET}. Porte aussi les valeurs par defaut d'un corps ajoute.
+ * parent ou autour d'une {@code STAR} (binaires simples), {@code PLANET} et {@code MINOR} autour d'une {@code STAR},
+ * {@code MOON} autour d'une {@code PLANET} ou d'un {@code MINOR} (Charon autour de Pluton). Porte aussi les valeurs par
+ * defaut d'un corps ajoute.
  * <p>
- * Sauvegarde par nom ({@link #name()}), reseau par ordinal : ne jamais renommer ni reordonner les constantes.
+ * {@code MINOR} (T16, decision C51) : planete naine ou objet mineur (Ceres, Pluton, Eris...). Dessine comme une planete
+ * (ciel, carte du Configurator) ; seule la surcouche du pilote le traite a part (repere seulement pres de lui, D15).
+ * <p>
+ * Sauvegarde par nom ({@link #name()}), reseau par ordinal : ne jamais renommer ni reordonner les constantes ; un
+ * nouveau type s'ajoute <b>en dernier</b>.
  */
 public enum SpaceBodyKind
 {
     STAR("Etoile", 696_000.0, 0xFFFFE07A, 20.0, 32_668.0),
     PLANET("Planete", 6_371.0, 0xFF3A6FD8, 1.0, 365.25),
-    MOON("Lune", 1_737.0, 0xFFB4B4B4, 0.00257, 27.32);
+    MOON("Lune", 1_737.0, 0xFFB4B4B4, 0.00257, 27.32),
+    /** Planete naine ou objet mineur (T16) ; ajoute en dernier : ordinal stable. */
+    MINOR("Objet mineur", 600.0, 0xFFA0A0A0, 40.0, 90_000.0);
 
     private final String defaultName;
     private final double defaultRadius;
@@ -59,7 +66,8 @@ public enum SpaceBodyKind
         return switch (this) {
             case STAR -> parent == null || parent == STAR;
             case PLANET -> parent == STAR;
-            case MOON -> parent == PLANET;
+            case MOON -> parent == PLANET || parent == MINOR;
+            case MINOR -> parent == STAR;
         };
     }
 

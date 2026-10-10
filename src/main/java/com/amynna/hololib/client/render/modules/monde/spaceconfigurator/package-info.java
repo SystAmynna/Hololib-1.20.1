@@ -11,7 +11,12 @@
  * <p>
  * Etat actuel : mode galaxie (T10 : aretes, faces teintees, graduations en al, etoiles billboard, anneau du systeme
  * courant, surbrillance de la selection, noms) et mode systeme (T12 : graduations en UA, orbites en rubans, corps aux
- * positions de Kepler du temps d'affichage, etoiles avec halo, selection, noms). Voir
+ * positions de Kepler du temps d'affichage, etoiles avec halo, selection, noms) ; T25 : tout a l'echelle (plus de
+ * loupe des lunes), zoom sur un corps (orbites de ses descendants, arc local de sa propre orbite, corps hors du cube
+ * masques), vaisseau (disque vert et segment de l'axe avant) quand le systeme edite est celui du monde, double anneau
+ * vert du systeme courant en mode galaxie ; T26 : croix de la selection (trois segments jusqu'aux faces, couleur de la
+ * selection) et coordonnees aux six extremites (al relatives a l'origine en mode galaxie, UA relatives a l'etoile
+ * principale en mode systeme), texte ecrit sans allocation. Voir
  * {@code docs/space/04-mathematiques.md} par. 7 et {@code docs/space/taches/}.
  * <p>
  * Regles : le renderer lit la copie synchronisee du module et ne fait que la mise en page ; ce qui ne change qu'a la

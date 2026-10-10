@@ -42,11 +42,15 @@ com.amynna.hololib
 ├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
 ├── modules/                     modules du mod (HoloLibModules = registre) : un sous-package par compatibilite
 │   ├── dimension/planet1/       (dimension, monde, camera), un package par module (module + objets, code commun)
-│   ├── dimension/space/         Space Environment (ciel = systeme stellaire, galaxie, pose du monde) + code commun
-│   │                            Space : model/ (galaxie, systemes, corps, orbites, bornes), math/ (orbites, pose,
-│   │                            mouvement, referentiel, entree du pilote)
-│   ├── monde/spacecontroller/   Space Controller (marker) : fenetre de pilotage, SpacePilotPad, cercles du joystick
-│   ├── monde/spaceconfigurator/ Space Configurator (marker, ops) : cube carte / systeme, fenetre, poignees sondees
+│   ├── dimension/space/         Space Environment (ciel = systeme stellaire, galaxie, pose du monde, saut) + code
+│   │                            commun Space : SpaceArchive (SavedData, persistance), SpaceFormat (formats affiches),
+│   │                            model/ (galaxie, systemes, corps STAR/PLANET/MOON/MINOR, orbites, bornes), math/
+│   │                            (orbites, pose, mouvement, referentiel, entree du pilote, SpaceJump : saut)
+│   ├── monde/spacecontroller/   Space Controller (marker) : fenetre de pilotage, SpacePilotPad (gaz, joystick, saut)
+│   ├── monde/spaceconfigurator/ Space Configurator (marker, ops) : cube carte / systeme et fenetre detachee, poignees
+│   │                            sondees, SpaceSystemScale (echelle, zoom), SpaceCoordinates (origine, coordonnees)
+│   ├── camera/spacepilot/       Space Pilot (joueur) : reglages (Config, Quick Action), cercles du joystick
+│   │                            (SpaceJoystickForward / Aim), HUD de navigation (SpacePilotHud)
 │   └── camera/focus|editor|config|quickaction/ modules joueur : mode focus (H) ; editeurs (G)
 │                                own fix/dyn/hud, world/dimension/other + editor_panel (fenetre Config) ; config (ecrou du focus -> liste des modules
 │                                Configurable) ; quickaction (roue d'actions du focus, QuickActionProvider)
@@ -58,9 +62,10 @@ com.amynna.hololib
     ├── edit/                    HoloEditSession (session d'edition), HoloEditTools (outil actif, poignees, gizmos),
     │                            boutons des objets edites (HoloEditTarget / Panel / EyeButton)
     ├── modules/camera/          logique client des modules joueur : FocusController, EditorController,
-    │                            ConfigController, QuickActionController
+    │                            ConfigController, QuickActionController ; SpacePilotClient (module Space Pilot du
+    │                            joueur local, relu chaque tick)
     ├── modules/dimension|monde/ backends client des modules Space (SpaceEnvironmentClient, SpaceControllerClient,
-    │                            SpaceConfiguratorClient : miroir de dimension, joueur local, op local)
+    │                            SpaceConfiguratorClient : miroir de dimension, joueur local, op local, Space Pilot local)
     └── render/                  TOUS les renderers du mod (regle d'architecture)
         ├── package-info.java    doc detaillee : ordre de rendu, regles (source de verite)
         ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
@@ -72,8 +77,11 @@ com.amynna.hololib
         ├── demo/                DemoCubeRenderer (objets des demos)
         ├── edit/                HoloGizmoRenderer (segments / cercles des objets World edites)
         ├── modules/             renderers des modules, meme arborescence que modules/ (ModuleRenderers au setup) ;
-        │                        Space : SpaceSkyRenderer (SkyRenderer), SpaceJoystickRenderer, SpaceMapCubeRenderer,
-        │                        SpaceHandleRenderer, SpaceOrbitHandleRenderer
+        │                        Space : dimension/space (SpaceSkyRenderer, SkyRenderer ; SpaceWarpEffect, distorsion
+        │                        du saut, provisoire), camera/spacepilot (SpacePilotSkyRenderer : surcouche + lien,
+        │                        SkyRenderer enregistre apres le ciel ; SpaceJoystickRenderer ; SpaceJumpRenderer :
+        │                        cible et roue de charge, ViewRenderer), monde/spaceconfigurator (SpaceMapCubeRenderer,
+        │                        SpaceHandleRenderer, SpaceOrbitHandleRenderer)
         ├── holo/                ponts objets -> familles (HoloRouting, 4 bridges + HoloFocusBridge : fenetre
         │                        d'outils visee au-dessus de tout), HoloObjectRenderer(s), fenetres,
         │                        HoloPicking (objet sous le reticule ; pas un renderer, partage les placements),
@@ -222,32 +230,58 @@ com.amynna.hololib
   sauvegardes par cle `<type du module>/<id>`. Pour apparaitre dans la roue vue par un observateur, le provider doit
   lui etre envoye (`sharedWithObservers()`). Demo : `hololib:demo_quick_actions`.
 
-### Modules Space (`modules/dimension/space`, `modules/monde/space*`)
+### Modules Space (`modules/dimension/space`, `modules/monde/space*`, `modules/camera/spacepilot`)
 
-Conception et decisions (D1-D9, choix C, limites L) : `docs/space/` (le code fait foi). Le monde d'une dimension est
-un vaisseau : sa pose dans un systeme stellaire simule est la camera du ciel.
+Conception et decisions (D1-D19, choix C, limites L) : `docs/space/` (le code fait foi). Le monde d'une dimension est
+un vaisseau : sa pose dans un systeme stellaire simule est la camera du ciel. Seuls fichiers hors packages Space :
+les enregistrements de `HoloLibModules` et `ModuleRenderers`.
 - `hololib:space_environment` (dimension) : **seule autorite** sur la galaxie (systemes, corps, orbites de Kepler
   animees), le systeme courant, la pose du monde (km, quaternion `double`), la vitesse signee, le referentiel, les
-  reglages et le pilote. Aucun objet (`sharedWithObservers()`) ; ciel dessine par `SpaceSkyRenderer` (fond opaque,
-  etoiles de fond = autres systemes, corps a taille apparente reelle, LOD) qui noircit le brouillard (`fogColor`).
-  Acces serveur : `SpaceEnvironmentModule.of(level)` ; client : `client()` (backend). API serveur publique (pilotage,
-  edition qui valide puis incremente la revision, reglages) : Controller et Configurator ne passent que par elle.
+  reglages (dont la vitesse de distorsion, 0,5 al/s), le saut et le pilote. Aucun objet (`sharedWithObservers()`) ;
+  ciel dessine par `SpaceSkyRenderer` (fond opaque, etoiles de fond = autres systemes, corps a taille apparente
+  reelle, LOD) qui noircit le brouillard (`fogColor`). Acces serveur : `SpaceEnvironmentModule.of(level)` ; client :
+  `client()` (backend). API serveur publique (pilotage, edition qui valide puis incremente la revision, reglages) :
+  Controller et Configurator ne passent que par elle.
+- **Galaxie par defaut** (galaxies creees apres T16 ; une galaxie sauvegardee n'est jamais changee) : Sol (34 corps :
+  8 planetes, lunes majeures, objets mineurs `MINOR` Ceres / Pluton / Eris / Haumea / Makemake) et 11 voisines reelles
+  avec compagnes et planetes confirmees (`docs/space/donnees-systemes.md`). Bornes : 48 corps / systeme, 256 systemes.
+- **Persistance** : `SpaceArchive` (`SavedData` du niveau, `data/hololib_space.dat`) recopie l'etat vivant a chaque
+  sauvegarde du niveau et recoit l'etat au retrait du module ; lue au premier tick serveur, elle remplace l'etat d'une
+  installation par commande ou d'une memoire plus ancienne (retrait / reinstallation = tout revient ; remise a zero :
+  supprimer le fichier, L20). Un voyage en cours reprend au chargement.
 - `hololib:space_controller` (marker) : fenetre `World` (`EVERYONE`, interrupteur "tous / ops" verifie par le
   serveur) ; clic sur `SpacePilotPad` = capture : Avancer / Reculer = gaz, Gauche / Droite = roulis, Saut = frein,
-  regard = joystick borne a un cone de 30 degres autour de l'axe avant (cercles `SpaceJoystickForward` /
-  `SpaceJoystickAim`, chez le pilote local seulement), Echap rend la main. Actions `BEGIN` / `INPUT` (7 octets,
-  envoyee au changement, battement 20 ticks) / `END` relayees a l'Environment ; un pilote a la fois, libere s'il se
-  tait, part ou si le poste disparait.
-- `hololib:space_configurator` (marker, **ops**, tout masque aux non-ops par `shown()`, verifie d'abord par le
-  serveur) : cube editable (carte galactique, ou systeme edite a temps fige `t_edit`) et fenetre a sa base ; copie
-  en lecture des en-tetes et du systeme edite, rafraichie quand la revision de l'Environment change.
+  Accroupi = saut, regard = joystick borne a un cone de 30 degres autour de l'axe avant, Echap rend la main.
+  **Refuse sans module Space Pilot** dans la memoire active (D11, serveur et client). Actions `BEGIN` / `INPUT`
+  (7 octets, 8-12 avec la cible du saut ; envoyee au changement, battement 20 ticks) / `END` / `OPS_ONLY` relayees a
+  l'Environment ; un pilote a la fois, libere s'il se tait, part ou si le poste disparait. Pendant un saut, la
+  fenetre affiche "Saut vers X" puis "Distorsion : n s" (lu dans le miroir client).
+- **Saut** (`SpaceJump`, etat de l'Environment avance dans le pas deterministe) : etoile de fond au reticule (<= 3
+  degres, choisie a l'appui), Accroupi maintenu = charge de 60 ticks (alignement de l'avant sur l'etoile en 40 ticks,
+  frein force, joystick inactif ; relacher annule), puis voyage de `max(20, ceil(20 D / v_w))` ticks pose figee, puis
+  arrivee decidee par le serveur seul : systeme courant = cible, a 10 rayons de son etoile, face a elle, `V = 0`.
+  Distorsion (ciel blanc + trainees) : `SpaceWarpEffect`, seule classe de l'effet, **provisoire**.
+- `hololib:space_pilot` (joueur, `Configurable` + `QuickActionProvider`, rien pour les observateurs : C45) : surcouche
+  du ciel du joueur local (`SpacePilotSkyRenderer` : anneaux des corps et des etoiles, orbites, nom au regard, lien
+  pointille avant -> referentiel ; lunes et objets mineurs reperes seulement de pres), cercles du joystick (objets
+  `Local` `PRIVATE`, pendant le pilotage seulement ; cercle avant = zone morte), cible et roue de charge du saut
+  (`SpaceJumpRenderer`), HUD de navigation (`SpacePilotHud`, `Hud`, deplacable par l'Own HUD Editor). Quick Action
+  `toggle` = coupe surcouche, HUD et lien (pas le joystick ni la roue). Module du joueur local : `SpacePilotClient`.
+- `hololib:space_configurator` (marker, **ops**, tout masque aux non-ops par `shown()`, op verifie en premier par le
+  serveur) : cube editable (carte galactique, systeme courant en vert ; ou systeme edite a temps fige `t_edit`, tout a
+  l'echelle, zoom sur un corps, vaisseau en vert) et fenetre **detachee** (placee devant la base du cube par defaut,
+  puis editable seule : translation, rotation, oeil) ; croix 3D de la selection avec coordonnees aux faces, origine
+  des coordonnees (defaut Sol), vitesse de distorsion. Copie en lecture des en-tetes et du systeme edite, rafraichie
+  quand la revision de l'Environment change.
 - **Poignees sondees** : pas de callback d'edition ; `serverTick` compare le transform du cube, de `SpaceMapHandle`
   (translation de l'etoile selectionnee) et de `SpaceOrbitHandle` (rotation + echelle de l'orbite) a la derniere
   valeur ecrite par le module et en deduit l'edition. Poignees ajoutees / retirees des deux cotes (serveur au
   changement d'etat avec `markDirty`, client dans `onSync`, seulement si absentes), memes cles (`handle`, `orbit`).
-- **Sync froid / chaud** (Environment) : chaque envoi est complet ; bloc chaud (tick, pose, vitesse, referentiel,
-  entree, pilote, reglages) puis bloc froid (revision, systeme courant, etoiles de fond) que le client saute si la
-  revision est connue. Envois limites (4 ticks) ; en mouvement, correction toutes les 20 ticks ; rien a l'arret.
+- **Sync froid / chaud** (Environment) : bloc chaud (tick, pose, vitesse, referentiel, entree, pilote, reglages, saut)
+  toujours ; revision ; bloc froid (systeme courant, etoiles de fond avec id et nom) **seulement au besoin** (D16) :
+  instantane d'un arrivant, changement de revision (edition, saut), demande d'un client qui l'a manque. Sans lui le
+  client ignore l'etat (`synced()` faux, ciel reduit au fond). Envois limites (4 ticks) ; en mouvement ou en saut,
+  correction toutes les 20 ticks ; rien a l'arret.
 - **Referentiel** : la vitesse est relative a un corps choisi par proximite x regard (delai, cooldown, fondu), qui
   entraine le monde ; synchronise et sauvegarde. Pose sauvegardee avec son tick (`time`), recalee sur le referentiel
   au chargement.

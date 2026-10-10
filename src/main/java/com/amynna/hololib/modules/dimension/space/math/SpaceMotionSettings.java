@@ -7,9 +7,9 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.joml.Vector3d;
 
 /**
- * Reglages du mouvement du monde et de l'horloge des orbites (immuable), tenus par le Space Environment, sauvegardes et
- * synchronises avec son etat chaud (voir {@code docs/space/04-mathematiques.md} par. 2, 3, 5). Les valeurs par defaut
- * ({@link #DEFAULT}) sont toutes ici.
+ * Reglages du mouvement du monde, de l'horloge des orbites et du saut (vitesse de distorsion, T15) (immuable), tenus
+ * par le Space Environment, sauvegardes et synchronises avec son etat chaud (voir
+ * {@code docs/space/04-mathematiques.md} par. 2, 3, 5, 8). Les valeurs par defaut ({@link #DEFAULT}) sont toutes ici.
  * <p>
  * Le constructeur borne chaque valeur et leve sur une valeur non finie (meme regle que le modele) : tout reglage
  * existant est valide.
@@ -21,9 +21,11 @@ import org.joml.Vector3d;
  * @param turnRate     taux de lacet / tangage a pleine deviation {@code turn}, degres par tick
  * @param rollSpeed    vitesse de roulis, degres par tick
  * @param timeScale    secondes simulees par tick pour les orbites ({@code 0} = orbites figees)
+ * @param warpSpeed    vitesse de distorsion du saut interstellaire, annees-lumiere par seconde (T15), bornee par
+ *                     {@link SpaceLimits#sanitizeWarpSpeed} ; n'intervient pas dans le pas de mouvement
  */
 public record SpaceMotionSettings(double forwardYaw, double forwardPitch, double maxSpeed, double turnRate,
-                                  double rollSpeed, double timeScale)
+                                  double rollSpeed, double timeScale, double warpSpeed)
 {
     /** Axe avant par defaut : nord ({@code (0, 0, -1)}). */
     public static final double DEFAULT_FORWARD_YAW = 180.0;
@@ -36,6 +38,11 @@ public record SpaceMotionSettings(double forwardYaw, double forwardPitch, double
     public static final double DEFAULT_ROLL_SPEED = 2.0;
     /** Echelle de temps par defaut : 3 600 s simulees par tick (un tick = une heure, une annee ~ 7 min 18 s). */
     public static final double DEFAULT_TIME_SCALE = 3_600.0;
+    /**
+     * Vitesse de distorsion par defaut, al/s (bornes : {@link SpaceLimits#MIN_WARP_SPEED} a
+     * {@link SpaceLimits#MAX_WARP_SPEED}).
+     */
+    public static final double DEFAULT_WARP_SPEED = 0.5;
 
     /** Bornes. */
     public static final double MAX_FORWARD_PITCH = 80.0;
@@ -47,7 +54,8 @@ public record SpaceMotionSettings(double forwardYaw, double forwardPitch, double
 
     /** Reglages par defaut. */
     public static final SpaceMotionSettings DEFAULT = new SpaceMotionSettings(DEFAULT_FORWARD_YAW,
-            DEFAULT_FORWARD_PITCH, DEFAULT_MAX_SPEED, DEFAULT_TURN_RATE, DEFAULT_ROLL_SPEED, DEFAULT_TIME_SCALE);
+            DEFAULT_FORWARD_PITCH, DEFAULT_MAX_SPEED, DEFAULT_TURN_RATE, DEFAULT_ROLL_SPEED, DEFAULT_TIME_SCALE,
+            DEFAULT_WARP_SPEED);
 
     public SpaceMotionSettings
     {
@@ -57,33 +65,40 @@ public record SpaceMotionSettings(double forwardYaw, double forwardPitch, double
         turnRate = clamp(turnRate, MIN_RATE, MAX_RATE);
         rollSpeed = clamp(rollSpeed, MIN_RATE, MAX_RATE);
         timeScale = clamp(timeScale, 0.0, MAX_TIME_SCALE);
+        warpSpeed = SpaceLimits.sanitizeWarpSpeed(warpSpeed);
     }
 
     // ---------------------------------------------------------------- copies modifiees
 
     public SpaceMotionSettings withForward(double yaw, double pitch)
     {
-        return new SpaceMotionSettings(yaw, pitch, maxSpeed, turnRate, rollSpeed, timeScale);
+        return new SpaceMotionSettings(yaw, pitch, maxSpeed, turnRate, rollSpeed, timeScale, warpSpeed);
     }
 
     public SpaceMotionSettings withMaxSpeed(double maxSpeed)
     {
-        return new SpaceMotionSettings(forwardYaw, forwardPitch, maxSpeed, turnRate, rollSpeed, timeScale);
+        return new SpaceMotionSettings(forwardYaw, forwardPitch, maxSpeed, turnRate, rollSpeed, timeScale, warpSpeed);
     }
 
     public SpaceMotionSettings withTurnRate(double turnRate)
     {
-        return new SpaceMotionSettings(forwardYaw, forwardPitch, maxSpeed, turnRate, rollSpeed, timeScale);
+        return new SpaceMotionSettings(forwardYaw, forwardPitch, maxSpeed, turnRate, rollSpeed, timeScale, warpSpeed);
     }
 
     public SpaceMotionSettings withRollSpeed(double rollSpeed)
     {
-        return new SpaceMotionSettings(forwardYaw, forwardPitch, maxSpeed, turnRate, rollSpeed, timeScale);
+        return new SpaceMotionSettings(forwardYaw, forwardPitch, maxSpeed, turnRate, rollSpeed, timeScale, warpSpeed);
     }
 
     public SpaceMotionSettings withTimeScale(double timeScale)
     {
-        return new SpaceMotionSettings(forwardYaw, forwardPitch, maxSpeed, turnRate, rollSpeed, timeScale);
+        return new SpaceMotionSettings(forwardYaw, forwardPitch, maxSpeed, turnRate, rollSpeed, timeScale, warpSpeed);
+    }
+
+    /** Vitesse de distorsion, al/s (bornee par le constructeur). */
+    public SpaceMotionSettings withWarpSpeed(double warpSpeed)
+    {
+        return new SpaceMotionSettings(forwardYaw, forwardPitch, maxSpeed, turnRate, rollSpeed, timeScale, warpSpeed);
     }
 
     // ---------------------------------------------------------------- axes du monde (sans allocation)
@@ -131,7 +146,8 @@ public record SpaceMotionSettings(double forwardYaw, double forwardPitch, double
         return SpaceUnits.days(gameTime, partialTick, timeScale);
     }
 
-    // ---------------------------------------------------------------- reseau (ordre : fyaw, fpitch, vmax, turn, roll, tscale)
+    // ---------------------------------------------------------------- reseau
+    // Ordre : fyaw, fpitch, vmax, turn, roll, tscale, warp (7 double, 56 octets ; warp ajoute en T15).
 
     public void write(FriendlyByteBuf buf)
     {
@@ -141,6 +157,7 @@ public record SpaceMotionSettings(double forwardYaw, double forwardPitch, double
         buf.writeDouble(turnRate);
         buf.writeDouble(rollSpeed);
         buf.writeDouble(timeScale);
+        buf.writeDouble(warpSpeed);
     }
 
     /** Lecture stricte : leve sur une valeur non finie (les valeurs finies sont bornees). */
@@ -152,12 +169,16 @@ public record SpaceMotionSettings(double forwardYaw, double forwardPitch, double
         double turn = buf.readDouble();
         double roll = buf.readDouble();
         double scale = buf.readDouble();
-        return new SpaceMotionSettings(yaw, pitch, maxSpeed, turn, roll, scale);
+        double warp = buf.readDouble();
+        return new SpaceMotionSettings(yaw, pitch, maxSpeed, turn, roll, scale, warp);
     }
 
     // ---------------------------------------------------------------- NBT
 
-    /** Format : {@code { fyaw, fpitch, vmax, turn, roll, tscale }} (cles courtes et stables). */
+    /**
+     * Format : {@code { fyaw, fpitch, vmax, turn, roll, tscale, warp }} (cles courtes et stables ; {@code warp} depuis
+     * T15).
+     */
     public CompoundTag save()
     {
         CompoundTag tag = new CompoundTag();
@@ -167,16 +188,20 @@ public record SpaceMotionSettings(double forwardYaw, double forwardPitch, double
         tag.putDouble("turn", turnRate);
         tag.putDouble("roll", rollSpeed);
         tag.putDouble("tscale", timeScale);
+        tag.putDouble("warp", warpSpeed);
         return tag;
     }
 
-    /** Lecture tolerante : cle manquante ou valeur non finie = valeur par defaut, valeur hors bornes bornee. */
+    /**
+     * Lecture tolerante : cle manquante ou valeur non finie = valeur par defaut, valeur hors bornes bornee. Une
+     * sauvegarde d'avant T15 (sans {@code warp}) prend {@link #DEFAULT_WARP_SPEED}.
+     */
     public static SpaceMotionSettings load(CompoundTag tag)
     {
         return new SpaceMotionSettings(number(tag, "fyaw", DEFAULT_FORWARD_YAW),
                 number(tag, "fpitch", DEFAULT_FORWARD_PITCH), number(tag, "vmax", DEFAULT_MAX_SPEED),
                 number(tag, "turn", DEFAULT_TURN_RATE), number(tag, "roll", DEFAULT_ROLL_SPEED),
-                number(tag, "tscale", DEFAULT_TIME_SCALE));
+                number(tag, "tscale", DEFAULT_TIME_SCALE), number(tag, "warp", DEFAULT_WARP_SPEED));
     }
 
     private static double number(CompoundTag tag, String key, double fallback)

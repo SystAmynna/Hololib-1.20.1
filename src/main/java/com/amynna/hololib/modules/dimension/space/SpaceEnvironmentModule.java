@@ -5,6 +5,7 @@ import com.amynna.hololib.holo.memory.HoloContainers;
 import com.amynna.hololib.holo.memory.dimension.DimensionHoloContainer;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.modules.dimension.space.math.SpaceFrameState;
+import com.amynna.hololib.modules.dimension.space.math.SpaceJump;
 import com.amynna.hololib.modules.dimension.space.math.SpaceMotion;
 import com.amynna.hololib.modules.dimension.space.math.SpaceMotionSettings;
 import com.amynna.hololib.modules.dimension.space.math.SpaceOrbits;
@@ -25,8 +26,10 @@ import net.minecraft.server.level.ServerPlayer;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -47,16 +50,36 @@ import java.util.UUID;
  * retire est remplace aussitot par le meilleur score (serveur, {@link SpaceMotion#refreshReference}). Une bascule
  * cote serveur demande un envoi.
  * <p>
- * <b>Synchronisation</b> ({@link #writeSync}) : bloc chaud puis bloc froid.
+ * <b>Synchronisation</b> ({@link #writeSync}) : bloc chaud, revision annoncee, bloc froid <b>optionnel</b> (D16, T15b).
  * <pre>
  * chaud : long T0 (stateTime, -1 avant le premier tick), pose (7 double : x y z qx qy qz qw), double V (signee,
  *         relative au referentiel), etat du referentiel (5 varints : id du corps de reference (0 = aucun : recalcule
  *         au pas suivant), id du precedent, ticks depuis la bascule, id du candidat, ticks de candidature), entree du
- *         pilote (7 octets, frein et visee compris), boolean pilote present [+ UUID], reglages (6 double)
- * froid : varint L (octets qui suivent), int revision, systeme courant complet, etoiles de fond (varint + n x 20 o)
+ *         pilote (7 octets, frein et visee compris, + varint de la cible si le drapeau du saut est leve,
+ *         {@link SpacePilotInput#write}), boolean pilote present [+ UUID], reglages (7 double, vitesse de distorsion
+ *         comprise, {@link SpaceMotionSettings#write}), saut ({@link SpaceJump#write} : 1 octet sans saut, 84 a 89
+ *         pendant un saut)
+ * entete : varint revision (celle du systeme courant et des etoiles de fond de cet etat), varint L (0 = pas de bloc
+ *         froid)
+ * froid : (L octets, si L &gt; 0) systeme courant complet, etoiles de fond (varint + n x (varint id + nom UTF + 20 o),
+ *         {@link BackgroundStar#write})
  * </pre>
- * Le client saute le bloc froid ({@code L - 4} octets) si la revision est celle qu'il connait. Le bloc froid est mis
- * en cache cote serveur et reconstruit quand la revision change.
+ * <b>Inclusion du bloc froid</b> (serveur) : le framework appelle {@code writeSync} soit pour l'envoi de fin de tick qui
+ * suit un {@code markDirty} (meme octets pour tous les joueurs de la dimension), soit hors de cet envoi : instantane
+ * d'un joueur qui arrive (connexion, changement de dimension, reapparition) ou installation du module. Le module sait
+ * lequel : il ne marque l'etat sale que dans {@link #send}, juste avant l'envoi de fin de tick ({@code flushExpected}).
+ * Hors envoi de fin de tick : bloc froid <b>toujours</b> inclus (le destinataire n'a peut-etre rien). Dans l'envoi de
+ * fin de tick : inclus seulement si la revision a change depuis le dernier bloc froid diffuse (edition, restauration
+ * T14, changement de systeme), ou s'il est force : arrivee d'un joueur sans instantane reconnu (suivi de
+ * {@code level.players()} a chaque tick, filet de securite), ou demande d'un client qui ne l'a pas
+ * ({@link #ACTION_REQUEST_COLD}, au plus une fois tous les {@value #CORRECTION_INTERVAL} ticks). Sans joueur dans la
+ * dimension, la revision courante est reputee connue de tous (chaque arrivant la recevra dans son instantane). Le bloc
+ * froid est mis en cache et reconstruit quand la revision change.
+ * <p>
+ * <b>Client</b> : un etat dont la revision annoncee n'est pas celle du bloc froid connu (ou sans aucun bloc froid
+ * connu) est ignore : le miroir n'est plus {@link #synced()} (ciel reduit au fond), et il redemande le bloc froid au
+ * serveur ({@value #CORRECTION_INTERVAL} ticks entre deux demandes) ; le premier etat complet recu le resynchronise
+ * (saut). Un bloc froid deja connu (meme revision) est saute ({@code L} octets).
  * <p>
  * <b>Politique d'envoi</b> (serveur, decidee dans {@link #serverTick}) : un envoi demande (edition qui change le bloc
  * froid, systeme courant, reglage, nouvelle entree du pilote, pilote pris ou rendu, changement de referentiel) part
@@ -65,7 +88,14 @@ import java.util.UUID;
  * un envoi a l'arret ; une edition qui ne change pas le bloc froid n'est envoyee qu'au plus tous les
  * {@value #CORRECTION_INTERVAL} ticks (seul moyen de la faire sauvegarder : le framework sauve sur {@code markDirty}).
  * <p>
- * <b>Client</b> (T07e, {@code docs/space/taches/T07e-saccades.md}) : dead reckoning (rejeu depuis {@code T0}, puis
+ * <b>Persistance</b> (T14, {@code docs/space/03-modele-donnees.md} par. 4) : la memoire de dimension n'est reecrite
+ * qu'apres un {@code markDirty} ; l'etat vivant est en plus recopie a chaque sauvegarde du niveau dans
+ * {@link SpaceArchive}, branchee au premier tick serveur. Au chargement, l'archive remplace l'etat de la memoire si
+ * elle est plus recente ; a l'installation par commande (aucun etat), elle le fournit ; au retrait
+ * ({@link #onUnload}), elle recoit l'etat. Dans tous les cas, la pose est recalee au premier tick (C37,
+ * {@link #rebaseLoadedPose}).
+ * <p>
+ * <b>Client</b> (T07e, {@code docs/space/05-synchronisation.md} par. 2) : dead reckoning (rejeu depuis {@code T0}, puis
  * un pas par tick) ; chaque tick simule laisse sa pose d'affichage dans un <b>historique</b> ({@value #HISTORY} ticks)
  * et son etat simule dans un second. L'affichage suit une <b>horloge propre</b> ({@link #displayDays(float)}) : un tick
  * par tick client, qui rattrape sa consigne (temps du niveau moins un tick) en changeant sa vitesse (au plus 25 %) au
@@ -78,6 +108,17 @@ import java.util.UUID;
  * entree ({@link #predictPilotInput}) et reconciliation lente (10 % de l'ecart par tick).
  * {@link #pose(float, SpacePose)} et {@link #bodyPositions} sont au meme temps ; la pose est interpolee entre deux
  * entrees de l'historique <b>dans le repere du referentiel</b> ({@link SpaceMotion#interpolate}, fondu compris).
+ * <p>
+ * <b>Saut</b> (T21, {@code docs/space/04-mathematiques.md} par. 8) : etat {@link SpaceJump} porte par chaque suite de
+ * pas (serveur, rejeu, prediction, historiques), avance par {@link SpaceMotion} dans le meme pas que le mouvement,
+ * declenche par l'entree du pilote (drapeau + id de cible) ; cibles cherchees dans la galaxie (serveur) ou les etoiles
+ * de fond (client), memes coordonnees ({@link #jumpTarget}). L'arrivee (systeme courant <- cible, revision, pose
+ * pres de l'etoile, C59) est faite par le serveur seul ({@link #arrive}) ; un client reste au bout du voyage jusqu'a l'etat
+ * qui porte le nouveau systeme (meme paquet que son bloc froid). Changement de phase -> envoi ; saut en cours = monde
+ * en mouvement (correction toutes les {@value #CORRECTION_INTERVAL} ticks). Sauvegarde sous la cle {@code jump} ;
+ * recalage C37 inactif pendant un saut. Lecture : {@link #jump()}, {@link #jumpAt(float)}, progressions et temps
+ * restant au temps d'affichage ({@link #jumpChargeProgress}, {@link #jumpTravelProgress},
+ * {@link #jumpRemainingSeconds}), {@link #warpSpeed()}.
  * <p>
  * Le client passe par un {@link Backend} installe au setup client ({@code client.modules.dimension.space}).
  */
@@ -97,8 +138,21 @@ public final class SpaceEnvironmentModule extends HoloModule
     public static final int SOFT_TICKS = 5;
     /** Ecart angulaire au-dela duquel la correction est un saut, en radians. */
     private static final double SOFT_MAX_ANGLE = Math.toRadians(10.0);
+    /** Action client -> serveur (premier octet) : le client n'a pas le bloc froid de la revision annoncee. */
+    public static final int ACTION_REQUEST_COLD = 0;
+    /**
+     * Banc en jeu (T15b) : vrai = taille de chaque etat ecrit par {@link #writeSync} dans le log (bloc froid inclus ou
+     * non). Desactive dans le code livre.
+     */
+    private static final boolean LOG_SYNC_SIZES = false;
     /** Part de l'ecart rattrapee a chaque tick par la prediction du pilote local. */
     private static final double RECONCILE = 0.1;
+    /**
+     * Ticks consecutifs de desaccord entre le saut predit du pilote local et le saut rejoue depuis le serveur au-dela
+     * desquels la prediction est ramenee sur l'etat rejoue ({@link #reconcileJump}) : plus que la latence d'un
+     * envoi (au plus {@value #CORRECTION_INTERVAL} ticks entre deux etats pendant un saut).
+     */
+    private static final int JUMP_DESYNC = 2 * CORRECTION_INTERVAL;
     /** Poses d'affichage gardees, une par tick simule (puissance de 2, au moins le retard maximal + 4). */
     private static final int HISTORY = 32;
     /** Horloge d'affichage : part de son ecart a la consigne rattrapee par tick. */
@@ -136,6 +190,10 @@ public final class SpaceEnvironmentModule extends HoloModule
     private long stateTime = -1;
     private SpacePilotInput input = SpacePilotInput.ZERO;
     private UUID pilot;
+    /** Saut de {@link #pose} (T21) : avance dans le meme pas que le mouvement. */
+    private final SpaceJump jump = new SpaceJump();
+    /** Cibles du saut : galaxie (serveur), etoiles de fond (client) ; voir {@link #jumpTarget}. */
+    private final SpaceJump.Targets targets = this::jumpTarget;
     /** Une instance par module : le module serveur et son miroir client tournent sur des fils differents. */
     private final SpaceMotion motion = new SpaceMotion();
 
@@ -144,6 +202,12 @@ public final class SpaceEnvironmentModule extends HoloModule
     private boolean poseUnset;
     /** Tick de la pose chargee (cle {@code time}), {@code -1} si inconnu ; consomme au premier tick serveur. */
     private long loadedTime = -1;
+    /** Vrai si l'etat vient d'une sauvegarde ({@link #load}) ; faux pour une installation par commande. */
+    private boolean stateLoaded;
+    /** Tick de la pose de l'etat charge depuis la memoire ({@code -1} si inconnu), compare a l'archive. */
+    private long loadedStamp = -1;
+    /** Archive du niveau ({@link SpaceArchive}), branchee au premier tick serveur ; {@code null} avant. */
+    private SpaceArchive archive;
     private String pilotMarker;
     private long lastInputTime;
     private long lastSendTime = Long.MIN_VALUE / 2;
@@ -155,27 +219,51 @@ public final class SpaceEnvironmentModule extends HoloModule
     private double referenceAltitude = Double.POSITIVE_INFINITY;
     private byte[] coldBytes;
     private int coldRevision;
+    /** Vrai entre {@link #send} ({@code markDirty}) et l'ecriture de l'envoi de fin de tick qui le suit. */
+    private boolean flushExpected;
+    /** Revision du dernier bloc froid diffuse a toute la dimension (connue de tous les joueurs presents). */
+    private int broadcastRevision;
+    /** Bloc froid a inclure dans le prochain envoi de fin de tick ; vrai au depart (personne ne le connait encore). */
+    private boolean coldForced = true;
+    /** Ecritures hors envoi de fin de tick (instantanes, installation) depuis le tick precedent. */
+    private int snapshotWrites;
+    /** Joueurs de la dimension au tick precedent. */
+    private final Set<UUID> present = new HashSet<>();
+    /** Tick de la derniere demande de bloc froid acceptee. */
+    private long lastColdRequest = Long.MIN_VALUE / 2;
+    /** Vecteur de travail de l'arrivee d'un saut. */
+    private final Vector3d jumpWork = new Vector3d();
 
     // ---------------------------------------------------------------- client
 
     private boolean synced;
     private boolean knowsCold;
+    /** Vrai si un etat a ete ignore faute du bloc froid de sa revision : demande au serveur en cours. */
+    private boolean awaitingCold;
+    /** Temps client de la derniere demande de bloc froid. */
+    private long coldRequestTime = Long.MIN_VALUE / 2;
     private SpacePilotInput localInput = SpacePilotInput.ZERO;
     private boolean predicting;
     private final SpacePose predicted = new SpacePose();
     private double predictedSpeed;
     private final SpaceFrameState predictedFrame = new SpaceFrameState();
+    private final SpaceJump predictedJump = new SpaceJump();
+    /** Ticks consecutifs ou le saut predit et le saut rejoue depuis le serveur different (phase ou cible). */
+    private int jumpMismatch;
     /** Pose affichee au tick {@link #stateTime} (derniere entree de l'historique). */
     private final SpacePose display = new SpacePose();
     private double displaySpeed;
     /** Referentiel de la pose affichee, apres le pas qui a mene a {@link #display}. */
     private final SpaceFrameState displayFrame = new SpaceFrameState();
+    /** Saut de la pose affichee, apres le pas qui a mene a {@link #display}. */
+    private final SpaceJump displayJump = new SpaceJump();
     /**
      * Historique d'affichage : pose affichee et referentiel (apres le pas qui y mene) du tick {@code t} a l'indice
      * {@code t & (HISTORY - 1)}, valables de {@link #historyFirst} a {@link #stateTime}.
      */
     private final SpacePose[] historyPose = newPoses(HISTORY);
     private final SpaceFrameState[] historyFrame = newFrames(HISTORY);
+    private final SpaceJump[] historyJump = newJumps(HISTORY);
     private long historyFirst;
     /** Temps d'affichage (ticks) au debut du tick client courant, et sa vitesse (ticks par tick client). */
     private double clockStart;
@@ -189,15 +277,18 @@ public final class SpaceEnvironmentModule extends HoloModule
      */
     private final SpacePose[] simPose = newPoses(HISTORY);
     private final SpaceFrameState[] simFrame = newFrames(HISTORY);
+    private final SpaceJump[] simJump = newJumps(HISTORY);
     private final double[] simSpeed = new double[HISTORY];
     private long simFirst;
     private final SpacePose searchPose = new SpacePose();
     private final SpaceFrameState searchFrame = new SpaceFrameState();
+    private final SpaceJump searchJump = new SpaceJump();
     /** Positions des corps pour remplir l'historique d'un saut. */
     private final Vector3d[] historyBodies = SpaceOrbits.newPositionArray();
     /** Instance du rendu ({@link #pose(float, SpacePose)}) : n'ecrase pas l'espace de travail de la simulation. */
     private final SpaceMotion displayMotion = new SpaceMotion();
     private final SpaceFrameState receivedFrame = new SpaceFrameState();
+    private final SpaceJump receivedJump = new SpaceJump();
     private final Vector3d correctionPosition = new Vector3d();
     private final Quaterniond correctionRotation = new Quaterniond();
     private final Quaterniond rotationWork = new Quaterniond();
@@ -248,11 +339,38 @@ public final class SpaceEnvironmentModule extends HoloModule
     /**
      * Aucun objet. Serveur : galaxie vide (premiere installation ou sauvegarde illisible) -> galaxie par defaut ;
      * systeme courant perdu -> premier systeme ; pose provisoire (calculee au temps 0, recalculee au premier tick).
+     * L'archive ({@link SpaceArchive}) n'est lue qu'au premier tick serveur ({@link #bindArchive}) : {@code onLoad}
+     * ne connait pas le niveau.
      */
     @Override
     public void onLoad()
     {
         if (host().clientSide()) return;
+        completeState();
+    }
+
+    /**
+     * Serveur : l'etat est recopie dans l'archive ({@link SpaceArchive#store}), qui le rendra a une reinstallation
+     * (retrait par commande ; aussi au dechargement du niveau, sans effet sur le disque : la derniere sauvegarde du
+     * niveau a deja recopie l'etat vivant). Rien si l'archive n'est pas encore branchee (aucun tick).
+     */
+    @Override
+    public void onUnload()
+    {
+        if (host().clientSide() || archive == null) return;
+        CompoundTag state = new CompoundTag();
+        save(state);
+        archive.store(state, stateTime);
+        archive.detach(this);
+        archive = null;
+    }
+
+    /**
+     * Serveur : complete un etat charge, restaure ou vide (galaxie par defaut, repli du systeme courant, pose par
+     * defaut provisoire si elle manque).
+     */
+    private void completeState()
+    {
         if (galaxy.isEmpty()) {
             galaxy = SpaceGalaxy.createDefault();
             currentId = galaxy.systems().get(0).id();
@@ -269,6 +387,7 @@ public final class SpaceEnvironmentModule extends HoloModule
             motion.defaultPose(current, settings.days(0L, 0f), settings, pose);
             speed = 0.0;
             frame.reset(motion.referenceBodyId());
+            jump.reset();
         }
     }
 
@@ -276,7 +395,10 @@ public final class SpaceEnvironmentModule extends HoloModule
 
     /**
      * Cles : {@code galaxy, current, pose, time} (tick de la pose), {@code speed, frame} (etat du referentiel,
-     * {@link SpaceFrameState#save}), {@code settings, rev}. Le pilote n'est pas sauvegarde.
+     * {@link SpaceFrameState#save}), {@code settings} ({@link SpaceMotionSettings#save}, vitesse de distorsion
+     * comprise), {@code rev}, {@code jump} (saut en cours seulement, {@link SpaceJump#save} ; absent = pas de saut).
+     * Le pilote n'est pas sauvegarde. Aussi appele par
+     * {@link SpaceArchive} (copie de l'etat vivant a chaque sauvegarde du niveau).
      */
     @Override
     public void save(CompoundTag tag)
@@ -289,6 +411,7 @@ public final class SpaceEnvironmentModule extends HoloModule
         tag.put("frame", frame.save());
         tag.put("settings", settings.save());
         tag.putInt("rev", revision);
+        if (jump.active()) tag.put("jump", jump.save());
     }
 
     /** Lecture tolerante ; {@link #onLoad} complete (galaxie par defaut, repli du systeme courant). */
@@ -301,9 +424,11 @@ public final class SpaceEnvironmentModule extends HoloModule
             pose.load(tag.getCompound("pose"));
             // Sauvegarde d'avant T13 : pas de cle "time", pas de recalage au premier tick.
             loadedTime = tag.contains("time", Tag.TAG_LONG) ? tag.getLong("time") : -1L;
+            loadedStamp = loadedTime;
         } else {
             poseUnset = true;
         }
+        stateLoaded = true;
         double loaded = tag.getDouble("speed");
         speed = Double.isFinite(loaded) ? loaded : 0.0;
         // Etat du referentiel ; sauvegarde d'avant T07d : seule la cle "ref" ; absent ou invalide : 0, le meilleur
@@ -317,13 +442,22 @@ public final class SpaceEnvironmentModule extends HoloModule
             settings = SpaceMotionSettings.DEFAULT;
         }
         revision = tag.getInt("rev");
+        // Saut en cours (T21, C43) : un voyage reprend ; une charge s'annule au premier pas (pilote non sauvegarde).
+        String problem = jump.load(tag.getCompound("jump"));
+        if (problem != null) HoloLib.LOGGER.warn("Space : saut sauvegarde illisible ({}), ignore", problem);
     }
 
     // ================================================================ synchronisation
 
+    /**
+     * Bloc chaud, revision, puis bloc froid seulement si le destinataire peut en avoir besoin (voir la documentation
+     * de la classe) : toujours hors envoi de fin de tick (instantane, installation) ; dans l'envoi de fin de tick, si
+     * la revision a change depuis le dernier bloc froid diffuse ou s'il est force.
+     */
     @Override
     public void writeSync(FriendlyByteBuf buf, boolean forOwner)
     {
+        int start = buf.writerIndex();
         // Chaud.
         buf.writeLong(stateTime);
         pose.write(buf);
@@ -333,19 +467,37 @@ public final class SpaceEnvironmentModule extends HoloModule
         buf.writeBoolean(pilot != null);
         if (pilot != null) buf.writeUUID(pilot);
         settings.write(buf);
-        // Froid (en cache).
-        if (coldBytes == null || coldRevision != revision) rebuildCold();
-        buf.writeVarInt(coldBytes.length);
-        buf.writeBytes(coldBytes);
+        jump.write(buf);
+        // Entete et froid (en cache).
+        boolean flushing = flushExpected;
+        flushExpected = false;
+        boolean withCold = !flushing || coldForced || revision != broadcastRevision;
+        if (!flushing) {
+            snapshotWrites++;
+        } else if (withCold) {
+            broadcastRevision = revision;
+            coldForced = false;
+        }
+        buf.writeVarInt(revision);
+        if (withCold) {
+            if (coldBytes == null || coldRevision != revision) rebuildCold();
+            buf.writeVarInt(coldBytes.length);
+            buf.writeBytes(coldBytes);
+        } else {
+            buf.writeVarInt(0);
+        }
+        if (LOG_SYNC_SIZES) {
+            HoloLib.LOGGER.info("Space : etat {} o ({}, bloc froid {} o, revision {})", buf.writerIndex() - start,
+                    flushing ? "envoi de fin de tick" : "instantane", withCold ? coldBytes.length : 0, revision);
+        }
     }
 
-    /** Bloc froid : revision, systeme courant, etoiles de fond. */
+    /** Bloc froid : systeme courant, etoiles de fond (la revision est dans l'entete). Jamais vide. */
     private void rebuildCold()
     {
         stars = galaxy.backgroundStars(currentId);
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
         try {
-            buf.writeInt(revision);
             current.write(buf);
             BackgroundStar.writeList(buf, stars);
             byte[] bytes = new byte[buf.readableBytes()];
@@ -359,7 +511,9 @@ public final class SpaceEnvironmentModule extends HoloModule
 
     /**
      * Lecture stricte rattrapee : un bloc chaud invalide laisse l'etat inchange (log) ; un bloc froid invalide garde
-     * le systeme connu (log) et sera relu au prochain envoi.
+     * le systeme connu (log). Un etat dont le bloc froid n'est pas connu (revision annoncee differente, ou aucun bloc
+     * froid recu) n'est pas applique : le miroir cesse d'etre {@link #synced()} et redemande le bloc froid
+     * ({@link #clientTick}).
      */
     @Override
     public void readSync(FriendlyByteBuf buf)
@@ -373,14 +527,15 @@ public final class SpaceEnvironmentModule extends HoloModule
             SpacePilotInput in = SpacePilotInput.read(buf);
             UUID newPilot = buf.readBoolean() ? buf.readUUID() : null;
             SpaceMotionSettings newSettings = SpaceMotionSettings.read(buf);
+            receivedJump.read(buf);
+            int newRevision = buf.readVarInt();
             int length = buf.readVarInt();
-            if (length < 4 || length > buf.readableBytes()) {
+            if (length < 0 || length > buf.readableBytes()) {
                 throw new IllegalArgumentException("Bloc froid de longueur invalide : " + length);
             }
-            int start = buf.readerIndex();
-            int newRevision = buf.readInt();
             boolean systemChanged = false;
-            if (!knowsCold || newRevision != revision) {
+            if (length > 0 && (!knowsCold || newRevision != revision)) {
+                int start = buf.readerIndex();
                 try {
                     SpaceSystem system = SpaceSystem.read(buf);
                     List<BackgroundStar> list = BackgroundStar.readList(buf);
@@ -393,10 +548,22 @@ public final class SpaceEnvironmentModule extends HoloModule
                 } catch (RuntimeException e) {
                     HoloLib.LOGGER.warn("Space : bloc froid invalide (revision {}), ignore", newRevision, e);
                 }
+                buf.readerIndex(start + length);
+            } else {
+                buf.skipBytes(length);
             }
-            buf.readerIndex(start + length);
-            // Aucun systeme connu (premier bloc froid invalide) : rien a simuler, on attend le prochain envoi.
-            if (current == null) return;
+            if (!knowsCold || newRevision != revision) {
+                // Bloc froid de cette revision inconnu : etat ignore (le systeme qu'il suppose n'est pas connu), ciel
+                // reduit au fond jusqu'a reception ; le prochain etat complet resynchronise (saut).
+                if (!awaitingCold) {
+                    HoloLib.LOGGER.debug("Space : etat de revision {} sans son bloc froid (connue : {}), en attente",
+                            newRevision, knowsCold ? revision : "aucune");
+                }
+                awaitingCold = true;
+                synced = false;
+                return;
+            }
+            awaitingCold = false;
             applyState(t0, v, in, newPilot, newSettings, systemChanged);
         } catch (RuntimeException e) {
             HoloLib.LOGGER.warn("Space : etat de l'environnement invalide, ignore", e);
@@ -411,11 +578,11 @@ public final class SpaceEnvironmentModule extends HoloModule
     private void applyState(long t0, double v, SpacePilotInput in, UUID newPilot, SpaceMotionSettings newSettings,
                             boolean systemChanged)
     {
-        boolean jump = !synced || systemChanged || t0 < 0;
+        boolean snap = !synced || systemChanged || t0 < 0;
         // Etat en avance sur la simulation (il arrive avant le tick client qui amene le niveau a T0) : l'ancienne
         // trajectoire est d'abord prolongee jusqu'a T0 (anciennes entrees), pour comparer au meme tick.
-        if (!jump && t0 > stateTime) {
-            if (t0 - stateTime > HISTORY / 2) jump = true;
+        if (!snap && t0 > stateTime) {
+            if (t0 - stateTime > HISTORY / 2) snap = true;
             else advance(t0);
         }
         if (t0 >= 0) {
@@ -428,15 +595,16 @@ public final class SpaceEnvironmentModule extends HoloModule
         pose.set(received);
         speed = v;
         frame.set(receivedFrame);
+        jump.set(receivedJump);
         // Rejeu jusqu'au dernier tick de l'historique ; au premier etat, jusqu'au niveau.
-        long last = jump ? Math.max(clientTime(), t0) : stateTime;
+        long last = snap ? Math.max(clientTime(), t0) : stateTime;
         if (t0 < 0 || last - t0 > MAX_REPLAY) {
             stateTime = Math.max(last, 0L);
-            jump = true;
+            snap = true;
         } else {
             stateTime = t0;
         }
-        if (jump) {
+        if (snap) {
             replay(last);
             if (!synced) clockStart = clientTime() - 1.0 - observerDelay();
             synced = true;
@@ -482,16 +650,19 @@ public final class SpaceEnvironmentModule extends HoloModule
                 // Tick du changement retrouve : trajectoire exacte reecrite de ce tick a T0.
                 searchPose.set(simPose[index(change)]);
                 searchFrame.set(simFrame[index(change)]);
+                searchJump.set(simJump[index(change)]);
                 double v = simSpeed[index(change)];
                 SpacePilotInput stepInput = stepInput();
                 for (long t = change; t < t0 - 1; t++) {
-                    v = motion.step(searchPose, v, searchFrame, stepInput, current, settings.days(t, 0f),
-                            settings.days(t + 1, 0f), settings, searchPose);
+                    v = motion.step(searchPose, v, searchFrame, searchJump, targets, stepInput, current,
+                            settings.days(t, 0f), settings.days(t + 1, 0f), settings, searchPose);
                     int i = index(t + 1);
                     historyPose[i].set(searchPose);
                     historyFrame[i].set(searchFrame);
+                    historyJump[i].set(searchJump);
                     simPose[i].set(searchPose);
                     simFrame[i].set(searchFrame);
+                    simJump[i].set(searchJump);
                     simSpeed[i] = v;
                 }
             } else {
@@ -509,7 +680,7 @@ public final class SpaceEnvironmentModule extends HoloModule
             }
             correctionTicks = 0;
             recordSim();
-            store(pose, speed, frame);
+            store(pose, speed, frame, jump);
             advance(last);
             return;
         }
@@ -536,12 +707,13 @@ public final class SpaceEnvironmentModule extends HoloModule
         for (long m = t0 - 1; m >= Math.max(lowest, simFirst); m--) {
             searchPose.set(simPose[index(m)]);
             searchFrame.set(simFrame[index(m)]);
+            searchJump.set(simJump[index(m)]);
             double v = simSpeed[index(m)];
             for (long t = m; t < t0; t++) {
-                v = motion.step(searchPose, v, searchFrame, stepInput, current, settings.days(t, 0f),
-                        settings.days(t + 1, 0f), settings, searchPose);
+                v = motion.step(searchPose, v, searchFrame, searchJump, targets, stepInput, current,
+                        settings.days(t, 0f), settings.days(t + 1, 0f), settings, searchPose);
             }
-            if (sameAsState(searchPose, v, searchFrame)) return m;
+            if (sameAsState(searchPose, v, searchFrame, searchJump)) return m;
         }
         return -1;
     }
@@ -549,13 +721,17 @@ public final class SpaceEnvironmentModule extends HoloModule
     /** Vrai si l'etat de l'historique de la simulation au tick {@code t} est exactement l'etat simule courant. */
     private boolean sameAsState(long t)
     {
-        return t >= simFirst && sameAsState(simPose[index(t)], simSpeed[index(t)], simFrame[index(t)]);
+        return t >= simFirst && sameAsState(simPose[index(t)], simSpeed[index(t)], simFrame[index(t)],
+                simJump[index(t)]);
     }
 
-    /** Vrai si {@code (p, v, f)} est exactement (bit a bit) l'etat simule courant ({@link #pose}, {@link #speed}). */
-    private boolean sameAsState(SpacePose p, double v, SpaceFrameState f)
+    /**
+     * Vrai si {@code (p, v, f, j)} est exactement (bit a bit) l'etat simule courant ({@link #pose}, {@link #speed},
+     * {@link #frame}, {@link #jump}).
+     */
+    private boolean sameAsState(SpacePose p, double v, SpaceFrameState f, SpaceJump j)
     {
-        return v == speed && f.sameAs(frame) && p.position().equals(pose.position())
+        return v == speed && f.sameAs(frame) && j.sameAs(jump) && p.position().equals(pose.position())
                 && p.orientation().equals(pose.orientation());
     }
 
@@ -564,7 +740,7 @@ public final class SpaceEnvironmentModule extends HoloModule
     {
         SpacePilotInput stepInput = stepInput();
         while (stateTime < until) {
-            speed = motion.step(pose, speed, frame, stepInput, current, settings.days(stateTime, 0f),
+            speed = motion.step(pose, speed, frame, jump, targets, stepInput, current, settings.days(stateTime, 0f),
                     settings.days(stateTime + 1, 0f), settings, pose);
             stateTime++;
             recordSim();
@@ -577,6 +753,7 @@ public final class SpaceEnvironmentModule extends HoloModule
         int i = index(stateTime);
         simPose[i].set(pose);
         simFrame[i].set(frame);
+        simJump[i].set(jump);
         simSpeed[i] = speed;
     }
 
@@ -589,6 +766,8 @@ public final class SpaceEnvironmentModule extends HoloModule
         predicted.set(pose);
         predictedSpeed = speed;
         predictedFrame.set(frame);
+        predictedJump.set(jump);
+        jumpMismatch = 0;
         correctionTicks = 0;
         int ref = current == null ? -1 : current.indexOf(frame.reference());
         boolean moving = ref >= 0 && !current.bodies().get(ref).isRoot();
@@ -603,12 +782,13 @@ public final class SpaceEnvironmentModule extends HoloModule
             SpacePose entry = historyPose[index(t)];
             entry.set(pose);
             historyFrame[index(t)].set(frame);
+            historyJump[index(t)].set(jump);
             if (moving) {
                 SpaceOrbits.positions(current, settings.days(t, 0f), historyBodies);
                 entry.position().add(historyBodies[ref].x - rx, historyBodies[ref].y - ry, historyBodies[ref].z - rz);
             }
         }
-        store(pose, speed, frame);
+        store(pose, speed, frame, jump);
         recordSim();
         simFirst = stateTime;
         historyFirst = stateTime - HISTORY + 1;
@@ -648,13 +828,15 @@ public final class SpaceEnvironmentModule extends HoloModule
     }
 
     /** Client : {@code shown} devient la pose affichee du tick {@link #stateTime} (derniere entree de l'historique). */
-    private void store(SpacePose shown, double shownSpeed, SpaceFrameState shownFrame)
+    private void store(SpacePose shown, double shownSpeed, SpaceFrameState shownFrame, SpaceJump shownJump)
     {
         display.set(shown);
         displaySpeed = shownSpeed;
         displayFrame.set(shownFrame);
+        displayJump.set(shownJump);
         historyPose[index(stateTime)].set(shown);
         historyFrame[index(stateTime)].set(shownFrame);
+        historyJump[index(stateTime)].set(shownJump);
     }
 
     /** Indice de l'historique du tick {@code tick}. */
@@ -682,6 +864,10 @@ public final class SpaceEnvironmentModule extends HoloModule
     public void serverTick(ServerLevel level)
     {
         long now = level.getGameTime();
+        // Un markDirty non suivi de son envoi de fin de tick (impossible en principe) ne doit pas priver un instantane
+        // de son bloc froid.
+        flushExpected = false;
+        if (archive == null) bindArchive(level);
         if (loadedTime >= 0) {
             if (!poseUnset) rebaseLoadedPose(loadedTime, now);
             loadedTime = -1;
@@ -693,14 +879,19 @@ public final class SpaceEnvironmentModule extends HoloModule
             motion.defaultPose(current, settings.days(stateTime, 0f), settings, pose);
             speed = 0.0;
             frame.reset(motion.referenceBodyId());
+            jump.reset();
             sendPending = true;
         }
         managePilot(level, now);
+        SpaceJump.Phase previousPhase = jump.phase();
         while (stateTime < now) {
-            speed = motion.step(pose, speed, frame, input, current, settings.days(stateTime, 0f),
+            speed = motion.step(pose, speed, frame, jump, targets, input, current, settings.days(stateTime, 0f),
                     settings.days(stateTime + 1, 0f), settings, pose);
             stateTime++;
+            if (jump.arrived()) arrive();
         }
+        // Debut ou annulation de la charge, debut du voyage, arrivee : envoi (au plus tous les 4 ticks).
+        if (jump.phase() != previousPhase) sendPending = true;
         nearestIndex = motion.nearestBody(pose, current, settings.days(stateTime, 0f));
         nearestAltitude = motion.nearestAltitude();
         // Referentiel au tick courant : un corps retire est remplace aussitot par le meilleur score (le debut du pas
@@ -708,6 +899,7 @@ public final class SpaceEnvironmentModule extends HoloModule
         motion.refreshReference(pose, input, current, settings.days(stateTime, 0f), settings, frame);
         referenceAltitude = motion.referenceAltitude();
         if (frame.reference() != previousReference) sendPending = true;
+        trackPlayers(level);
 
         boolean moving = moving();
         long sinceSend = now - lastSendTime;
@@ -730,7 +922,8 @@ public final class SpaceEnvironmentModule extends HoloModule
      */
     private void rebaseLoadedPose(long saved, long now)
     {
-        if (now <= saved || current == null) return;
+        // Saut en cours (C43) : pose figee (voyage) ou pilotee (charge, annulee au premier pas) : pas de recalage.
+        if (now <= saved || current == null || jump.active()) return;
         int ref = current.indexOf(frame.reference());
         if (ref < 0 || current.bodies().get(ref).isRoot()) return;
         Vector3d[] bodies = SpaceOrbits.newPositionArray();
@@ -740,6 +933,41 @@ public final class SpaceEnvironmentModule extends HoloModule
         double z = bodies[ref].z;
         SpaceOrbits.positions(current, settings.days(now, 0f), bodies);
         pose.position().add(bodies[ref].x - x, bodies[ref].y - y, bodies[ref].z - z);
+    }
+
+    /**
+     * Premier tick serveur : branche l'archive du niveau ({@link SpaceArchive}). Si elle contient un etat et que le
+     * module a ete installe sans etat (commande), ou que l'archive est plus recente que l'etat de la memoire (la
+     * memoire n'a pas ete reecrite a la derniere sauvegarde du niveau : monde immobile, ou moins de
+     * {@value #CORRECTION_INTERVAL} ticks depuis le dernier envoi), l'etat archive remplace l'etat courant. Le recalage
+     * C37 ({@link #rebaseLoadedPose}) suit, depuis le tick archive.
+     */
+    private void bindArchive(ServerLevel level)
+    {
+        archive = SpaceArchive.of(level);
+        if (archive.present() && (!stateLoaded || archive.saved() > loadedStamp)) {
+            restore(archive.state(), stateLoaded ? "plus recente que la memoire" : "reinstallation");
+        }
+        archive.attach(this);
+    }
+
+    /**
+     * Serveur, avant le premier pas : remplace tout l'etat par {@code tag} (format de {@link #save}). Les ids de la
+     * galaxie sont ceux de l'etat archive ; la revision est portee au-dessus de celle deja envoyee (un client qui a
+     * recu la galaxie par defaut a l'installation ne garde pas son bloc froid) ; envoi demande.
+     */
+    private void restore(CompoundTag tag, String reason)
+    {
+        int known = revision;
+        galaxy = new SpaceGalaxy();
+        poseUnset = false;
+        loadedTime = -1;
+        load(tag);
+        completeState();
+        revision = Math.max(revision, known) + 1;
+        coldBytes = null;
+        sendPending = true;
+        HoloLib.LOGGER.info("Space : etat restaure depuis l'archive ({}, tick {})", reason, archive.saved());
     }
 
     /** Liberation automatique : joueur absent ou hors de la dimension, marker disparu, silence. */
@@ -758,12 +986,111 @@ public final class SpaceEnvironmentModule extends HoloModule
         }
     }
 
-    /** Monde en mouvement : vitesse non nulle (dans un sens ou l'autre) ou rotation commandee. */
-    private boolean moving() { return speed != 0.0 || input.rotating(); }
+    /**
+     * Monde en mouvement : vitesse non nulle (dans un sens ou l'autre), rotation commandee, ou saut en cours (charge :
+     * alignement ; voyage : correction toutes les {@value #CORRECTION_INTERVAL} ticks).
+     */
+    private boolean moving() { return speed != 0.0 || input.rotating() || jump.active(); }
 
+    /**
+     * Serveur : fin du voyage ({@link SpaceJump#arrived()}), dans le pas qui y mene (D10, C59, doc 04 par. 8). Systeme
+     * courant <- cible (revision incrementee : le bloc froid part avec l'envoi qui suit), pose d'arrivee pres de
+     * l'etoile principale du systeme cible, face a elle ({@link SpaceJump#arrivalPose}), {@code V = 0}, referentiel =
+     * etoile principale sans fondu, saut termine. Cible retiree entre-temps (ou devenue le systeme courant) : le saut
+     * est abandonne, le monde reste dans le systeme d'origine, a l'arret.
+     */
+    private void arrive()
+    {
+        int target = jump.target();
+        SpaceSystem system = galaxy.system(target);
+        if (system == null || target == currentId) {
+            HoloLib.LOGGER.warn("Space : systeme cible du saut {} introuvable, saut abandonne", target);
+            jump.reset();
+            speed = 0.0;
+            sendPending = true;
+            return;
+        }
+        jump.arrivalPose(system, pose.orientation(), settings, jumpWork, pose);
+        currentId = target;
+        current = system;
+        speed = 0.0;
+        frame.reset(system.primaryStar().id());
+        jump.reset();
+        revision++;
+        sendPending = true;
+    }
+
+    /**
+     * Cible de saut ({@link SpaceJump.Targets}) : position de l'etoile de fond du systeme {@code systemId}, coordonnees
+     * arrondies en {@code float}. Serveur : systeme de la galaxie (meme arrondi que {@code BackgroundStar.of}) ;
+     * client : etoile de fond recue. Faux pour le systeme courant ou un id inconnu.
+     */
+    private boolean jumpTarget(int systemId, Vector3d dest)
+    {
+        if (systemId <= 0 || systemId == currentId) return false;
+        if (host().clientSide()) {
+            BackgroundStar star = backgroundStar(systemId);
+            if (star == null) return false;
+            dest.set(star.x(), star.y(), star.z());
+            return true;
+        }
+        SpaceSystem system = galaxy.system(systemId);
+        if (system == null) return false;
+        dest.set((float) system.x(), (float) system.y(), (float) system.z());
+        return true;
+    }
+
+    /**
+     * Suivi des joueurs de la dimension (filet de securite du bloc froid) : chaque arrivant a normalement recu un
+     * instantane avec le bloc froid (ecriture hors envoi de fin de tick, comptee dans {@link #snapshotWrites}) ; s'il y a
+     * plus d'arrivants que d'instantanes depuis le tick precedent, le bloc froid est force dans le prochain envoi (au
+     * plus {@value #MIN_SEND_INTERVAL} ticks). Personne dans la dimension : la revision courante est reputee connue de
+     * tous (le prochain arrivant la recevra dans son instantane). Sans allocation hors changement de la liste.
+     */
+    private void trackPlayers(ServerLevel level)
+    {
+        List<ServerPlayer> players = level.players();
+        int count = players.size();
+        int arrivals = 0;
+        for (int i = 0; i < count; i++) {
+            if (!present.contains(players.get(i).getUUID())) arrivals++;
+        }
+        if (arrivals > 0 || present.size() != count) {
+            present.clear();
+            for (int i = 0; i < count; i++) present.add(players.get(i).getUUID());
+        }
+        if (arrivals > snapshotWrites) {
+            coldForced = true;
+            sendPending = true;
+        }
+        snapshotWrites = 0;
+        if (count == 0) {
+            broadcastRevision = revision;
+            coldForced = false;
+        }
+    }
+
+    /**
+     * Action d'un client de la dimension ({@link #ACTION_REQUEST_COLD}) : il n'a pas le bloc froid de la revision
+     * annoncee. Bloc froid force dans le prochain envoi, au plus une fois tous les {@value #CORRECTION_INTERVAL} ticks
+     * (toute la dimension le recoit : pas d'envoi cible).
+     */
+    @Override
+    public void handleAction(ServerPlayer player, FriendlyByteBuf buf)
+    {
+        if (buf.readUnsignedByte() != ACTION_REQUEST_COLD) return;
+        long now = player.serverLevel().getGameTime();
+        if (now - lastColdRequest < CORRECTION_INTERVAL && now >= lastColdRequest) return;
+        lastColdRequest = now;
+        coldForced = true;
+        sendPending = true;
+    }
+
+    /** Marque l'etat sale : il est ecrit par l'envoi de fin de tick du framework, juste apres ce tick. */
     private void send(long now)
     {
         markDirty();
+        flushExpected = true;
         lastSendTime = now;
         sendPending = false;
         persistPending = false;
@@ -776,6 +1103,7 @@ public final class SpaceEnvironmentModule extends HoloModule
     @Override
     public void clientTick()
     {
+        if (awaitingCold) requestCold();
         if (!synced) return;
         boolean local = isLocalPilot();
         if (local && !predicting) {
@@ -783,6 +1111,8 @@ public final class SpaceEnvironmentModule extends HoloModule
             predicted.set(display);
             predictedSpeed = displaySpeed;
             predictedFrame.set(displayFrame);
+            predictedJump.set(displayJump);
+            jumpMismatch = 0;
             correctionTicks = 0;
         } else if (!local && predicting) {
             predicting = false;
@@ -822,19 +1152,21 @@ public final class SpaceEnvironmentModule extends HoloModule
         while (stateTime < target) {
             double begin = settings.days(stateTime, 0f);
             double end = settings.days(stateTime + 1, 0f);
-            speed = motion.step(pose, speed, frame, stepInput, current, begin, end, settings, pose);
+            speed = motion.step(pose, speed, frame, jump, targets, stepInput, current, begin, end, settings, pose);
             if (predicting) {
-                predictedSpeed = motion.step(predicted, predictedSpeed, predictedFrame, stepInput, current, begin,
-                        end, settings, predicted);
+                predictedSpeed = motion.step(predicted, predictedSpeed, predictedFrame, predictedJump, targets,
+                        stepInput, current, begin, end, settings, predicted);
             }
             stateTime++;
             recordSim();
             if (predicting) {
+                reconcileJump();
                 SpacePose.lerp(predicted, pose, RECONCILE, predicted);
                 predictedSpeed += (speed - predictedSpeed) * RECONCILE;
                 display.set(predicted);
                 displaySpeed = predictedSpeed;
                 displayFrame.set(predictedFrame);
+                displayJump.set(predictedJump);
             } else {
                 if (correctionTicks > 0) correctionTicks--;
                 display.set(pose);
@@ -846,9 +1178,43 @@ public final class SpaceEnvironmentModule extends HoloModule
                 }
                 displaySpeed = speed;
                 displayFrame.set(frame);
+                displayJump.set(jump);
             }
-            store(display, displaySpeed, displayFrame);
+            store(display, displaySpeed, displayFrame, displayJump);
         }
+    }
+
+    /**
+     * Client du pilote : le saut predit suit son propre compte (la charge commence des l'appui, avant l'echo du
+     * serveur), decale du saut rejoue depuis l'etat serveur de la latence. S'ils different (phase ou cible) plus de
+     * {@value #JUMP_DESYNC} ticks d'affilee (saut refuse par le serveur, annule par lui, cible inconnue d'un cote),
+     * la prediction est ramenee sur l'etat rejoue (pose, vitesse, referentiel, saut) : sans cela, un voyage predit que
+     * le serveur n'a pas fait resterait fige au bout de son compte.
+     */
+    private void reconcileJump()
+    {
+        if (predictedJump.phase() == jump.phase() && predictedJump.target() == jump.target()) {
+            jumpMismatch = 0;
+            return;
+        }
+        if (++jumpMismatch <= JUMP_DESYNC) return;
+        jumpMismatch = 0;
+        predicted.set(pose);
+        predictedSpeed = speed;
+        predictedFrame.set(frame);
+        predictedJump.set(jump);
+    }
+
+    /**
+     * Client en attente du bloc froid de la revision annoncee : demande au serveur ({@link #ACTION_REQUEST_COLD}), au
+     * plus une fois tous les {@value #CORRECTION_INTERVAL} ticks (une demande perdue ou refusee est refaite).
+     */
+    private void requestCold()
+    {
+        long now = clientTime();
+        if (now - coldRequestTime < CORRECTION_INTERVAL && now >= coldRequestTime) return;
+        coldRequestTime = now;
+        sendAction(buf -> buf.writeByte(ACTION_REQUEST_COLD));
     }
 
     /** Entree utilisee pour simuler : celle du pilote local s'il pilote, sinon la derniere recue. */
@@ -1071,7 +1437,7 @@ public final class SpaceEnvironmentModule extends HoloModule
 
     /**
      * Apres une operation du modele : revision incrementee ; envoi si le bloc froid change (systeme courant, ou
-     * etoile de fond du systeme touche), sinon envoi differe pour la sauvegarde.
+     * etoile de fond du systeme touche : position, eclat, et depuis T15 nom), sinon envoi differe pour la sauvegarde.
      */
     private SpaceEditResult edited(SpaceEditResult result, int systemId, SpaceSystem before)
     {
@@ -1096,6 +1462,8 @@ public final class SpaceEnvironmentModule extends HoloModule
         motion.defaultPose(current, settings.days(Math.max(stateTime, 0L), 0f), settings, pose);
         speed = 0.0;
         frame.reset(motion.referenceBodyId());
+        // Changement de systeme ou reinitialisation : un saut en cours est abandonne.
+        jump.reset();
     }
 
     // ================================================================ API serveur : reglages
@@ -1140,6 +1508,77 @@ public final class SpaceEnvironmentModule extends HoloModule
         return setSettings(settings.withTimeScale(timeScale));
     }
 
+    /**
+     * Vitesse de distorsion du saut, al/s (T15) : refusee si non finie, sinon bornee a
+     * {@code [SpaceLimits.MIN_WARP_SPEED, SpaceLimits.MAX_WARP_SPEED]} ; envoyee avec les autres reglages (bloc chaud,
+     * au plus tous les {@value #MIN_SEND_INTERVAL} ticks).
+     */
+    public SpaceEditResult setWarpSpeed(double warpSpeed)
+    {
+        requireServer();
+        if (!Double.isFinite(warpSpeed)) return nonFinite();
+        return setSettings(settings.withWarpSpeed(warpSpeed));
+    }
+
+    /** Vitesse de distorsion du saut, al/s (deux cotes ; client : derniere valeur recue). */
+    public double warpSpeed() { return settings.warpSpeed(); }
+
+    // ================================================================ API : saut (T21, lecture seule)
+
+    /**
+     * Saut, <b>lecture seule</b> (instance interne) : serveur = etat simule au tick courant ; client = saut de la pose
+     * affichee au dernier tick simule (prediction du pilote local comprise), comme {@link #pose()}. Pour un rendu,
+     * preferer {@link #jumpAt(float)} (meme temps que {@link #pose(float, SpacePose)}).
+     */
+    public SpaceJump jump() { return host().clientSide() ? displayJump : jump; }
+
+    /**
+     * Saut au temps d'affichage, <b>lecture seule</b> : client = etat de l'historique a la fin de l'intervalle affiche
+     * (le tick {@code k + 1} si le temps d'affichage est {@code k + f}, comme {@link #pose(float, SpacePose)}) ;
+     * serveur = {@link #jump()}. Avec {@link #jumpFraction(float)} pour les progressions de {@link SpaceJump}.
+     */
+    public SpaceJump jumpAt(float partialTick)
+    {
+        if (!host().clientSide()) return jump;
+        double tau = displayTime(partialTick);
+        return historyJump[(int) ((displayTick(tau) + 1) & (HISTORY - 1))];
+    }
+
+    /**
+     * Fraction {@code [0, 1]} de l'intervalle affiche qui mene a {@link #jumpAt(float)} ({@code f} pour un temps
+     * d'affichage {@code k + f}) ; serveur : {@code 1} (etat au tick courant).
+     */
+    public double jumpFraction(float partialTick)
+    {
+        if (!host().clientSide()) return 1.0;
+        double tau = displayTime(partialTick);
+        return Math.max(0.0, Math.min(1.0, tau - displayTick(tau)));
+    }
+
+    /**
+     * Progression de la charge au temps d'affichage, {@code [0, 1]} (roue de charge, T22) : {@code 1} pendant le
+     * voyage, {@code 0} sans saut ({@link SpaceJump#chargeProgress}).
+     */
+    public double jumpChargeProgress(float partialTick)
+    {
+        return jumpAt(partialTick).chargeProgress(jumpFraction(partialTick));
+    }
+
+    /** Progression du voyage au temps d'affichage, {@code [0, 1]} ({@code 0} hors voyage ; distorsion, T23). */
+    public double jumpTravelProgress(float partialTick)
+    {
+        return jumpAt(partialTick).travelProgress(jumpFraction(partialTick));
+    }
+
+    /**
+     * Temps de voyage restant au temps d'affichage, en secondes ({@link SpaceJump#remainingSeconds}) : pendant la
+     * charge, la duree entiere du voyage a venir ; {@code 0} sans saut.
+     */
+    public double jumpRemainingSeconds(float partialTick)
+    {
+        return jumpAt(partialTick).remainingSeconds(jumpFraction(partialTick));
+    }
+
     private SpaceEditResult setSettings(SpaceMotionSettings value)
     {
         if (!value.equals(settings)) {
@@ -1165,6 +1604,13 @@ public final class SpaceEnvironmentModule extends HoloModule
         return array;
     }
 
+    private static SpaceJump[] newJumps(int count)
+    {
+        SpaceJump[] array = new SpaceJump[count];
+        for (int i = 0; i < count; i++) array[i] = new SpaceJump();
+        return array;
+    }
+
     private void requireServer()
     {
         if (host().clientSide()) throw new IllegalStateException("Space Environment : methode serveur cote client");
@@ -1172,7 +1618,11 @@ public final class SpaceEnvironmentModule extends HoloModule
 
     // ================================================================ API client
 
-    /** Vrai des que le miroir client a recu un etat valide (toujours vrai cote serveur). */
+    /**
+     * Vrai si le miroir client a recu un etat valide dont il connait le bloc froid (systeme courant et etoiles de fond
+     * de la revision annoncee) ; redevient faux tant qu'un etat recu annonce une revision dont le bloc froid manque
+     * (T15b). Toujours vrai cote serveur.
+     */
     public boolean synced() { return !host().clientSide() || synced; }
 
     /**
@@ -1205,6 +1655,17 @@ public final class SpaceEnvironmentModule extends HoloModule
     }
 
     /**
+     * Temps d'affichage en ticks (meme horloge que {@link #displayDays(float)}, sans l'echelle de temps des orbites) :
+     * continu d'une frame a l'autre, il avance meme orbites figees et ne saute pas au changement de systeme (arrivee
+     * d'un saut). Pour animer un effet du ciel sans le temps de jeu de Minecraft (C20 ; distorsion du saut, T23).
+     * Serveur : tick courant. Lecture seule, sans allocation.
+     */
+    public double displayTicks(float partialTick)
+    {
+        return host().clientSide() ? displayTime(partialTick) : stateTime;
+    }
+
+    /**
      * Temps d'affichage en ticks : debut du tick client courant plus {@code partialTick} fois la vitesse de l'horloge,
      * borne a l'historique.
      */
@@ -1233,8 +1694,26 @@ public final class SpaceEnvironmentModule extends HoloModule
         return current.bodies().size();
     }
 
-    /** Etoiles de fond : tous les systemes sauf le courant (liste non modifiable). */
+    /**
+     * Etoiles de fond : tous les systemes sauf le courant, dans l'ordre de la galaxie (liste non modifiable). Client :
+     * derniere liste recue ; serveur : celle du dernier bloc froid construit (preferer {@link #system(int)}).
+     */
     public List<BackgroundStar> backgroundStars() { return stars; }
+
+    /**
+     * Etoile de fond du systeme d'id {@code systemId}, ou {@code null} (systeme courant, inconnu, ou rien recu).
+     * Recherche lineaire sans allocation (au plus {@code SpaceLimits.MAX_SYSTEMS} etoiles) ; meme source que
+     * {@link #backgroundStars()}.
+     */
+    public BackgroundStar backgroundStar(int systemId)
+    {
+        List<BackgroundStar> list = stars;
+        for (int i = 0, n = list.size(); i < n; i++) {
+            BackgroundStar star = list.get(i);
+            if (star.id() == systemId) return star;
+        }
+        return null;
+    }
 
     /** Vrai si le joueur local est le pilote (client). */
     public boolean isLocalPilot()

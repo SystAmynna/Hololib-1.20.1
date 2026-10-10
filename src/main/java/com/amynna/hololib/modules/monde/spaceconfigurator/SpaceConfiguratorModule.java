@@ -38,15 +38,19 @@ import java.util.function.Consumer;
 
 /**
  * Module {@code hololib:space_configurator} (memoire de position, marker), reserve aux operateurs : cube editable
- * ({@link SpaceMapCube}) qui montre la carte galactique ou un systeme, et fenetre a sa base
- * ({@link SpaceConfiguratorWindow}). Il ne stocke <b>pas</b> la galaxie : il en garde une copie, recopiee depuis le
+ * ({@link SpaceMapCube}) qui montre la carte galactique ou un systeme, et fenetre editable separee
+ * ({@link SpaceConfiguratorWindow}, T24 : creee devant la base du cube par defaut, puis independante du cube). Il ne stocke <b>pas</b> la galaxie : il en garde une copie, recopiee depuis le
  * Space Environment de la dimension du marker quand sa revision change, et synchronisee a ses observateurs. Les
  * modifications passent par les methodes serveur de l'Environment ({@code SpaceEditResult} : motif du refus affiche
  * au joueur).
  * <p>
- * <b>Etat sauvegarde</b> : mode, systeme et corps selectionnes, cadrage galactique {@code (c, H)}, temps fige du mode
- * systeme {@code t_edit} (placement, acces et visibilite des objets le sont par le framework). La copie est
- * recalculee au premier tick.
+ * <b>Etat sauvegarde</b> : mode, systeme et corps selectionnes, corps zoome (T25), origine des coordonnees (T26),
+ * cadrage galactique {@code (c, H)}, temps fige du mode systeme {@code t_edit}, marque {@code detached} (T24 : fenetre detachee du cube ; placement, acces, affichage et
+ * visibilite des objets le sont par le framework). La copie est recalculee au premier tick.
+ * <p>
+ * <b>Fenetre</b> (T24) : son placement initial (devant la base du cube <b>par defaut</b>, {@link #windowPlacement})
+ * est aussi son transform par defaut (RESET) ; ensuite le module n'y touche plus. Ancienne sauvegarde (sans
+ * {@code detached}) : la fenetre est replacee une fois devant la base du cube <b>charge</b>, au premier tick serveur.
  * <p>
  * <b>Poignees</b> ({@link SpaceMapHandle}, cle {@code handle} ; {@link SpaceOrbitHandle}, cle {@code orbit}) : la
  * premiere existe seulement si un systeme selectionne figure dans la copie en mode galaxie, la seconde seulement si un
@@ -56,23 +60,38 @@ import java.util.function.Consumer;
  * <p>
  * <b>Mode systeme</b> (T12) : a l'entree (« Editer »), le temps simule de l'Environment est fige ({@code t_edit},
  * jours) : le cube montre les corps a leurs positions de Kepler a {@code t_edit}, a l'echelle de
- * {@link SpaceSystemScale} (echelle lineaire, loupe des lunes). « Animer » fait avancer localement le temps
- * d'affichage ({@link #displayDays}, client, rien n'est envoye) ; la poignee d'orbite reste posee a {@code t_edit}.
+ * {@link SpaceSystemScale} (echelle lineaire, tout a l'echelle depuis T25 : plus de loupe des lunes, D13). « Animer »
+ * fait avancer localement le temps d'affichage ({@link #displayDays}, client, rien n'est envoye) ; la poignee d'orbite
+ * reste posee a {@code t_edit}.
+ * <p>
+ * <b>Zoom sur un corps</b> (T25, D17) : le corps zoome ({@code 0} = systeme entier) fait partie de l'etat
+ * <b>sauvegarde et synchronise</b>, comme la selection : la poignee d'orbite est placee et relue par le serveur, qui
+ * doit donc connaitre l'echelle de la vue (un zoom purement client fausserait la conversion de la poignee), et le cube
+ * est commun a tous les operateurs. La vue est centree sur le corps ({@link SpaceSystemScale#zoomHalfExtent}) ; la
+ * poignee d'orbite n'existe que pour un corps dont le parent est dans le voisinage du zoom (le corps zoome ou un de ses
+ * descendants : {@link SpaceSystemScale#orbitInView}). Remis a {@code 0} au changement de mode ou de systeme et si le
+ * corps disparait.
+ * <p>
+ * <b>Origine des coordonnees</b> (T26, C50) : id d'un systeme ({@code 0} = defaut), sauvegarde et synchronise ;
+ * systeme effectif resolu par {@link SpaceCoordinates#origin} (le choisi, sinon {@code Sol}, sinon le premier). Remis a
+ * {@code 0} (retour au defaut) quand la copie ne contient plus ce systeme. La croix du cube et la ligne d'information
+ * de la fenetre donnent les coordonnees galactiques de la selection relativement a lui.
  * <p>
  * <b>Etat synchronise</b> ({@link #writeSync}, envoye seulement au changement de revision de l'Environment ou d'etat
  * d'interface, jamais par tick) :
  * <pre>
  * byte mode (ordinal), varint systeme selectionne (0 = aucun), varint corps selectionne (0 = aucun),
- * double t_edit (jours),
+ * varint corps zoome (0 = systeme entier, T25), varint origine (0 = defaut, T26), double t_edit (jours),
  * double cx, double cy, double cz, double H (cadrage, al),
  * boolean environment
  * si environment : int revision copiee, varint systeme courant de l'Environment,
  *                  byte axe avant (indice de FORWARD_YAW, -1 = autre valeur),
+ *                  double vitesse de distorsion (al/s, T24),
  *                  en-tetes de tous les systemes (SystemHeader.writeList),
  *                  boolean systeme edite [+ SpaceSystem.write] (present en mode systeme seulement)
  * </pre>
- * L'axe avant est relu dans les reglages de l'Environment chaque tick (changement de l'instance des reglages) : ses
- * reglages ne changent pas sa revision.
+ * L'axe avant et la vitesse de distorsion sont relus dans les reglages de l'Environment chaque tick (changement de
+ * l'instance des reglages) : ses reglages ne changent pas sa revision.
  * <b>Actions</b> ({@code sendAction(window, ...)}), premier octet = type ; le serveur verifie <b>d'abord</b> que le
  * joueur est operateur (refus silencieux sinon), puis que la source est la fenetre :
  * <pre>
@@ -95,6 +114,14 @@ import java.util.function.Consumer;
  *                                  2 couleur (int ARGB), 3 luminosite (double, etoiles), 4 periode jours (double,
  *                                  corps a orbite), 5 phase degres (double, corps a orbite) ; valeur non finie ou
  *                                  champ sans objet refuses ; bornes appliquees par le modele
+ * -- reglages (T24) --
+ * 12 WARP_SPEED + double        -> setWarpSpeed(al/s) (« Distorsion », mode galaxie) ; non finie refusee par
+ *                                  l'Environment, sinon bornee
+ * -- vue (T25) --
+ * 13 ZOOM + varint id           -> zoom sur un corps du systeme edite (0 = systeme entier) ; mode systeme requis,
+ *                                  corps inconnu = message
+ * -- coordonnees (T26) --
+ * 14 ORIGIN + varint id         -> origine des coordonnees (0 = defaut) ; systeme inconnu = message
  * </pre>
  * Tout refus de l'Environment (ou son absence) est affiche au joueur dans la barre d'action.
  * <b>Sondage de la poignee</b> ({@code docs/space/04-mathematiques.md} par. 7) : le module retient la derniere position
@@ -107,17 +134,17 @@ import java.util.function.Consumer;
  * <b>Sondage de la poignee d'orbite</b> (doc 04 par. 7) : rotation et echelle comparees chaque {@code serverTick} aux
  * dernieres ecrites ({@value #ORBIT_ANGLE_EPSILON} degre, ecart relatif {@value #ORBIT_SCALE_EPSILON}). Rotation
  * changee : {@code R_o = R_cube^-1 . R_poignee} decompose en (yaw, pitch, roll) ; echelle {@code X} ou {@code Z}
- * changee : {@code a = scaleX / sigma . H_sys / k}, {@code b = scaleZ / sigma . H_sys / k} ({@code k} = loupe pour une
- * lune), {@code e = sqrt(1 - (b/a)^2)} borne a {@code [0 ; 0,95]}, {@code 0} si {@code b >= a}. Seules les
- * composantes changees sont recalculees (pas de derive d'arrondi sur les autres), puis {@code updateBody} ; la
- * poignee est ensuite toujours reecrite depuis l'orbite (d'ou {@code scaleY = scaleX}). La conversion utilise
- * l'echelle et la loupe du systeme <b>avant</b> la modification (celles que le joueur voyait).
+ * changee : {@code a = scaleX / sigma . H}, {@code b = scaleZ / sigma . H} ({@code H} = demi-etendue de la vue :
+ * systeme entier ou zoom), {@code e = sqrt(1 - (b/a)^2)} borne a {@code [0 ; 0,95]}, {@code 0} si {@code b >= a}.
+ * Seules les composantes changees sont recalculees (pas de derive d'arrondi sur les autres), puis {@code updateBody} ;
+ * la poignee est ensuite toujours reecrite depuis l'orbite (d'ou {@code scaleY = scaleX}). La conversion utilise
+ * l'echelle de la vue <b>avant</b> la modification (celle que le joueur voyait).
  * <p>
  * <b>Sondage du cube</b> : le framework applique les editions sans callback ({@code HoloContainers.handleEdit}).
  * Chaque {@code serverTick} compare le transform du cube a la derniere valeur vue (copie exacte des neuf
- * composantes) ; a la difference : echelle ramenee a la moyenne si elle n'est plus uniforme (C11), fenetre replacee
- * devant la base du cube, valeur retenue. Le client replace aussi la fenetre et la poignee localement
- * ({@code clientTick}, meme calcul, sans toucher a l'echelle) pour qu'elles suivent le cube pendant la manipulation.
+ * composantes) ; a la difference : echelle ramenee a la moyenne si elle n'est plus uniforme (C11), valeur retenue. La
+ * fenetre ne suit plus le cube (T24). Le client replace les poignees localement ({@code clientTick}, meme calcul, sans
+ * toucher a l'echelle) pour qu'elles suivent le cube pendant la manipulation.
  * <p>
  * <b>Acces</b> de la fenetre : {@code HoloAccess.players(<operateurs connectes>)}, recalcule chaque tick serveur et
  * reaffecte seulement s'il change. Cube et fenetre ne sont dessines que chez un operateur ({@code shown()}, backend).
@@ -159,6 +186,12 @@ public final class SpaceConfiguratorModule extends HoloModule
     public static final int ACTION_REMOVE_BODY = 10;
     /** Type d'action : modification d'un champ d'un corps (varint id, octet champ, valeur). */
     public static final int ACTION_UPDATE_BODY = 11;
+    /** Type d'action : vitesse de distorsion du saut (double, al/s ; T24). */
+    public static final int ACTION_WARP_SPEED = 12;
+    /** Type d'action : zoom sur un corps du systeme edite (varint id, 0 = systeme entier ; T25). */
+    public static final int ACTION_ZOOM = 13;
+    /** Type d'action : origine des coordonnees (varint id d'un systeme, 0 = defaut ; T26). */
+    public static final int ACTION_ORIGIN = 14;
     /** Champ de {@link #ACTION_UPDATE_BODY} : nom (utf). */
     public static final int FIELD_NAME = 0;
     /** Champ : rayon en km (double). */
@@ -182,6 +215,12 @@ public final class SpaceConfiguratorModule extends HoloModule
     /** Echelle minimale ecrite dans la poignee d'orbite (un transform exige une echelle positive). */
     private static final float MIN_ORBIT_SCALE = 1e-6f;
     /**
+     * Demi-petit axe affiche minimal (unites du cube) d'une orbite pour avoir une poignee (T25) : en dessous (Phobos
+     * dans la vue de Sol entier : 3e-7), l'echelle de la poignee serait bornee par {@link #MIN_ORBIT_SCALE} et sa
+     * relecture fausse ; l'orbite s'edite alors dans le zoom sur le parent. Ne depend que de l'etat synchronise.
+     */
+    private static final double MIN_HANDLE_AXIS = 1e-5;
+    /**
      * Choix de l'axe avant du monde : nord, est, sud, ouest, haut, bas (yaw en degres, convention de
      * {@link SpaceMotionSettings#forward} : 180 = nord {@code -Z}, -90 = est {@code +X}). Haut et bas sont bornes au
      * pitch maximal des reglages ({@value SpaceMotionSettings#MAX_FORWARD_PITCH} degres), avec le yaw du nord.
@@ -202,7 +241,7 @@ public final class SpaceConfiguratorModule extends HoloModule
     public static final double MIN_HALF_EXTENT = 1.0;
     /** Marge du recadrage : {@code H = nice(REFRAME_MARGIN x demi-etendue max)}. */
     public static final double REFRAME_MARGIN = 1.1;
-    /** Ecart entre la fenetre et la face avant du cube, en blocs. */
+    /** Ecart entre la fenetre et la face avant du cube (placement initial), en blocs. */
     public static final float WINDOW_GAP = 0.25f;
     /** Ecart relatif tolere entre les echelles du cube avant de les uniformiser. */
     private static final float UNIFORM_EPSILON = 1e-4f;
@@ -225,6 +264,10 @@ public final class SpaceConfiguratorModule extends HoloModule
     private int selectedSystem;
     /** Id du corps selectionne dans le systeme edite (mode systeme), {@code 0} = aucun. */
     private int selectedBody;
+    /** Id du corps zoome dans le systeme edite (mode systeme, T25), {@code 0} = systeme entier. */
+    private int zoomBody;
+    /** Id du systeme origine des coordonnees (T26), {@code 0} = defaut ({@link SpaceCoordinates#origin}). */
+    private int origin;
     /** Centre du cadrage galactique, al. */
     private double frameX;
     private double frameY;
@@ -233,6 +276,11 @@ public final class SpaceConfiguratorModule extends HoloModule
     private double frameHalf;
     /** Temps simule fige a l'entree du mode systeme ({@code t_edit}), jours. */
     private double editTime;
+    /**
+     * Faux apres la lecture d'une sauvegarde d'avant T24 : la fenetre sera replacee une fois devant la base du cube
+     * charge (serveur). Vrai par defaut (installation par commande : {@code load} n'est pas appele).
+     */
+    private boolean windowDetached = true;
 
     // ---------------------------------------------------------------- copie synchronisee (recalculee)
 
@@ -241,6 +289,8 @@ public final class SpaceConfiguratorModule extends HoloModule
     private int currentSystemId;
     /** Indice du choix de l'axe avant ({@link #FORWARD_YAW}), {@code -1} = autre valeur ou pas d'Environment. */
     private int forward = -1;
+    /** Vitesse de distorsion de l'Environment (copie), al/s. */
+    private double warpSpeed = SpaceMotionSettings.DEFAULT_WARP_SPEED;
     private List<SystemHeader> headers = List.of();
     private SpaceSystem editedSystem;
 
@@ -282,11 +332,13 @@ public final class SpaceConfiguratorModule extends HoloModule
     private final Quaternionf orbitRotation = new Quaternionf();
     /** Positions affichees des corps (unites du cube), tableau reutilise. */
     private final Vector3d[] bodyPoints = SpaceOrbits.newPositionArray();
-    private final Vector3d bodyTmp = new Vector3d();
-    /** Systeme dont l'echelle a ete calculee ({@link #ensureScale}). */
+    /** Systeme et zoom dont l'echelle a ete calculee ({@link #ensureScale}). */
     private SpaceSystem scaledSystem;
-    private double systemHalf = 1.0;
-    private double magnifier = 1.0;
+    private int scaledZoom;
+    /** Indice du corps zoome dans le systeme edite, {@code -1} = systeme entier. */
+    private int zoomIndex = -1;
+    /** Demi-etendue de la vue (systeme entier ou zoom), UA. */
+    private double viewHalf = 1.0;
 
     // ---------------------------------------------------------------- client (animation)
 
@@ -315,13 +367,18 @@ public final class SpaceConfiguratorModule extends HoloModule
 
     // ---------------------------------------------------------------- cycle de vie
 
-    /** Cree le cube, la fenetre et, si l'etat le demande, la poignee (deux cotes, memes cles) ; affiche l'etat. */
+    /**
+     * Cree le cube, la fenetre (devant la base du cube par defaut : placement initial et transform de RESET) et, si
+     * l'etat le demande, la poignee (deux cotes, memes cles) ; affiche l'etat. Le framework restaure ensuite les
+     * placements sauvegardes / recus.
+     */
     @Override
     public void onLoad()
     {
         cube = addObject(new SpaceMapCube("cube"));
-        window = addObject(new SpaceConfiguratorWindow("window", this));
-        placeWindow(cube.transform());
+        HoloTransform initial = new HoloTransform();
+        windowPlacement(cube.transform(), initial);
+        window = addObject(new SpaceConfiguratorWindow("window", this, initial));
         updateHandle();
         refresh();
     }
@@ -344,7 +401,10 @@ public final class SpaceConfiguratorModule extends HoloModule
         tag.putString("mode", mode.name());
         tag.putInt("system", selectedSystem);
         tag.putInt("body", selectedBody);
+        tag.putInt("zoom", zoomBody);
+        tag.putInt("origin", origin);
         tag.putDouble("tedit", editTime);
+        tag.putBoolean("detached", true);
         CompoundTag frame = new CompoundTag();
         frame.putDouble("x", frameX);
         frame.putDouble("y", frameY);
@@ -360,9 +420,14 @@ public final class SpaceConfiguratorModule extends HoloModule
         mode = Mode.SYSTEM.name().equals(tag.getString("mode")) ? Mode.SYSTEM : Mode.GALAXY;
         selectedSystem = Math.max(0, tag.getInt("system"));
         selectedBody = Math.max(0, tag.getInt("body"));
+        zoomBody = Math.max(0, tag.getInt("zoom"));
+        origin = Math.max(0, tag.getInt("origin"));
         editTime = tag.getDouble("tedit");
         if (!Double.isFinite(editTime)) editTime = 0.0;
+        // Sauvegarde d'avant T24 : fenetre replacee une fois au premier tick serveur.
+        windowDetached = tag.getBoolean("detached");
         if (selectedSystem == 0) mode = Mode.GALAXY;
+        if (mode != Mode.SYSTEM) zoomBody = 0;
         CompoundTag frame = tag.getCompound("frame");
         frameX = frame.getDouble("x");
         frameY = frame.getDouble("y");
@@ -383,8 +448,8 @@ public final class SpaceConfiguratorModule extends HoloModule
     // ---------------------------------------------------------------- serveur
 
     /**
-     * Copie de l'Environment si sa revision ou ses reglages ont change, sondage du cube puis des poignees, poignees
-     * creees / retirees / replacees, acces des operateurs.
+     * Copie de l'Environment si sa revision ou ses reglages ont change, sondage du cube, placement unique de la fenetre
+     * d'une ancienne sauvegarde, sondage des poignees, poignees creees / retirees / replacees, acces des operateurs.
      */
     @Override
     public void serverTick(ServerLevel level)
@@ -392,6 +457,7 @@ public final class SpaceConfiguratorModule extends HoloModule
         SpaceEnvironmentModule env = SpaceEnvironmentModule.of(level);
         updateCopy(env);
         pollCube();
+        detachWindow();
         pollHandle(env);
         pollOrbit(env);
         updateHandle();
@@ -416,8 +482,10 @@ public final class SpaceConfiguratorModule extends HoloModule
         if (settings == lastSettings) return;
         lastSettings = settings;
         int choice = settings != null ? forwardChoice(settings) : -1;
-        if (choice != forward) {
+        double warp = settings != null ? settings.warpSpeed() : SpaceMotionSettings.DEFAULT_WARP_SPEED;
+        if (choice != forward || warp != warpSpeed) {
             forward = choice;
+            warpSpeed = warp;
             markDirty();
         }
     }
@@ -449,6 +517,7 @@ public final class SpaceConfiguratorModule extends HoloModule
             headers = List.of();
             editedSystem = null;
             forward = -1;
+            warpSpeed = SpaceMotionSettings.DEFAULT_WARP_SPEED;
             lastSettings = null;
             return;
         }
@@ -460,16 +529,19 @@ public final class SpaceConfiguratorModule extends HoloModule
         for (SpaceSystem system : systems) list.add(system.header());
         headers = List.copyOf(list);
         if (selectedSystem != 0 && env.system(selectedSystem) == null) selectedSystem = 0;
+        // Origine retiree : retour au defaut (Sol, sinon le premier).
+        if (origin != 0 && env.system(origin) == null) origin = 0;
         if (selectedSystem == 0) mode = Mode.GALAXY;
         editedSystem = mode == Mode.SYSTEM ? env.system(selectedSystem) : null;
         if (editedSystem == null || editedSystem.body(selectedBody) == null) selectedBody = 0;
+        if (editedSystem == null || editedSystem.body(zoomBody) == null) zoomBody = 0;
         if (frameHalf <= 0.0) reframe();
     }
 
     /**
      * Sondage du cube : a chaque changement de son transform (edition d'un joueur, RESET), echelle uniformisee
-     * (moyenne des trois axes, C11) et fenetre replacee. Le transform modifie est envoye par le framework au tick
-     * suivant.
+     * (moyenne des trois axes, C11). Le transform modifie est envoye par le framework au tick suivant. La fenetre ne
+     * suit plus le cube (T24).
      */
     private void pollCube()
     {
@@ -477,9 +549,21 @@ public final class SpaceConfiguratorModule extends HoloModule
         if (cubeKnown && sameTransform(t, lastCube)) return;
         float mean = meanScale(t);
         if (!uniform(t, mean)) t.setScale(mean);
-        placeWindow(t);
         lastCube.set(t);
         cubeKnown = true;
+    }
+
+    /**
+     * Ancienne sauvegarde (d'avant T24) : la fenetre est replacee une fois devant la base du cube charge (apres
+     * {@link #pollCube}, echelle uniformisee), puis le module n'y touche plus ; la marque {@code detached} est ecrite a
+     * la prochaine sauvegarde.
+     */
+    private void detachWindow()
+    {
+        if (windowDetached) return;
+        windowDetached = true;
+        windowPlacement(cube.transform(), window.transform());
+        markDirty();
     }
 
     /** Acces de la fenetre : operateurs connectes ; reaffecte seulement si l'ensemble change. */
@@ -552,12 +636,31 @@ public final class SpaceConfiguratorModule extends HoloModule
                 if (system != null) report(player, env.removeBody(system.id(), id));
             }
             case ACTION_UPDATE_BODY -> updateBody(player, env, buf);
+            case ACTION_WARP_SPEED -> {
+                double value = buf.readDouble();
+                if (env != null) report(player, env.setWarpSpeed(value));
+                else player.displayClientMessage(NO_ENVIRONMENT, true);
+            }
+            case ACTION_ZOOM -> zoom(player, buf.readVarInt());
+            case ACTION_ORIGIN -> setOrigin(player, env, buf.readVarInt());
             default -> {
             }
         }
         // Effet visible des le prochain envoi : copie, axe avant et poignee a jour.
         updateCopy(env);
         updateHandle();
+    }
+
+    /** Origine des coordonnees : systeme {@code id} de l'Environment ({@code 0} = defaut). */
+    private void setOrigin(ServerPlayer player, SpaceEnvironmentModule env, int id)
+    {
+        if (id < 0 || id == origin) return;
+        if (id != 0 && (env == null || env.system(id) == null)) {
+            player.displayClientMessage(env == null ? NO_ENVIRONMENT : UNKNOWN_SYSTEM, true);
+            return;
+        }
+        origin = id;
+        markDirty();
     }
 
     /** « Ajouter » : systeme au nom par defaut, au centre du cadrage, puis selectionne. */
@@ -572,6 +675,7 @@ public final class SpaceConfiguratorModule extends HoloModule
         updateCopy(env);
         selectedSystem = result.id();
         selectedBody = 0;
+        zoomBody = 0;
         editedSystem = mode == Mode.SYSTEM ? env.system(selectedSystem) : null;
         markDirty();
     }
@@ -608,7 +712,26 @@ public final class SpaceConfiguratorModule extends HoloModule
         markDirty();
     }
 
-    /** « + Etoile », « + Planete », « + Lune » : corps aux valeurs par defaut du type, puis selectionne. */
+    /**
+     * Zoom sur le corps {@code id} du systeme edite ({@code 0} = systeme entier ; T25, D17). La poignee d'orbite est
+     * replacee (ou retiree) a l'echelle de la nouvelle vue par {@code updateHandle} a la fin de l'action.
+     */
+    private void zoom(ServerPlayer player, int id)
+    {
+        if (id < 0 || id == zoomBody) return;
+        if (mode != Mode.SYSTEM || editedSystem == null) {
+            player.displayClientMessage(NOT_SYSTEM_MODE, true);
+            return;
+        }
+        if (id != 0 && editedSystem.body(id) == null) {
+            player.displayClientMessage(UNKNOWN_BODY, true);
+            return;
+        }
+        zoomBody = id;
+        markDirty();
+    }
+
+    /** « +Etoile », « +Planete », « +Lune », « +Mineur » : corps aux valeurs par defaut du type, puis selectionne. */
     private void addBody(ServerPlayer player, SpaceEnvironmentModule env, SpaceBodyKind kind, int parent)
     {
         SpaceSystem system = systemForEdit(player, env);
@@ -694,6 +817,7 @@ public final class SpaceConfiguratorModule extends HoloModule
         }
         selectedSystem = id;
         selectedBody = 0;
+        zoomBody = 0;
         if (id == 0) mode = Mode.GALAXY;
         editedSystem = mode == Mode.SYSTEM ? env.system(id) : null;
         markDirty();
@@ -720,6 +844,7 @@ public final class SpaceConfiguratorModule extends HoloModule
         }
         mode = requested;
         selectedBody = 0;
+        zoomBody = 0;
         markDirty();
     }
 
@@ -768,18 +893,18 @@ public final class SpaceConfiguratorModule extends HoloModule
         return step * magnitude;
     }
 
-    // ---------------------------------------------------------------- placement de la fenetre (deux cotes)
+    // ---------------------------------------------------------------- placement initial de la fenetre (deux cotes)
 
     /**
-     * Pose la fenetre devant la base du cube : tournee comme lui en lacet seulement (sa face {@code +Z} regarde dans
-     * la direction avant du cube {@code f = (-sin yaw, 0, cos yaw)}), a {@value #WINDOW_GAP} bloc de l'enveloppe du
-     * cube dans cette direction, bord bas au niveau du point le plus bas du cube. Les demi-etendues de l'enveloppe
-     * tiennent compte de la rotation complete du cube (somme des projections de ses trois demi-axes) et de son
-     * echelle moyenne (meme resultat des deux cotes, que l'echelle soit deja uniformisee ou non).
+     * Placement de la fenetre devant la base du cube {@code t}, ecrit dans {@code dest} (translation et rotation ;
+     * echelle inchangee) : tournee comme le cube en lacet seulement (sa face {@code +Z} regarde dans la direction avant
+     * du cube {@code f = (-sin yaw, 0, cos yaw)}), a {@value #WINDOW_GAP} bloc de l'enveloppe du cube dans cette
+     * direction, bord bas au niveau du point le plus bas du cube. Les demi-etendues de l'enveloppe tiennent compte de
+     * la rotation complete du cube (somme des projections de ses trois demi-axes) et de son echelle moyenne. Utilise
+     * seulement pour le placement initial (cube par defaut) et une ancienne sauvegarde (T24).
      */
-    private void placeWindow(HoloTransform t)
+    private void windowPlacement(HoloTransform t, HoloTransform dest)
     {
-        if (window == null) return;
         HoloEditMath.rotation(rotation, t);
         float scale = meanScale(t) * SpaceMapCube.HALF_SIZE;
         float yaw = t.yaw() * Mth.DEG_TO_RAD;
@@ -796,14 +921,14 @@ public final class SpaceConfiguratorModule extends HoloModule
         vertical *= scale;
         front *= scale;
         float distance = front + WINDOW_GAP;
-        window.transform().setTranslation(t.x() + fx * distance,
-                t.y() - vertical + SpaceConfiguratorWindow.HALF_HEIGHT, t.z() + fz * distance);
-        window.transform().setRotation(t.yaw(), 0f, 0f);
+        dest.setTranslation(t.x() + fx * distance, t.y() - vertical + SpaceConfiguratorWindow.HALF_HEIGHT,
+                t.z() + fz * distance);
+        dest.setRotation(t.yaw(), 0f, 0f);
     }
 
     /**
-     * Client : temps de l'animation ; fenetre et poignees suivent le cube localement, y compris pendant une
-     * manipulation (rien n'est envoye).
+     * Client : temps de l'animation ; poignees replacees sur le cube localement, y compris pendant une manipulation
+     * (rien n'est envoye). La fenetre ne suit pas le cube (T24).
      */
     @Override
     public void clientTick()
@@ -812,7 +937,6 @@ public final class SpaceConfiguratorModule extends HoloModule
         if (cube == null) return;
         HoloTransform t = cube.transform();
         if (cubeKnown && sameTransform(t, lastCube)) return;
-        placeWindow(t);
         placeHandle();
         placeOrbit();
         lastCube.set(t);
@@ -902,12 +1026,19 @@ public final class SpaceConfiguratorModule extends HoloModule
 
     // ---------------------------------------------------------------- poignee d'orbite (deux cotes)
 
-    /** Corps selectionne s'il a une orbite et que le mode systeme l'affiche ; {@code null} sinon. */
+    /**
+     * Corps selectionne s'il a une orbite et que la vue du mode systeme la montre a l'echelle (sans zoom, ou parent
+     * dans le voisinage du corps zoome : {@link SpaceSystemScale#orbitInView}) et assez grande pour une poignee
+     * ({@link #MIN_HANDLE_AXIS}) ; {@code null} sinon.
+     */
     private SpaceBody orbitBody()
     {
         if (mode != Mode.SYSTEM || editedSystem == null || selectedBody == 0) return null;
         SpaceBody body = editedSystem.body(selectedBody);
-        return body != null && body.orbit() != null && !body.isRoot() ? body : null;
+        if (body == null || body.orbit() == null || body.isRoot()) return null;
+        ensureScale();
+        if (body.orbit().semiMinorAxis() / viewHalf * SpaceMapCube.HALF_SIZE < MIN_HANDLE_AXIS) return null;
+        return SpaceSystemScale.orbitInView(editedSystem, zoomIndex, editedSystem.indexOf(body.id())) ? body : null;
     }
 
     /** Cree ou retire la poignee d'orbite selon l'etat, puis la replace si son placement voulu a change. */
@@ -938,8 +1069,9 @@ public final class SpaceConfiguratorModule extends HoloModule
 
     /**
      * Placement voulu de la poignee d'orbite ({@code docs/space/04-mathematiques.md} par. 7) : translation = parent
-     * affiche a {@code t_edit} ({@code P = t + R . (sigma (.) q)}), rotation = {@code R_cube . R_orbite}, echelle
-     * {@code (a_aff . sigma, a_aff . sigma, b_aff . sigma)}. Faux sans corps a orbite selectionne.
+     * affiche a {@code t_edit} dans la vue courante ({@code P = t + R . (sigma (.) q)}), rotation =
+     * {@code R_cube . R_orbite}, echelle {@code (a_aff . sigma, a_aff . sigma, b_aff . sigma)} ({@code a_aff = a / H},
+     * {@code H} de la vue). Faux sans corps a orbite selectionne (ou hors du voisinage du zoom).
      */
     private boolean orbitTransform(HoloTransform dest)
     {
@@ -949,7 +1081,7 @@ public final class SpaceConfiguratorModule extends HoloModule
         SpaceSystem system = editedSystem;
         int parent = system.parentIndex(system.indexOf(body.id()));
         if (parent < 0) return false;
-        SpaceSystemScale.positions(system, editTime, systemHalf, magnifier, bodyPoints, bodyTmp);
+        SpaceSystemScale.positions(system, editTime, viewHalf, zoomIndex, bodyPoints);
         Vector3d q = bodyPoints[parent];
         HoloTransform t = cube.transform();
         point.set((float) q.x * t.scaleX(), (float) q.y * t.scaleY(), (float) q.z * t.scaleZ());
@@ -959,8 +1091,7 @@ public final class SpaceConfiguratorModule extends HoloModule
         orbitRotation.rotationYXZ(-(float) orbit.yaw() * Mth.DEG_TO_RAD, (float) orbit.pitch() * Mth.DEG_TO_RAD,
                 (float) orbit.roll() * Mth.DEG_TO_RAD);
         setRotationYXZ(dest, rotation.mul(orbitRotation));
-        double unit = SpaceSystemScale.factor(body, magnifier) / systemHalf * SpaceMapCube.HALF_SIZE
-                * meanScale(t);
+        double unit = SpaceMapCube.HALF_SIZE / viewHalf * meanScale(t);
         float scaleA = orbitScale(orbit.semiMajorAxis() * unit);
         dest.setScale(scaleA, scaleA, orbitScale(orbit.semiMinorAxis() * unit));
         return true;
@@ -999,8 +1130,7 @@ public final class SpaceConfiguratorModule extends HoloModule
             orbit = orbit.withOrientation(orbitScratch.yaw(), orbitScratch.pitch(), orbitScratch.roll());
         }
         if (shaped) {
-            double unit = SpaceSystemScale.factor(body, magnifier) / systemHalf * SpaceMapCube.HALF_SIZE
-                    * meanScale(cube.transform());
+            double unit = SpaceMapCube.HALF_SIZE / viewHalf * meanScale(cube.transform());
             double a = h.scaleX() / unit;
             double b = h.scaleZ() / unit;
             double e = 0.0;
@@ -1071,18 +1201,22 @@ public final class SpaceConfiguratorModule extends HoloModule
         return Math.abs(a - b) <= ORBIT_SCALE_EPSILON * Math.max(Math.abs(a), Math.abs(b));
     }
 
-    /** Echelle et loupe du systeme edite, recalculees seulement quand la copie change. */
+    /**
+     * Echelle de la vue du systeme edite (indice du corps zoome, demi-etendue), recalculee seulement quand la copie
+     * ou le zoom change.
+     */
     private void ensureScale()
     {
-        if (editedSystem == scaledSystem) return;
+        if (editedSystem == scaledSystem && zoomBody == scaledZoom) return;
         scaledSystem = editedSystem;
+        scaledZoom = zoomBody;
         if (editedSystem == null) {
-            systemHalf = 1.0;
-            magnifier = 1.0;
+            zoomIndex = -1;
+            viewHalf = 1.0;
             return;
         }
-        systemHalf = SpaceSystemScale.halfExtent(editedSystem);
-        magnifier = SpaceSystemScale.moonMagnifier(editedSystem, systemHalf);
+        zoomIndex = zoomBody == 0 ? -1 : editedSystem.indexOf(zoomBody);
+        viewHalf = SpaceSystemScale.viewHalf(editedSystem, zoomIndex);
     }
 
     private static float clampUnit(double value)
@@ -1177,6 +1311,15 @@ public final class SpaceConfiguratorModule extends HoloModule
      */
     void requestBodyNumber(int id, int field, double value) { sendUpdate(id, field, buf -> buf.writeDouble(value)); }
 
+    /** Client : vitesse de distorsion du saut, al/s (bornee par l'Environment). */
+    void requestWarpSpeed(double value) { sendTyped(ACTION_WARP_SPEED, buf -> buf.writeDouble(value)); }
+
+    /** Client : zoom sur le corps {@code id} du systeme edite ({@code 0} = systeme entier). */
+    void requestZoom(int id) { sendTyped(ACTION_ZOOM, buf -> buf.writeVarInt(id)); }
+
+    /** Client : « Definir comme origine » le systeme {@code id} ({@code 0} = defaut). */
+    void requestOrigin(int id) { sendTyped(ACTION_ORIGIN, buf -> buf.writeVarInt(id)); }
+
     private void sendUpdate(int id, int field, Consumer<FriendlyByteBuf> value)
     {
         sendTyped(ACTION_UPDATE_BODY, buf -> {
@@ -1194,6 +1337,8 @@ public final class SpaceConfiguratorModule extends HoloModule
     {
         animating = on && mode == Mode.SYSTEM;
         animationTicks = 0L;
+        // Coordonnees de la ligne d'information (temps affiche) remises a jour au basculement.
+        refresh();
     }
 
     private void sendTyped(int action, Consumer<FriendlyByteBuf> content)
@@ -1213,6 +1358,8 @@ public final class SpaceConfiguratorModule extends HoloModule
         buf.writeByte(mode.ordinal());
         buf.writeVarInt(selectedSystem);
         buf.writeVarInt(selectedBody);
+        buf.writeVarInt(zoomBody);
+        buf.writeVarInt(origin);
         buf.writeDouble(editTime);
         buf.writeDouble(frameX);
         buf.writeDouble(frameY);
@@ -1223,6 +1370,7 @@ public final class SpaceConfiguratorModule extends HoloModule
         buf.writeInt(copiedRevision);
         buf.writeVarInt(currentSystemId);
         buf.writeByte(forward);
+        buf.writeDouble(warpSpeed);
         SystemHeader.writeList(buf, headers);
         buf.writeBoolean(editedSystem != null);
         if (editedSystem != null) editedSystem.write(buf);
@@ -1236,6 +1384,8 @@ public final class SpaceConfiguratorModule extends HoloModule
         Mode newMode = ordinal >= 0 && ordinal < Mode.values().length ? Mode.values()[ordinal] : Mode.GALAXY;
         int newSystem = Math.max(0, buf.readVarInt());
         int newBody = Math.max(0, buf.readVarInt());
+        int newZoom = Math.max(0, buf.readVarInt());
+        int newOrigin = Math.max(0, buf.readVarInt());
         double newEditTime = buf.readDouble();
         double x = buf.readDouble();
         double y = buf.readDouble();
@@ -1245,6 +1395,7 @@ public final class SpaceConfiguratorModule extends HoloModule
         int revision = 0;
         int current = 0;
         int newForward = -1;
+        double newWarp = SpaceMotionSettings.DEFAULT_WARP_SPEED;
         List<SystemHeader> newHeaders = List.of();
         SpaceSystem edited = null;
         if (newEnvironment) {
@@ -1252,12 +1403,16 @@ public final class SpaceConfiguratorModule extends HoloModule
             current = buf.readVarInt();
             newForward = buf.readByte();
             if (newForward < -1 || newForward >= FORWARD_YAW.length) newForward = -1;
+            double warp = buf.readDouble();
+            if (Double.isFinite(warp)) newWarp = SpaceLimits.sanitizeWarpSpeed(warp);
             newHeaders = SystemHeader.readList(buf);
             if (buf.readBoolean()) edited = SpaceSystem.read(buf);
         }
         mode = newMode;
         selectedSystem = newSystem;
         selectedBody = newBody;
+        zoomBody = newZoom;
+        origin = newOrigin;
         editTime = Double.isFinite(newEditTime) ? newEditTime : 0.0;
         if (validFrame(x, y, z, half)) {
             frameX = x;
@@ -1272,6 +1427,7 @@ public final class SpaceConfiguratorModule extends HoloModule
         copiedRevision = revision;
         currentSystemId = current;
         forward = newForward;
+        warpSpeed = newWarp;
         headers = newHeaders;
         editedSystem = edited;
     }
@@ -1327,18 +1483,30 @@ public final class SpaceConfiguratorModule extends HoloModule
         return editTime + (animationTicks + partialTick) * scale / SpaceUnits.SECONDS_PER_DAY;
     }
 
-    /** Demi-etendue {@code H_sys} du systeme edite, UA ({@link SpaceSystemScale}) ; {@code 1} sans systeme. */
-    public double systemHalf()
+    /**
+     * Demi-etendue de la vue du mode systeme, UA ({@link SpaceSystemScale}) : {@code H_sys} du systeme entier, ou
+     * {@code H_zoom} du corps zoome ; {@code 1} sans systeme.
+     */
+    public double viewHalf()
     {
         ensureScale();
-        return systemHalf;
+        return viewHalf;
     }
 
-    /** Loupe des lunes du systeme edite ({@link SpaceSystemScale}) ; {@code 1} sans systeme. */
-    public double moonMagnifier()
+    /** Indice du corps zoome dans le systeme edite (copie), {@code -1} = systeme entier ou pas de systeme. */
+    public int zoomIndex()
     {
         ensureScale();
-        return magnifier;
+        return zoomIndex;
+    }
+
+    /** Id du corps zoome (mode systeme, T25), {@code 0} = systeme entier. */
+    public int zoomBody() { return zoomBody; }
+
+    /** Corps zoome dans le systeme edite (copie), {@code null} sans zoom. Sans allocation. */
+    public SpaceBody zoomBodyData()
+    {
+        return editedSystem == null || zoomBody == 0 ? null : editedSystem.body(zoomBody);
     }
 
     /** Corps selectionne dans le systeme edite (copie), {@code null} si aucun. Sans allocation. */
@@ -1347,8 +1515,20 @@ public final class SpaceConfiguratorModule extends HoloModule
         return editedSystem == null || selectedBody == 0 ? null : editedSystem.body(selectedBody);
     }
 
+    /** Id de l'origine des coordonnees choisie (T26), {@code 0} = defaut ; voir {@link #originHeader()}. */
+    public int origin() { return origin; }
+
+    /**
+     * Systeme origine effectif des coordonnees galactiques (copie) : le choisi, sinon {@code Sol}, sinon le premier
+     * ({@link SpaceCoordinates#origin}) ; {@code null} sans systeme. Sans allocation.
+     */
+    public SystemHeader originHeader() { return SpaceCoordinates.origin(headers, origin); }
+
     /** Choix courant de l'axe avant du monde (indice de {@link #FORWARD_YAW}), {@code -1} = autre ou inconnu. */
     public int forwardChoice() { return forward; }
+
+    /** Vitesse de distorsion du saut de l'Environment (copie), al/s ; defaut sans Environment. */
+    public double warpSpeed() { return warpSpeed; }
 
     /**
      * Vrai si le systeme selectionne est hors du cadrage (la poignee est alors bornee au bord du cube). Sans

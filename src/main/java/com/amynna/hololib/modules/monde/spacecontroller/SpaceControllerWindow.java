@@ -12,10 +12,9 @@ import com.amynna.hololib.holo.widget.HoloLabel;
 import com.amynna.hololib.holo.widget.control.HoloWidgetSwitch;
 import com.amynna.hololib.holo.window.HoloWindow;
 import com.amynna.hololib.modules.camera.config.ConfigWindow;
-import com.amynna.hololib.modules.dimension.space.math.SpaceUnits;
+import com.amynna.hololib.modules.dimension.space.SpaceFormat;
 import net.minecraft.network.chat.Component;
 
-import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -26,10 +25,12 @@ import java.util.function.Consumer;
  * interceptes sur toute la fenetre. Editable par les operateurs (translation, rotation, echelle ; pas besoin d'etre le
  * createur du module) pour la placer.
  * <p>
- * Contenu : titre, etat (« Libre », « Pilote par X », « Aucun Space Environment dans cette dimension »), vitesse
+ * Contenu : titre, etat (« Libre », « Pilote par X », « Aucun Space Environment dans cette dimension » ; pendant un
+ * saut, T22 : « Saut vers X » puis « Distorsion : n s », {@link #showJump}), vitesse
  * (relative au referentiel), corps de reference (« Referentiel : X ») et altitude au-dessus de lui, interrupteur « Pilotage : tous / ops » (non predictif : il affiche l'etat recu ;
  * seul un operateur peut le changer, verifie par le serveur), zone {@link SpacePilotPad}. Les textes sont reconstruits
- * a chaque synchronisation ({@link #showState}), jamais par frame.
+ * a chaque synchronisation ({@link #showState}), jamais par frame ; formats communs {@link SpaceFormat} (aussi utilises
+ * par le HUD de navigation de Space Pilot).
  */
 public final class SpaceControllerWindow extends HoloWindow implements HoloEditTranslation, HoloEditRotation,
         HoloEditScale
@@ -45,10 +46,9 @@ public final class SpaceControllerWindow extends HoloWindow implements HoloEditT
     private static final int FREE = 0xFF80FF80;
     private static final int BUSY = 0xFFFFC040;
     private static final int MISSING = 0xFFFF8060;
-    /** Au-dela (km/s), la vitesse est affichee en UA/s. */
-    private static final double SPEED_AU_THRESHOLD = 0.01 * SpaceUnits.AU_KM;
-    /** Au-dela (km), l'altitude est affichee en UA. */
-    private static final double DISTANCE_AU_THRESHOLD = 0.01 * SpaceUnits.AU_KM;
+    /** Etat du saut : charge (couleur de selection des modules Space), voyage (blanc bleute). */
+    private static final int JUMP_CHARGE = 0xFFFFE040;
+    private static final int JUMP_TRAVEL = 0xFFE0F8FF;
     private static final Component ACCESS_ALL = Component.literal("Pilotage : tous");
     private static final Component ACCESS_OPS = Component.literal("Pilotage : ops");
 
@@ -58,6 +58,12 @@ public final class SpaceControllerWindow extends HoloWindow implements HoloEditT
     private final HoloLabel altitudeLine;
     private final HoloWidgetSwitch accessSwitch;
     private final SpacePilotPad pad;
+    /** Etat normal de la ligne d'etat (dernier {@link #showState}), remis a la fin d'un saut. */
+    private Component stateText = Component.empty();
+    private int stateColor = TEXT;
+    /** Texte du saut en cours qui remplace l'etat normal, ou {@code null}. */
+    private Component jumpText;
+    private int jumpColor;
 
     /**
      * @param link             envois du pilotage (module)
@@ -114,56 +120,52 @@ public final class SpaceControllerWindow extends HoloWindow implements HoloEditT
         accessSwitch.setLabel(opsOnly ? ACCESS_OPS : ACCESS_ALL);
         pad.syncState(environment, pilot, here, opsOnly);
         if (!environment) {
-            state.setText(Component.literal("Aucun Space Environment")).setColor(MISSING);
+            setState(Component.literal("Aucun Space Environment"), MISSING);
             speedLine.setText(Component.literal("dans cette dimension")).setColor(MISSING);
             bodyLine.setText(Component.empty());
             altitudeLine.setText(Component.empty());
             return;
         }
         if (pilot == null) {
-            state.setText(Component.literal("Libre")).setColor(FREE);
+            setState(Component.literal("Libre"), FREE);
         } else {
-            state.setText(Component.literal("Pilote par " + pilotName)).setColor(BUSY);
+            setState(Component.literal("Pilote par " + pilotName), BUSY);
         }
-        speedLine.setText(Component.literal("Vitesse : " + speedText(speed))).setColor(TEXT);
+        speedLine.setText(Component.literal("Vitesse : " + SpaceFormat.speed(speed))).setColor(TEXT);
         if (body.isEmpty()) {
             bodyLine.setText(Component.literal("Aucun referentiel"));
             altitudeLine.setText(Component.empty());
         } else {
             bodyLine.setText(Component.literal("Referentiel : " + body));
-            altitudeLine.setText(Component.literal("Altitude : " + distanceText(altitude)));
+            altitudeLine.setText(Component.literal("Altitude : " + SpaceFormat.distance(altitude)));
         }
     }
 
-    // ---------------------------------------------------------------- formats
-
     /**
-     * Vitesse signee (km par tick) en km/s, ou en UA/s au-dela de 0,01 UA/s en valeur absolue ; une vitesse negative
-     * (marche arriere) garde son signe ({@code -12,3 km/s}).
+     * Client (T22) : etat du saut qui remplace la ligne d'etat ({@code text} : « Saut vers X » pendant la charge,
+     * « Distorsion : n s » pendant le voyage), ou {@code null} pour revenir a l'etat normal. Appele par le module
+     * seulement quand le texte change.
+     *
+     * @param travel vrai pendant le voyage (couleur du voyage), faux pendant la charge
      */
-    static String speedText(double kmPerTick)
+    void showJump(Component text, boolean travel)
     {
-        double kms = kmPerTick * SpaceUnits.TICKS_PER_SECOND;
-        if (Math.abs(kms) >= SPEED_AU_THRESHOLD) return number(SpaceUnits.kmToAu(kms)) + " UA/s";
-        return number(kms) + " km/s";
+        jumpText = text;
+        jumpColor = travel ? JUMP_TRAVEL : JUMP_CHARGE;
+        refreshState();
     }
 
-    /** Distance (km) en km, ou en UA au-dela de 0,01 UA. */
-    static String distanceText(double km)
+    /** Etat normal (synchronise), affiche sauf pendant un saut. */
+    private void setState(Component text, int color)
     {
-        if (!Double.isFinite(km)) return "-";
-        if (Math.abs(km) >= DISTANCE_AU_THRESHOLD) return number(SpaceUnits.kmToAu(km)) + " UA";
-        return number(km) + " km";
+        stateText = text;
+        stateColor = color;
+        refreshState();
     }
 
-    /** Nombre a trois chiffres significatifs (a la francaise : virgule decimale, milliers separes par une espace). */
-    static String number(double value)
+    private void refreshState()
     {
-        if (!Double.isFinite(value)) return "-";
-        double magnitude = Math.abs(value);
-        if (magnitude < 1e-6) return "0";
-        if (magnitude >= 1000.0) return String.format(Locale.ROOT, "%,.0f", value).replace(',', ' ');
-        int decimals = Math.min(6, Math.max(0, 2 - (int) Math.floor(Math.log10(magnitude))));
-        return String.format(Locale.ROOT, "%." + decimals + "f", value).replace('.', ',');
+        if (jumpText != null) state.setText(jumpText).setColor(jumpColor);
+        else state.setText(stateText).setColor(stateColor);
     }
 }

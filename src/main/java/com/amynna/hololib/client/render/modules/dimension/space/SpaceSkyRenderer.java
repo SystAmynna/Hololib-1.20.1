@@ -31,8 +31,9 @@ import java.util.List;
 
 /**
  * Ciel du module {@code hololib:space_environment} : remplace visuellement le ciel vanilla par le systeme courant vu
- * depuis la pose du monde ({@code docs/space/04-mathematiques.md} par. 2 a 4). Dessine seulement si le miroir de
- * dimension contient un Environment synchronise ; sinon le ciel vanilla reste intact.
+ * depuis la pose du monde ({@code docs/space/04-mathematiques.md} par. 2 a 4). Dessine des que le miroir de
+ * dimension contient un Environment ; sans Environment, le ciel vanilla reste intact. Tant que l'Environment n'est pas
+ * synchronise (bloc froid de la revision annoncee pas encore recu, T15b), seul le fond est dessine.
  * <p>
  * Ordre de dessin (profondeur de la passe du ciel, chaque objet plus proche que le precedent) :
  * <ol>
@@ -46,11 +47,16 @@ import java.util.List;
  * de dessin (calotte d'angle egal a son rayon angulaire apparent, jusqu'a 90 degres : au plancher d'altitude, une
  * planete est une demi-sphere de ciel bordee par un horizon) plutot que sur un plan. Le long d'un rayon de vue, la
  * profondeur est alors celle du rayon de dessin : l'occultation entre corps reste exacte quelle que soit leur taille,
- * et aucun sommet ne depasse le plan lointain. Les planetes et lunes recoivent la normale <b>exacte</b> de la sphere
- * qu'elles representent au point vise par chaque sommet, perspective comprise (phases ; de pres on ne voit qu'une
- * calotte du corps, dont les normales restent proches de la verticale), eclairee par l'etoile la plus proche ; les
+ * et aucun sommet ne depasse le plan lointain. Les corps qui ne sont pas des etoiles (planetes, lunes, objets mineurs
+ * depuis T16 : dessines a l'identique) recoivent la normale <b>exacte</b> de la sphere qu'ils representent au point
+ * vise par chaque sommet, perspective comprise (phases ; de pres on ne voit qu'une calotte du corps, dont les
+ * normales restent proches de la verticale), eclaires par l'etoile la plus proche ; les
  * etoiles sont en pleine lumiere, avec un halo translucide. Sous {@link #MIN_ANGULAR_RADIUS}, un corps devient un
  * point de taille fixe dont l'eclat decroit.
+ * <p>
+ * <b>Distorsion du saut</b> (T23, provisoire) : dessinee par {@link SpaceWarpEffect} par-dessus le ciel, dans la meme
+ * passe ; a pleine intensite (voyage), fond, etoiles et corps ne sont plus dessines ; le brouillard vire au blanc
+ * bleute selon la meme intensite (hors fluides).
  * <p>
  * <b>Niveaux de detail</b> (D9) : quatre maillages polaires precalcules, de 24 x 6 a 192 x 48 (secteurs x anneaux),
  * choisis par corps selon son rayon apparent a l'ecran ({@code tan alpha} fois l'echelle verticale de la projection :
@@ -189,6 +195,8 @@ public final class SpaceSkyRenderer implements SkyRenderer
 
     /** Environment trouve par {@link #shouldRender}, utilise par {@link #render} de la meme frame. */
     private SpaceEnvironmentModule environment;
+    /** Distorsion du saut (T23, provisoire) : seule responsable de l'effet. */
+    private final SpaceWarpEffect warp = new SpaceWarpEffect();
     private final SpacePose pose = new SpacePose();
     private final SpaceSkyFrame frame = new SpaceSkyFrame();
     private final Vector3d[] positions = SpaceOrbits.newPositionArray();
@@ -241,37 +249,52 @@ public final class SpaceSkyRenderer implements SkyRenderer
     @Override
     public boolean shouldRender(SkyRenderContext ctx)
     {
-        SpaceEnvironmentModule env = find();
-        environment = env != null && env.synced() && env.currentSystem() != null ? env : null;
+        environment = find();
         return environment != null;
     }
 
+    /**
+     * Fond, puis, si l'Environment est synchronise (bloc froid connu), etoiles de fond et corps ; enfin la distorsion
+     * du saut ({@link SpaceWarpEffect}) par-dessus, qui remplace tout le reste a pleine intensite.
+     */
     @Override
     public void render(PoseStack stack, MultiBufferSource buffers, SkyRenderContext ctx)
     {
         SpaceEnvironmentModule env = environment;
         environment = null;
         if (env == null) return;
-        SpaceSystem system = env.currentSystem();
-        if (system == null) return;
-        float partialTick = ctx.partialTick();
-        frame.set(env.pose(partialTick, pose));
         Matrix4f m = stack.last().pose();
+        float partialTick = ctx.partialTick();
         float scale = Math.min(1f, ctx.farPlane() * FAR_PLANE_MARGIN / BACKGROUND_RADIUS);
+        float warpStrength = SpaceWarpEffect.strength(env, partialTick);
+        if (warpStrength < 1f) drawSky(buffers, m, env, partialTick, scale);
+        if (warpStrength > 0f) warp.render(buffers, m, env, partialTick, warpStrength, scale);
+    }
+
+    /** Ciel du systeme courant : fond, puis etoiles de fond et corps si le bloc froid est connu. */
+    private void drawSky(MultiBufferSource buffers, Matrix4f m, SpaceEnvironmentModule env, float partialTick,
+                         float scale)
+    {
+        drawBackground(buffers, m, BACKGROUND_RADIUS * scale);
+        SpaceSystem system = env.synced() ? env.currentSystem() : null;
+        if (system == null) return;
+        frame.set(env.pose(partialTick, pose));
         double m11 = Math.abs(RenderSystem.getProjectionMatrix().m11());
         projectionScale = Double.isFinite(m11) && m11 > 0.0 ? m11 : DEFAULT_PROJECTION_SCALE;
 
-        drawBackground(buffers, m, BACKGROUND_RADIUS * scale);
         drawBackgroundStars(buffers, m, env.backgroundStars(), system, STAR_FIELD_RADIUS * scale);
         drawBodies(buffers, m, system, env.bodyPositions(partialTick, positions), scale);
     }
 
+    /** Couleur spatiale quasi noire hors fluides, melangee vers le blanc pendant la distorsion du saut. */
     @Override
     public void fogColor(Camera camera, float partialTick, Vector3f rgb)
     {
         if (camera.getFluidInCamera() != FogType.NONE) return;
-        if (find() == null) return;
+        SpaceEnvironmentModule env = find();
+        if (env == null) return;
         rgb.set(FOG_RED, FOG_GREEN, FOG_BLUE);
+        SpaceWarpEffect.fogColor(SpaceWarpEffect.strength(env, partialTick), rgb);
     }
 
     /** Environment du miroir de dimension du joueur local, ou {@code null}. */
@@ -336,7 +359,7 @@ public final class SpaceSkyRenderer implements SkyRenderer
     {
         List<SpaceBody> bodies = system.bodies();
         count = Math.min(count, bodies.size());
-        // Directions et distances, puis tri du plus lointain au plus proche (insertion : au plus 32 corps).
+        // Directions et distances, puis tri du plus lointain au plus proche (insertion : au plus MAX_BODIES, 48 corps).
         int visible = 0;
         for (int i = 0; i < count; i++) {
             double d = frame.direction(positions[i], directions[i]);
@@ -441,8 +464,9 @@ public final class SpaceSkyRenderer implements SkyRenderer
     }
 
     /**
-     * Planete ou lune : eclairee par l'etoile la plus proche (l'etoile principale hors binaire). Disque a phases, ou
-     * point dont la couleur suit la fraction eclairee visible et dont l'eclat decroit avec la taille apparente.
+     * Planete, lune ou objet mineur : eclaire par l'etoile la plus proche (l'etoile principale hors binaire). Disque a
+     * phases, ou point dont la couleur suit la fraction eclairee visible et dont l'eclat decroit avec la taille
+     * apparente.
      */
     private void drawLitBody(MultiBufferSource buffers, Matrix4f m, List<SpaceBody> bodies, int count, int index,
                              Vector3f w, float radius, double alpha, int color)

@@ -64,7 +64,6 @@ public final class SpaceOrbitHandleRenderer implements HoloObjectRenderer<SpaceO
     private final Vector3f offset = new Vector3f();
     private final Vector3d[] frozen = SpaceOrbits.newPositionArray();
     private final Vector3d[] animated = SpaceOrbits.newPositionArray();
-    private final Vector3d work = new Vector3d();
     /** Sommet transforme : {@code VertexConsumer.vertex(Matrix4f, ...)} alloue un vecteur par sommet. */
     private final Vector3f transformed = new Vector3f();
 
@@ -123,7 +122,8 @@ public final class SpaceOrbitHandleRenderer implements HoloObjectRenderer<SpaceO
 
     /**
      * {@link #offset} : deplacement affiche du parent entre {@code t_edit} et le temps anime, dans le repere tourne de
-     * la poignee (blocs) ; nul hors animation ou pour un parent immobile (centre du systeme).
+     * la poignee (blocs), dans la vue courante (systeme entier ou zoom) ; nul hors animation, pour un parent immobile
+     * (centre du systeme) ou pour le corps zoome lui-meme (centre de la vue).
      */
     private void animationOffset(SpaceOrbitHandle handle, HoloTransform t, float partialTick)
     {
@@ -135,10 +135,11 @@ public final class SpaceOrbitHandleRenderer implements HoloObjectRenderer<SpaceO
         if (system == null || body == null || body.orbit() == null) return;
         int parent = system.parentIndex(system.indexOf(body.id()));
         if (parent < 0 || system.parentIndex(parent) < 0) return;
-        double half = module.systemHalf();
-        double magnifier = module.moonMagnifier();
-        SpaceSystemScale.positions(system, module.editTime(), half, magnifier, frozen, work);
-        SpaceSystemScale.positions(system, module.displayDays(partialTick), half, magnifier, animated, work);
+        // Vue courante (systeme entier ou zoom, T25) : chaque position est relative au corps zoome a son propre temps.
+        double half = module.viewHalf();
+        int zoom = module.zoomIndex();
+        SpaceSystemScale.positions(system, module.editTime(), half, zoom, frozen);
+        SpaceSystemScale.positions(system, module.displayDays(partialTick), half, zoom, animated);
         // Positions en unites du cube (demi-arete comprise) : echelle du cube seulement.
         HoloTransform cube = module.cube().transform();
         offset.set((float) (animated[parent].x - frozen[parent].x) * cube.scaleX(),

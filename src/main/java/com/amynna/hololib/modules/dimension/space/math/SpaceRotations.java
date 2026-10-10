@@ -67,8 +67,7 @@ final class SpaceRotations
     }
 
     /** Rotation d'un vecteur par le quaternion unitaire {@code (qx, qy, qz, qw)} : {@code v + w t + u x t}, {@code t = 2 u x v}. */
-    private static Vector3d rotate(double qx, double qy, double qz, double qw, double x, double y, double z,
-                                   Vector3d dest)
+    static Vector3d rotate(double qx, double qy, double qz, double qw, double x, double y, double z, Vector3d dest)
     {
         double tx = 2.0 * (qy * z - qz * y);
         double ty = 2.0 * (qz * x - qx * z);
