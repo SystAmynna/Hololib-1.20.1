@@ -6,6 +6,7 @@ import com.amynna.hololib.client.render.modules.camera.spaceknowledge.SpaceKnowl
 import com.amynna.hololib.client.render.modules.camera.spacepilot.SpacePilotRenderers;
 import com.amynna.hololib.client.render.modules.dimension.planet1.Planet1Renderers;
 import com.amynna.hololib.client.render.modules.dimension.space.SpaceRenderers;
+import com.amynna.hololib.client.render.modules.monde.areadisplayer.AreaDisplayerRenderers;
 import com.amynna.hololib.client.render.modules.monde.spaceconfigurator.SpaceConfiguratorRenderers;
 import com.amynna.hololib.client.render.modules.monde.spacemap.SpaceMapRenderers;
 import net.minecraftforge.api.distmarker.Dist;
@@ -30,6 +31,7 @@ public final class ModuleRenderers
             SpacePilotRenderers.register();
             SpaceMapRenderers.register();
             SpaceConfiguratorRenderers.register();
+            AreaDisplayerRenderers.register();
         });
     }
 }

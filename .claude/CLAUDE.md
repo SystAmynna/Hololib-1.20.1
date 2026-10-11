@@ -66,6 +66,10 @@ com.amynna.hololib
 │   ├── camera/spacepilot/       Space Pilot (joueur) : reglages (Config), cercles du joystick (SpaceJoystickForward /
 │   │                            Aim), HUD de navigation et vitesse de croisiere (SpacePilotHud)
 │   ├── camera/spaceknowledge/   Space Knowledge (joueur) : reglages de la surcouche du ciel (Config, Quick Action)
+│   ├── monde/areadisplayer/     Area Displayer (marker, tous) : pave du terrain d'une zone A-B (AreaDisplayerCube),
+│   │                            AreaGrid (voxels, pas adaptatif), AreaScanner (scan serveur etale), AreaFeed (abonnes) ;
+│   │                            terrain/ : canal dedie hololib:area_terrain (AreaTerrainNetwork, AreaTerrainPackets)
+│   ├── monde/areaconfigurator/  Area Displayer Configurator (marker, ops) : fenetre des reglages du Displayer du marker
 │   ├── dimension/skycancel/     Sky Cancel (dimension) ; camera/crosshaircancel/ : Crosshair Cancel (joueur) : demos
 │   │                            du RenderCanceler
 │   └── camera/focus|editor|config|quickaction/ modules joueur : mode focus (H) ; editeurs (G)
@@ -84,7 +88,9 @@ com.amynna.hololib
     ├── modules/dimension|monde/ backends client des modules Space (SpaceEnvironmentClient, SpaceControllerClient,
     │                            SpaceConfiguratorClient : miroir de dimension, joueur local, op local, Space Pilot local) ;
     │                            SpaceSoundController (sons du vaisseau), SpaceTextureClient (canal des textures),
-    │                            SpaceTextureImport (selecteur de fichier, preparation de l'image importee)
+    │                            SpaceTextureImport (selecteur de fichier, preparation de l'image importee) ;
+    │                            areadisplayer/ : AreaTerrainClient (canal du terrain, vues, remaillage), AreaView,
+    │                            AreaMesher (maillage glouton) ; areaconfigurator/ : backend (op local)
     └── render/                  TOUS les renderers du mod (regle d'architecture)
         ├── package-info.java    doc detaillee : ordre de rendu, regles (source de verite)
         ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
@@ -107,7 +113,8 @@ com.amynna.hololib
         │                        WORLD : SpaceJumpRenderer cible et roue du saut, SpaceTargetRenderer x2 fleche /
         │                        anneau de la cible, SpaceReferenceLinkRenderer lien et anneau du referentiel),
         │                        monde/spacemap (SpaceMapCubeRenderer), monde/spaceconfigurator (SpaceHandleRenderer,
-        │                        SpaceOrbitHandleRenderer, SpaceConfiguratorWindowRenderer : fenetre + apercu)
+        │                        SpaceOrbitHandleRenderer, SpaceConfiguratorWindowRenderer : fenetre + apercu),
+        │                        monde/areadisplayer (AreaDisplayerCubeRenderer : terrain, points, trainees, noms)
         ├── holo/                ponts objets -> familles (HoloRouting, 4 bridges + HoloFocusBridge : fenetre
         │                        d'outils visee au-dessus de tout), HoloObjectRenderer(s), fenetres,
         │                        HoloPicking (objet sous le reticule ; pas un renderer, partage les placements),
@@ -377,6 +384,39 @@ ou synthetises) : toute ressource ajoutee y est creditee.
   (dead reckoning) ; horloge d'affichage propre (jamais le `gameTime` vanilla), historique de 32 ticks interpole dans
   le repere du referentiel, observateur en leger retard, pilote local predit (reconciliation 10 % / tick). Les
   renderers lisent `pose(partialTick)`, `bodyPositions`, `displayDays`.
+
+### Modules Area (`modules/monde/areadisplayer`, `modules/monde/areaconfigurator`)
+
+- `hololib:area_displayer` (marker, **tous**) : pave `World` (`AreaDisplayerCube`, editable par les ops, echelle
+  uniforme, proportions = grille de la zone) qui montre en **monochrome cyan** le terrain entre les coins A et B, les
+  joueurs (points verts) et les entites vivantes hors porte-armures (hostiles rouges, autres jaunes), leurs
+  **trainees** (5 s) et le nom du point le plus proche du regard (cone de 1,5 degre, famille `WORLD`). Etat
+  (coins, options cadre / Auto Update / joueurs / trainees / entites / trainees, intervalle, generation, avancement)
+  sauvegarde et synchronise ; API serveur publique (`setCorner`, `setFlag`, `setInterval`, `refresh`) reservee au
+  Configurator ; aucune action propre.
+- **Taille de zone illimitee, resolution reglable** : `AreaGrid` ; Auto = pas (blocs par voxel) le plus fin sous
+  `128^3` voxels ; palier choisi (`LEVELS` 1:1 bloc par bloc, 1:2 ... 1:32) releve au premier palier qui tient sous
+  `256^3` voxels (`raised()`, affiche « 1:1 -> 1:4 »). Changer de resolution = nouvelle grille, scan complet.
+  Sections de `16^3` voxels (2 bits : vide / solide / fluide). Voxel solide si un quart de ses echantillons (au plus 4 par
+  axe, 2 au-dela de 32 blocs) `blocksMotion`.
+- **Scan** (`AreaScanner`, serveur, 3 ms par tick) par colonnes de sections : passage complet a la definition de la
+  zone et sur « Actualiser » (chunk non charge : existence lue sur le disque, jamais genere, puis ticket temporaire
+  `hololib_area`) ; **Auto Update = rescan periodique** (10 s a 10 min, defaut 60 s) des **seuls chunks charges**,
+  jamais en temps reel (aucune ecoute des blocs : demande de l'utilisatrice, ressources). Sans Auto Update, terrain
+  fige jusqu'a « Actualiser », meme apres redemarrage (voxels deflates dans l'etat sauvegarde du module).
+- **Canal dedie** `hololib:area_terrain` (protocole "2" : `Header` porte la resolution demandee, exception validee comme D27 ; `HoloNetwork` inchange) : le
+  miroir client s'abonne a sa creation (backend) ; le serveur (`AreaFeed`) n'accepte que les joueurs qui suivent le
+  chunk du marker (reverifie toutes les 20 ticks) : `Header` (grille), sections changees deflatees (64 Kio / tick /
+  abonne), positions suivies toutes les 2 ticks (256 au plus, nom envoye une fois). Client : `AreaTerrainClient`
+  (remaillage glouton de 32 sections / tick, interpolation des positions), dessin `AreaDisplayerCubeRenderer`
+  (`RenderType` local : terrain translucide sans tri, faces arriere eliminees ; trainees sans ecriture de
+  profondeur).
+- `hololib:area_displayer_configurator` (marker, **ops** : `shown()` + `hasPermissions(2)` verifie en premier) :
+  fenetre branchee sur l'Area Displayer **du meme marker** (`AreaDisplayerModule.of` ; sans lui : « Area Displayer
+  requis sur ce marker ») : coins A / B (X Y Z en brouillons par axe, envoyes quand les trois ont une valeur ; « Ici »
+  = bloc du joueur), interrupteurs, resolution a paliers (clic gauche / droit), intervalle, « Actualiser » ; actions
+  0-5 relayees a l'API du Displayer ; fenetre relue quand `revision()` du Displayer change ; `HEIGHT` calcule depuis
+  la derniere ligne (un widget qui deborde n'est vise que sur sa partie interieure).
 
 ### RenderCanceler (`holo/render`, `client/render/cancel`)
 
