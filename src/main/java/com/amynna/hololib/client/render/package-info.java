@@ -81,6 +81,10 @@
  *     {@code RenderType}, et Minecraft 1.21.5+ remplace OpenGL direct par {@code GpuDevice}. Le gain de performance
  *     vient du regroupement par {@code RenderType}, du culling et de {@code VertexBuffer} pour la geometrie statique.</li>
  *     <li>Pas d'allocation par frame dans les chemins de rendu ; tout etat GL modifie est restaure.</li>
+ *     <li>Annuler un element du rendu vanilla (ciel, nuages, meteo, main, reticule, bloc
+ *     d'inventaire du HUD) : {@code HoloRenderCanceler}
+ *     depuis un module, jamais un abonnement propre ; implementation dans
+ *     {@link com.amynna.hololib.client.render.cancel}.</li>
  * </ul>
  */
 package com.amynna.hololib.client.render;

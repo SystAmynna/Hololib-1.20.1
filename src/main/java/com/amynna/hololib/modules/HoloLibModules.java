@@ -5,6 +5,7 @@ import com.amynna.hololib.holo.module.HoloModuleTarget;
 import com.amynna.hololib.holo.module.HoloModuleType;
 import com.amynna.hololib.holo.module.HoloModuleTypes;
 import com.amynna.hololib.modules.camera.config.ConfigModule;
+import com.amynna.hololib.modules.camera.crosshaircancel.CrosshairCancelModule;
 import com.amynna.hololib.modules.camera.editor.DimensionEditorModule;
 import com.amynna.hololib.modules.camera.editor.EditorPanelModule;
 import com.amynna.hololib.modules.camera.editor.OtherEditorModule;
@@ -17,6 +18,7 @@ import com.amynna.hololib.modules.camera.quickaction.QuickActionModule;
 import com.amynna.hololib.modules.camera.spaceknowledge.SpaceKnowledgeModule;
 import com.amynna.hololib.modules.camera.spacepilot.SpacePilotModule;
 import com.amynna.hololib.modules.dimension.planet1.Planet1Module;
+import com.amynna.hololib.modules.dimension.skycancel.SkyCancelModule;
 import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
 import com.amynna.hololib.modules.monde.spaceconfigurator.SpaceConfiguratorModule;
 import com.amynna.hololib.modules.monde.spacecontroller.SpaceControllerModule;
@@ -65,6 +67,10 @@ public final class HoloLibModules
             "config", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, ConfigModule::new));
     public static final RegistryObject<HoloModuleType<QuickActionModule>> QUICK_ACTION = REGISTER.register(
             "quick_action", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, QuickActionModule::new));
+    public static final RegistryObject<HoloModuleType<SkyCancelModule>> SKY_CANCEL = REGISTER.register(
+            "sky_cancel", () -> new HoloModuleType<>(HoloModuleTarget.DIMENSION, SkyCancelModule::new));
+    public static final RegistryObject<HoloModuleType<CrosshairCancelModule>> CROSSHAIR_CANCEL = REGISTER.register(
+            "crosshair_cancel", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, CrosshairCancelModule::new));
 
     private HoloLibModules() {}
 }

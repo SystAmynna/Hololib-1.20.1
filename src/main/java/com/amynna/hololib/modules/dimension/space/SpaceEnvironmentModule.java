@@ -20,6 +20,8 @@ import com.amynna.hololib.modules.dimension.space.model.SpaceRotation;
 import com.amynna.hololib.modules.dimension.space.model.SpaceStarField;
 import com.amynna.hololib.modules.dimension.space.model.SpaceSystem;
 import com.amynna.hololib.modules.dimension.space.model.SpaceTextureRef;
+import com.amynna.hololib.holo.render.HoloRenderCanceler;
+import com.amynna.hololib.holo.render.HoloRenderElement;
 import io.netty.buffer.Unpooled;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -39,7 +41,8 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Module {@code hololib:space_environment} (memoire de dimension) : porte la galaxie de la dimension, le systeme
  * courant et la pose du monde dans ce systeme, simule le mouvement des deux cotes et expose l'API serveur du
- * Controller et du Configurator. Aucun objet holographique : le ciel est dessine par un {@code SkyRenderer} (T05).
+ * Controller et du Configurator. Aucun objet holographique : le ciel est dessine par un {@code SkyRenderer} (T05) ;
+ * ciel, nuages et pluie vanilla sont annules ({@code HoloRenderCanceler}) tant que le module est installe.
  * Conception : {@code docs/space/02-architecture.md} par. 5, {@code 05-synchronisation.md}.
  * <p>
  * <b>Temps</b> : l'etat porte l'etiquette {@code stateTime} (tick de jeu de la pose). Un pas de
@@ -416,12 +419,17 @@ public final class SpaceEnvironmentModule extends HoloModule
      * Aucun objet. Serveur : galaxie vide (premiere installation ou sauvegarde illisible) -> galaxie par defaut ;
      * systeme courant perdu -> premier systeme ; pose provisoire (calculee au temps 0, recalculee au premier tick).
      * L'archive ({@link SpaceArchive}) n'est lue qu'au premier tick serveur ({@link #bindArchive}) : {@code onLoad}
-     * ne connait pas le niveau.
+     * ne connait pas le niveau. Client : annule ciel, nuages et pluie vanilla (le ciel spatial les remplace).
      */
     @Override
     public void onLoad()
     {
-        if (host().clientSide()) return;
+        if (host().clientSide()) {
+            HoloRenderCanceler.cancel(this, HoloRenderElement.SKY);
+            HoloRenderCanceler.cancel(this, HoloRenderElement.CLOUDS);
+            HoloRenderCanceler.cancel(this, HoloRenderElement.WEATHER);
+            return;
+        }
         completeState();
     }
 
@@ -429,7 +437,7 @@ public final class SpaceEnvironmentModule extends HoloModule
      * Serveur : l'etat est recopie dans l'archive ({@link SpaceArchive#store}), qui le rendra a une reinstallation
      * (retrait par commande ; aussi au dechargement du niveau, sans effet sur le disque : la derniere sauvegarde du
      * niveau a deja recopie l'etat vivant). Rien si l'archive n'est pas encore branchee (aucun tick). Client : sons du
-     * vaisseau coupes ({@link Backend#released}, T36).
+     * vaisseau coupes ({@link Backend#released}, T36), ciel, nuages et pluie vanilla retablis.
      */
     @Override
     public void onUnload()
@@ -437,6 +445,7 @@ public final class SpaceEnvironmentModule extends HoloModule
         if (host().clientSide()) {
             // Miroir oublie : les sons qu'il faisait jouer s'arretent (T36).
             if (backend != null) backend.released(this);
+            HoloRenderCanceler.restoreAll(this);
             return;
         }
         if (archive == null) return;

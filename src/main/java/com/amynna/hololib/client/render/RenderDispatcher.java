@@ -1,17 +1,23 @@
 package com.amynna.hololib.client.render;
 
 import com.amynna.hololib.HoloLib;
+import com.amynna.hololib.client.render.cancel.RenderCancels;
+import com.amynna.hololib.client.render.cancel.SkyCancelFill;
 import com.amynna.hololib.client.render.hud.HudRenderPass;
 import com.amynna.hololib.client.render.sky.SkyRenderPass;
 import com.amynna.hololib.client.render.sky.SkyRenderer;
 import com.amynna.hololib.client.render.view.ViewRenderPass;
 import com.amynna.hololib.client.render.world.WorldRenderPass;
+import com.amynna.hololib.holo.render.HoloRenderElement;
 import net.minecraft.client.Camera;
 import net.minecraft.util.Mth;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RegisterGuiOverlaysEvent;
+import net.minecraftforge.client.event.RenderGuiOverlayEvent;
+import net.minecraftforge.client.event.RenderHandEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.client.event.ViewportEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -31,7 +37,8 @@ import java.util.WeakHashMap;
  * a {@code AFTER_SKY}). Priorite {@code LOWEST} : les autres mods dessinent avant nous, en particulier avant que la
  * passe de vue ne vide la profondeur. Le HUD passe par un overlay Forge enregistre sous tous les overlays vanilla
  * ({@link ModBus}). Il releve aussi le FOV ({@code ComputeFov}) et le roulis ({@code ComputeCameraAngles}), et relaie
- * la couleur du brouillard aux renderers du ciel ({@code ComputeFogColor}).
+ * la couleur du brouillard aux renderers du ciel ({@code ComputeFogColor}), et applique les annulations du
+ * RenderCanceler ({@code client.render.cancel} : debut de frame, ciel avec shaderpack, main, overlays du HUD).
  * <p>
  * Toutes les passes recoivent la <b>rotation camera sans bobbing</b> et la <b>projection du monde bobbing compris</b>.
  * Sans shaderpack, vanilla met le bobbing dans la projection : la pose de {@code AFTER_SKY} est la rotation. Avec un
@@ -61,6 +68,8 @@ public final class RenderDispatcher
     /** Couleur du brouillard en cours de calcul, et celle recue par le renderer courant : reutilisees. */
     private static final Vector3f FOG = new Vector3f();
     private static final Vector3f FOG_BEFORE = new Vector3f();
+    /** Couleur finale du brouillard de la frame (fond de l'ecran), apres tous les mods. */
+    private static final Vector3f FRAME_FOG = new Vector3f();
     /** Renderers dont une exception dans {@code fogColor} a deja ete loguee (cles faibles : pas de fuite). */
     private static final Set<SkyRenderer> FOG_FAILED = Collections.newSetFromMap(new WeakHashMap<>());
 
@@ -89,7 +98,10 @@ public final class RenderDispatcher
     public static void onComputeFogColor(ViewportEvent.ComputeFogColor event)
     {
         List<SkyRenderer> renderers = HoloRenderers.sky();
-        if (renderers.isEmpty()) return;
+        if (renderers.isEmpty()) {
+            FRAME_FOG.set(event.getRed(), event.getGreen(), event.getBlue());
+            return;
+        }
         float red = event.getRed();
         float green = event.getGreen();
         float blue = event.getBlue();
@@ -118,6 +130,28 @@ public final class RenderDispatcher
             event.setGreen(FOG.y);
             event.setBlue(FOG.z);
         }
+        FRAME_FOG.set(FOG);
+    }
+
+    /** Debut de frame, avant le rendu du niveau : effets de dimension du RenderCanceler (ciel, nuages, meteo). */
+    @SubscribeEvent
+    public static void onRenderTick(TickEvent.RenderTickEvent event)
+    {
+        if (event.phase == TickEvent.Phase.START) RenderCancels.beginFrame();
+    }
+
+    /** Main en premiere personne annulee (chaque main, aussi pour le rendu de la main d'Oculus). */
+    @SubscribeEvent
+    public static void onRenderHand(RenderHandEvent event)
+    {
+        if (RenderCancels.cancelled(HoloRenderElement.HAND)) event.setCanceled(true);
+    }
+
+    /** Overlays vanilla annules (reticule, bloc d'inventaire). */
+    @SubscribeEvent
+    public static void onRenderGuiOverlay(RenderGuiOverlayEvent.Pre event)
+    {
+        if (RenderCancels.overlayCancelled(event.getOverlay().id())) event.setCanceled(true);
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
@@ -146,6 +180,8 @@ public final class RenderDispatcher
             if (shaderPack)
             {
                 // Monde compose par Oculus dans la cible principale : ciel puis monde par-dessus, selon la profondeur.
+                // Ciel annule : le ciel du pack est recouvert avant les SkyRenderer.
+                if (RenderCancels.cancelled(HoloRenderElement.SKY)) SkyCancelFill.render(FRAME_FOG);
                 SkyRenderPass.renderDeferred(HoloRenderers.sky(), event.getCamera(), event.getPartialTick(),
                         CAMERA_ROTATION, CAMERA_NORMAL, WORLD_PROJECTION, fov);
                 WorldRenderPass.renderOverlay(HoloRenderers.world(), CAMERA_ROTATION, CAMERA_NORMAL, WORLD_PROJECTION,

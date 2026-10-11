@@ -4,6 +4,10 @@ import com.amynna.hololib.holo.memory.HoloContainers;
 import com.amynna.hololib.holo.memory.player.PlayerHoloContainer;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloTransform;
+import com.amynna.hololib.holo.render.HoloRenderCanceler;
+import com.amynna.hololib.holo.render.HoloRenderElement;
+import com.amynna.hololib.holo.render.HoloRenderCanceler;
+import com.amynna.hololib.holo.render.HoloRenderElement;
 import com.amynna.hololib.modules.camera.config.ConfigWindow;
 import com.amynna.hololib.modules.camera.config.Configurable;
 import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
@@ -40,6 +44,9 @@ import java.util.Objects;
  *     avant = zone morte, place par {@link #clientTick} sur l'axe avant de l'Environment) et {@link SpaceJoystickAim}
  *     (cercle de visee au centre de l'ecran), dessines seulement pendant que le joueur local pilote
  *     ({@link #joystickShown()}) ;</li>
+ *     <li>la <b>main</b>, le <b>reticule</b> et le <b>bloc d'inventaire</b> du HUD du joueur local masques pendant le
+ *     pilotage ({@code HoloRenderCanceler}, suivi a chaque {@link #clientTick}, retablis a la sortie ou au retrait du
+ *     module) ;</li>
  *     <li>le <b>saut</b> (T22) : cible, roue de charge et aide a la visee, dessinees pour le pilote local par
  *     {@code SpaceJumpRenderer} (client) ;</li>
  *     <li>le <b>lien vers le referentiel</b> et l'anneau du referentiel ({@link #refLink()}), dessines pour le pilote
@@ -126,6 +133,8 @@ public final class SpacePilotModule extends HoloModule implements Configurable
     // Client : HUD de navigation (espace de travail cree au premier rafraichissement, jamais cote serveur).
     /** Space Environment present dans la dimension du joueur local (relu a chaque tick client). */
     private boolean environmentPresent;
+    /** Main, reticule et bloc d'inventaire du joueur local annules (pilotage en cours au dernier tick client). */
+    private boolean pilotingHidden;
     private int hudCountdown;
     private SpacePose hudPose;
     private Vector3d[] hudPositions;
@@ -244,11 +253,27 @@ public final class SpacePilotModule extends HoloModule implements Configurable
     /**
      * Client : place le cercle avant sur l'axe avant du monde (reglage de l'Environment de la dimension du joueur
      * local ; meme calcul que le Space Controller du lot 1) et rafraichit le HUD de navigation. Le serveur ne deplace
-     * ni l'un ni l'autre : rien n'est envoye.
+     * ni l'un ni l'autre : rien n'est envoye. Masque main, reticule et bloc d'inventaire au debut du pilotage, les
+     * retablit a la fin (au plus un tick apres la fin de la capture du pad).
      */
+    /** Main, reticule et bloc d'inventaire retablis si le module part en plein pilotage. */
+    @Override
+    public void onUnload() { HoloRenderCanceler.restoreAll(this); }
+
     @Override
     public void clientTick()
     {
+        boolean piloting = joystickShown();
+        if (piloting != pilotingHidden) {
+            pilotingHidden = piloting;
+            if (piloting) {
+                HoloRenderCanceler.cancel(this, HoloRenderElement.HAND);
+                HoloRenderCanceler.cancel(this, HoloRenderElement.CROSSHAIR);
+                HoloRenderCanceler.cancel(this, HoloRenderElement.INVENTORY_HUD);
+            } else {
+                HoloRenderCanceler.restoreAll(this);
+            }
+        }
         if (forward == null) return;
         SpaceEnvironmentModule env = SpaceEnvironmentModule.client();
         environmentPresent = env != null;

@@ -12,6 +12,7 @@
  *     <li>{@code inspect} : acces d'inspection entre joueurs (qui voit les affichages de qui).</li>
  *     <li>{@code edit} : interfaces d'edition en jeu des objets, affichage ({@code HoloDisplay}), regles.</li>
  *     <li>{@code mode} : modes d'un joueur (focus, edition) portes par des modules de sa memoire.</li>
+ *     <li>{@code render} : annulation d'elements du rendu vanilla par un module (RenderCanceler).</li>
  * </ul>
  *
  * <h2>Replication</h2>

@@ -40,7 +40,8 @@ com.amynna.hololib
 │   ├── interact/                HoloInteractible, HoloInteraction (interaction au regard, partie commune)
 │   ├── edit/                    interfaces d'edition (HoloEditable + outils), HoloDisplay, HoloRelativeToOpen,
 │   │                            HoloEditRules (droits, validation), HoloEditMath (rotations, Local relatif <-> follow)
-│   └── mode/                    HoloMode (FOCUS, EDITOR), HoloModeModule (module qui porte un mode)
+│   ├── mode/                    HoloMode (FOCUS, EDITOR), HoloModeModule (module qui porte un mode)
+│   └── render/                  HoloRenderCanceler (annuler un element du rendu vanilla), HoloRenderElement
 ├── network/                     HoloNetwork + paquets (snapshot, module, objet, origine, oubli ; deplacement, action,
 │                                edition)
 ├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
@@ -65,6 +66,8 @@ com.amynna.hololib
 │   ├── camera/spacepilot/       Space Pilot (joueur) : reglages (Config), cercles du joystick (SpaceJoystickForward /
 │   │                            Aim), HUD de navigation et vitesse de croisiere (SpacePilotHud)
 │   ├── camera/spaceknowledge/   Space Knowledge (joueur) : reglages de la surcouche du ciel (Config, Quick Action)
+│   ├── dimension/skycancel/     Sky Cancel (dimension) ; camera/crosshaircancel/ : Crosshair Cancel (joueur) : demos
+│   │                            du RenderCanceler
 │   └── camera/focus|editor|config|quickaction/ modules joueur : mode focus (H) ; editeurs (G)
 │                                own fix/dyn/hud, world/dimension/other + editor_panel (fenetre Config) ; config (ecrou du focus -> liste des modules
 │                                Configurable) ; quickaction (roue d'actions du focus, QuickActionProvider)
@@ -87,6 +90,8 @@ com.amynna.hololib
         ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
         ├── HoloRenderers.java   registre des renderers (register/unregister, fil de rendu)
         ├── HoloBuffers.java     BufferSource immediat du mod (toutes les passes) ; ShaderPacks : shaderpack Oculus actif
+        ├── cancel/              RenderCanceler client : RenderCancels (etat, backend), CancelingEffects (enveloppe des
+        │                        effets de dimension), SkyCancelFill (ciel annule avec shaderpack)
         ├── sky/                 SkyRenderer, SkyRenderContext, SkyRenderPass
         ├── world/               WorldRenderer<T>, WorldRenderable, WorldRenderContext, WorldRenderPass
         ├── view/                ViewRenderer, ViewRenderContext, ViewRenderPass
@@ -267,7 +272,8 @@ ou synthetises) : toute ressource ajoutee y est creditee.
   dessine par `SpaceSkyRenderer` : fond opaque, **fond etoile procedural** (`SpaceStarField`, 4 000 etoiles tirees de
   la graine du serveur : meme ciel pour tous, bande et renflement de la Voie lactee), etoiles de fond = autres
   systemes, corps a taille apparente reelle, **textures** (`SpaceBodyTextureCache`, chargement hors du fil de rendu)
-  et **rotation propre** (`SpaceSpin`), LOD ; noircit le brouillard (`fogColor`). Acces serveur :
+  et **rotation propre** (`SpaceSpin`), LOD ; noircit le brouillard (`fogColor`) ; ciel, nuages et pluie vanilla
+  annules tant que le module est installe (`HoloRenderCanceler`, miroir client). Acces serveur :
   `SpaceEnvironmentModule.of(level)` ; client : `client()` (backend). API serveur publique (pilotage, edition qui
   valide puis incremente la revision, reglages, `setTarget` / `clearTarget`, `teleportTo`) : Controller, Map et
   Configurator ne passent que par elle.
@@ -322,8 +328,10 @@ ou synthetises) : toute ressource ajoutee y est creditee.
   (`SpaceJumpRenderer`), lien et anneau du referentiel (`SpaceReferenceLinkRenderer`, `ViewRenderer` `WORLD`,
   conversion `STABLE -> WORLD`), cible du vaisseau, HUD de navigation (`SpacePilotHud`, `Hud`, deplacable par l'Own
   HUD Editor) avec la **vitesse de croisiere** (`SpaceCruise` : astre au regard <= 10 degres, `v*` par interception au
-  frein normal avec temps de reaction, fleche haut / bas coloree vert -> rouge, point "viser ici" bleu pale). Module
-  du joueur local : `SpacePilotClient` ; regard : `SpacePilotBackend`.
+  frein normal avec temps de reaction, fleche haut / bas coloree vert -> rouge, point "viser ici" bleu pale) ; main,
+  reticule et bloc d'inventaire du HUD masques aux commandes (`HoloRenderCanceler` `HAND`, `CROSSHAIR`,
+  `INVENTORY_HUD`, suivi dans `clientTick`). Module du joueur local :
+  `SpacePilotClient` ; regard : `SpacePilotBackend`.
 - `hololib:space_knowledge` (joueur, `Configurable` + `QuickActionProvider`, C45 ; pas requis pour piloter) :
   surcouche du ciel du joueur local (`SpaceKnowledgeSkyRenderer`, `SkyRenderer` enregistre apres le ciel) : anneaux
   (planetes bleu, etoiles jaune, lunes gris), orbites (coupees dans l'anneau de leur corps, pointillees a travers les
@@ -369,6 +377,21 @@ ou synthetises) : toute ressource ajoutee y est creditee.
   (dead reckoning) ; horloge d'affichage propre (jamais le `gameTime` vanilla), historique de 32 ticks interpole dans
   le repere du referentiel, observateur en leger retard, pilote local predit (reconciliation 10 % / tick). Les
   renderers lisent `pose(partialTick)`, `bodyPositions`, `displayDays`.
+
+### RenderCanceler (`holo/render`, `client/render/cancel`)
+
+- Un module annule un element du rendu vanilla (`HoloRenderElement` : `SKY`, `CLOUDS`, `WEATHER`, `HAND`,
+  `CROSSHAIR`, `INVENTORY_HUD` : barre d'inventaire et jauges du bas de l'ecran) par `HoloRenderCanceler.cancel(this, element)` (dans `onLoad` ou au fil de l'etat), `restore`, et
+  `restoreAll(this)` dans `onUnload`. Facade commune (backend installe au setup client, inerte sur serveur dedie) ;
+  demandeurs comptes par identite ; seul un module avec `host().canAct()` compte (ni la copie serveur en solo, ni le
+  module d'un joueur inspecte). Demos : `hololib:sky_cancel` (dimension, `sharedWithObservers`),
+  `hololib:crosshair_cancel` (joueur).
+- Sans Mixin : `SKY` / `CLOUDS` / `WEATHER` = hooks Forge de `DimensionSpecialEffects` ; tant que l'un est annule,
+  `RenderCancels.beginFrame` (debut de frame) remplace `ClientLevel.effects` (final, SRG `f_104564_`, reflexion) par
+  `CancelingEffects` (delegue tout), puis remet l'original. `HAND` = `RenderHandEvent` ; `CROSSHAIR` /
+  `INVENTORY_HUD` = `RenderGuiOverlayEvent.Pre` des overlays vanilla (`RenderCancels.overlayCancelled`) ; abonnements dans `RenderDispatcher`. Ciel annule = fond couleur
+  du brouillard, sans la lueur du lever / coucher (`getSunriseColor` nul : sinon teinte selon le regard) ; avec shaderpack, `SkyCancelFill` recouvre les pixels de profondeur 1 a `AFTER_LEVEL` avant les
+  `SkyRenderer` (limites : brouillard du terrain du pack, nuages volumetriques en composite).
 
 ### Capture de controles (independante de l'interaction)
 
