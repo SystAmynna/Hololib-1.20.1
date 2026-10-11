@@ -60,6 +60,18 @@ public final class HoloMemoryBank
         return memory;
     }
 
+    /**
+     * Cree une memoire copiee de {@code source} (modules, sauvegardes dormantes, acces d'inspection) ; {@code null} si
+     * le nom est invalide ou deja pris. Pour copier une memoire active, lui recopier d'abord l'etat vivant.
+     */
+    public HoloMemory createCopy(String name, HoloMemory source)
+    {
+        if (!validName(name) || find(name) != null) return null;
+        HoloMemory memory = source.copy(name);
+        memories.add(memory);
+        return memory;
+    }
+
     /** Supprime une memoire inactive ; faux si elle n'existe pas ou est active. */
     public boolean delete(String name)
     {

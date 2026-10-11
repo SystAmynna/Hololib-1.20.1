@@ -1,9 +1,12 @@
 package com.amynna.hololib.client.render.modules;
 
 import com.amynna.hololib.HoloLib;
+import com.amynna.hololib.client.render.modules.camera.attackguard.AttackGuardRenderers;
 import com.amynna.hololib.client.render.modules.camera.editor.EditorRenderers;
+import com.amynna.hololib.client.render.modules.camera.radar.RadarRenderers;
 import com.amynna.hololib.client.render.modules.camera.spaceknowledge.SpaceKnowledgeRenderers;
 import com.amynna.hololib.client.render.modules.camera.spacepilot.SpacePilotRenderers;
+import com.amynna.hololib.client.render.modules.camera.targeting.TargetingRenderers;
 import com.amynna.hololib.client.render.modules.dimension.planet1.Planet1Renderers;
 import com.amynna.hololib.client.render.modules.dimension.space.SpaceRenderers;
 import com.amynna.hololib.client.render.modules.monde.areadisplayer.AreaDisplayerRenderers;
@@ -32,6 +35,9 @@ public final class ModuleRenderers
             SpaceMapRenderers.register();
             SpaceConfiguratorRenderers.register();
             AreaDisplayerRenderers.register();
+            AttackGuardRenderers.register();
+            RadarRenderers.register();                 // composition plein ecran du radar, par-dessus les precedents
+            TargetingRenderers.register();             // apres le radar : contour de la cible au-dessus du sien
         });
     }
 }

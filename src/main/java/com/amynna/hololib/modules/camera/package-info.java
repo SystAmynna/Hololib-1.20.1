@@ -8,6 +8,14 @@
  *     <li>{@code quickaction} : en mode focus, roue d'actions au centre de l'ecran, actions declarees par les modules
  *     {@code QuickActionProvider}.</li>
  *     <li>{@code crosshaircancel} : reticule du joueur annule (demonstration du RenderCanceler).</li>
+ *     <li>{@code radar} : onde de detection du joueur local, entites reperees a travers les murs (Config, Quick
+ *     Action, visables par le ciblage).</li>
+ *     <li>{@code targeting} : cible (entite ou bloc) choisie a l'ouverture du focus, gardee pendant le focus, contour
+ *     vert et segment.</li>
+ *     <li>{@code keys} : cles du joueur, interrogeables par les modules d'autres joueurs (serveur) ;
+ *     {@code keyseditor} : edition des cles (Config : soi-meme, ou joueur cible pour les ops).</li>
+ *     <li>{@code attackguard} : pas d'attaque sur un joueur qui possede une cle de la whitelist (Config), croix
+ *     rouge a la place du reticule.</li>
  * </ul>
  * Focus et edition ne sont jamais ouverts ensemble. Leur logique client (touches, conditions de sortie, repere de
  * l'editeur) vit dans {@code com.amynna.hololib.client.modules.camera}.

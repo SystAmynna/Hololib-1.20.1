@@ -38,6 +38,9 @@ import java.util.UUID;
  * que les modules <b>partages</b>, c'est-a-dire ayant au moins un objet {@code PUBLIC} (ou
  * {@link HoloModule#sharedWithObservers()}), et leur etat public ; un module
  * qui devient (ou cesse d'etre) partage leur est ajoute (ou retire). Les changements sont envoyes en fin de tick.
+ * <p>
+ * Un module retire laisse sa sauvegarde dans la memoire (<b>dormante</b>) : elle est relue s'il est reinstalle, et
+ * effacee par {@link #reset}.
  */
 public abstract class HoloContainer
 {
@@ -46,6 +49,8 @@ public abstract class HoloContainer
     private final Collection<HoloModule> modulesView = Collections.unmodifiableCollection(modules.values());
     /** Modules dont le type n'est plus enregistre (mod retire) : conserves tels quels dans la memoire. */
     private final List<HoloMemory.Entry> orphans = new ArrayList<>();
+    /** Sauvegardes des modules retires, par type. */
+    private final Map<ResourceLocation, HoloMemory.Entry> dormant = new LinkedHashMap<>();
     /** Modules actuellement connus des observateurs. */
     private final Set<UUID> shared = new HashSet<>();
 
@@ -101,29 +106,32 @@ public abstract class HoloContainer
         return types;
     }
 
+    /** Types des sauvegardes dormantes (modules retires dont la sauvegarde est gardee). */
+    public final Set<ResourceLocation> storedTypes() { return new LinkedHashSet<>(dormant.keySet()); }
+
+    /** Types des modules equipes dont le type n'est plus enregistre (conserves tels quels). */
+    public final Set<ResourceLocation> unknownTypes()
+    {
+        Set<ResourceLocation> types = new LinkedHashSet<>();
+        for (HoloMemory.Entry entry : orphans) types.add(entry.type());
+        return types;
+    }
+
     /**
-     * Installe un nouveau module et le synchronise ; {@code null} si le type est incompatible avec cette memoire ou
-     * deja installe.
+     * Installe un module et le synchronise ; {@code null} si le type est incompatible avec cette memoire ou deja
+     * installe. Une sauvegarde dormante de ce type est relue (sinon le module part de son etat initial).
      *
-     * @param creator joueur qui l'installe ({@link HoloModule#creator()}), ou {@code null}
+     * @param creator joueur qui l'installe ({@link HoloModule#creator()}), ou {@code null} ; une sauvegarde relue
+     *                garde son createur s'il en a un
      */
     public final HoloModule install(HoloModuleType<?> type, UUID creator)
     {
         if (type.target() != target() || contains(type.id())) return null;
-        HoloModule module = type.create(UUID.randomUUID(), host());
-        module.creator(creator);
-        module.onLoad();
-        module.clearDirty();
-        modules.put(module.instanceId(), module);
-        if (scope.owner() != null) {
-            sendToOwner(new HoloModulePacket(scope, true, HoloModulePacket.Op.ADD,
-                    ModuleData.of(module, true, true)));
-        }
-        if (isShared(module)) {
-            shared.add(module.instanceId());
-            sendToObservers(new HoloModulePacket(scope, false, HoloModulePacket.Op.ADD,
-                    ModuleData.of(module, false, true)));
-        }
+        HoloMemory.Entry saved = dormant.remove(type.id());
+        HoloModule module = saved != null ? restore(type, saved) : null;
+        if (module == null) module = fresh(type, creator);
+        else if (module.creator() == null) module.creator(creator);
+        attach(module);
         markPersistDirty();
         return module;
     }
@@ -135,15 +143,37 @@ public abstract class HoloContainer
         return module != null && uninstall(module.instanceId());
     }
 
-    /** Retire un module ; faux s'il n'existe pas. */
+    /** Retire un module, en gardant sa sauvegarde (dormante) ; faux s'il n'existe pas. */
     public final boolean uninstall(UUID instanceId)
     {
-        HoloModule module = modules.remove(instanceId);
+        HoloModule module = modules.get(instanceId);
         if (module == null) return false;
-        module.unload();
-        HoloModulePacket packet = HoloModulePacket.remove(scope, module);
-        sendToOwner(packet);
-        if (shared.remove(instanceId)) sendToObservers(packet);
+        ResourceLocation typeId = module.type().id();
+        dormant.put(typeId, new HoloMemory.Entry(typeId, instanceId, module.saveAll()));
+        detach(module);
+        markPersistDirty();
+        return true;
+    }
+
+    /**
+     * Remet a zero la sauvegarde du module de ce type, sans le retirer : equipe, il est remplace par un module dans son
+     * etat initial (meme createur) ; retire, sa sauvegarde dormante est effacee. {@link HoloModule#onReset} est appele
+     * avant. Faux si la memoire n'a aucune trace de ce type (un module de type inconnu n'est jamais remis a zero).
+     */
+    public final boolean reset(ResourceLocation typeId)
+    {
+        HoloModule module = find(typeId);
+        if (module != null) {
+            module.onReset(level());
+            detach(module);
+            dormant.remove(typeId);
+            attach(fresh(module.type(), module.creator()));
+            markPersistDirty();
+            return true;
+        }
+        HoloMemory.Entry saved = dormant.remove(typeId);
+        if (saved == null) return false;
+        HoloMemories.discard(saved, scope, level());
         markPersistDirty();
         return true;
     }
@@ -166,10 +196,11 @@ public abstract class HoloContainer
 
     // ---------------------------------------------------------------- interne
 
-    /** Usage interne : charge les modules d'une memoire. */
+    /** Usage interne : charge les modules d'une memoire (et garde ses sauvegardes dormantes). */
     @ApiStatus.Internal
     public final void load(HoloMemory memory)
     {
+        for (HoloMemory.Entry entry : memory.dormant()) dormant.put(entry.type(), entry);
         for (HoloMemory.Entry entry : memory.entries()) {
             HoloModuleType<?> type = HoloModuleTypes.get(entry.type());
             if (type == null) {
@@ -204,6 +235,8 @@ public abstract class HoloContainer
             entries.add(new HoloMemory.Entry(module.type().id(), module.instanceId(), module.saveAll()));
         }
         entries.addAll(orphans);
+        memory.dormant().clear();
+        memory.dormant().addAll(dormant.values());
     }
 
     /** Usage interne : decharge tous les modules (sans sauvegarder ni rien envoyer). */
@@ -213,6 +246,7 @@ public abstract class HoloContainer
         for (HoloModule module : modules.values()) module.unload();
         modules.clear();
         orphans.clear();
+        dormant.clear();
         shared.clear();
     }
 
@@ -267,6 +301,54 @@ public abstract class HoloContainer
             module.clearDirty();
         }
         if (changed) markPersistDirty();
+    }
+
+    /** Module dans son etat initial (non ajoute). */
+    private HoloModule fresh(HoloModuleType<?> type, UUID creator)
+    {
+        HoloModule module = type.create(UUID.randomUUID(), host());
+        module.creator(creator);
+        module.onLoad();
+        return module;
+    }
+
+    /** Module relu depuis une sauvegarde dormante (non ajoute) ; {@code null} si elle est illisible. */
+    private HoloModule restore(HoloModuleType<?> type, HoloMemory.Entry saved)
+    {
+        HoloModule module = type.create(saved.instanceId(), host());
+        try {
+            module.loadAll(saved.data());
+        } catch (RuntimeException e) {
+            HoloLib.LOGGER.error("Sauvegarde du module {} illisible, etat initial", saved.type(), e);
+            return null;
+        }
+        return module;
+    }
+
+    /** Ajoute un module pret et l'envoie au proprietaire et, s'il est partage, aux observateurs. */
+    private void attach(HoloModule module)
+    {
+        module.clearDirty();
+        modules.put(module.instanceId(), module);
+        if (scope.owner() != null) {
+            sendToOwner(new HoloModulePacket(scope, true, HoloModulePacket.Op.ADD,
+                    ModuleData.of(module, true, true)));
+        }
+        if (isShared(module)) {
+            shared.add(module.instanceId());
+            sendToObservers(new HoloModulePacket(scope, false, HoloModulePacket.Op.ADD,
+                    ModuleData.of(module, false, true)));
+        }
+    }
+
+    /** Retire et decharge un module, et le fait oublier aux clients. */
+    private void detach(HoloModule module)
+    {
+        modules.remove(module.instanceId());
+        module.unload();
+        HoloModulePacket packet = HoloModulePacket.remove(scope, module);
+        sendToOwner(packet);
+        if (shared.remove(module.instanceId())) sendToObservers(packet);
     }
 
     private HoloModule find(ResourceLocation typeId)

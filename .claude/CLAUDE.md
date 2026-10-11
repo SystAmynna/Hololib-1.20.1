@@ -44,7 +44,7 @@ com.amynna.hololib
 │   └── render/                  HoloRenderCanceler (annuler un element du rendu vanilla), HoloRenderElement
 ├── network/                     HoloNetwork + paquets (snapshot, module, objet, origine, oubli ; deplacement, action,
 │                                edition)
-├── command/ demo/               /hololib_marker, /hololib_module, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
+├── command/ demo/               /hololib_marker, /hololib_module, /holo_memory, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
 ├── modules/                     modules du mod (HoloLibModules = registre) : un sous-package par compatibilite
 │   ├── dimension/planet1/       (dimension, monde, camera), un package par module (module + objets, code commun)
 │   ├── dimension/space/         Space Environment (ciel = systeme stellaire, galaxie, pose du monde, saut, cible,
@@ -72,6 +72,10 @@ com.amynna.hololib
 │   ├── monde/areaconfigurator/  Area Displayer Configurator (marker, ops) : fenetre des reglages du Displayer du marker
 │   ├── dimension/skycancel/     Sky Cancel (dimension) ; camera/crosshaircancel/ : Crosshair Cancel (joueur) : demos
 │   │                            du RenderCanceler
+│   ├── camera/radar/            Radar (joueur) : reglages, fenetre Activer / Desactiver, Config, Quick Action
+│   ├── camera/targeting/        Ciblage (joueur) : TargetingModule (cible entite / bloc), TargetingThroughWalls
+│   ├── camera/keys/ keyseditor/ Keys (joueur) : KeysModule, KeySet, widget KeyListEditor ; Keys Editor (Config)
+│   ├── camera/attackguard/      Attack Guard (joueur) : whitelist (Config), joueurs proteges, AttackEntityEvent
 │   └── camera/focus|editor|config|quickaction/ modules joueur : mode focus (H) ; editeurs (G)
 │                                own fix/dyn/hud, world/dimension/other + editor_panel (fenetre Config) ; config (ecrou du focus -> liste des modules
 │                                Configurable) ; quickaction (roue d'actions du focus, QuickActionProvider)
@@ -84,7 +88,10 @@ com.amynna.hololib
     │                            boutons des objets edites (HoloEditTarget / Panel / EyeButton)
     ├── modules/camera/          logique client des modules joueur : FocusController, EditorController,
     │                            ConfigController, QuickActionController ; SpacePilotClient / SpaceKnowledgeClient
-    │                            (module du joueur local, relu chaque tick), SpacePilotBackend (regard de la camera)
+    │                            (module du joueur local, relu chaque tick), SpacePilotBackend (regard de la camera) ;
+    │                            radar/ : RadarClient (backend, module local), RadarScan (onde, reperages), RadarWalls ;
+    │                            targeting/ : TargetingClient (choix et validite de la cible) ; attackguard/ :
+    │                            AttackGuardClient (joueur protege vise, captor passif de l'attaque, reticule)
     ├── modules/dimension|monde/ backends client des modules Space (SpaceEnvironmentClient, SpaceControllerClient,
     │                            SpaceConfiguratorClient : miroir de dimension, joueur local, op local, Space Pilot local) ;
     │                            SpaceSoundController (sons du vaisseau), SpaceTextureClient (canal des textures),
@@ -96,6 +103,8 @@ com.amynna.hololib
         ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
         ├── HoloRenderers.java   registre des renderers (register/unregister, fil de rendu)
         ├── HoloBuffers.java     BufferSource immediat du mod (toutes les passes) ; ShaderPacks : shaderpack Oculus actif
+        ├── outline/             contours facon glowing partages : HoloOutlineMask (masque hors ecran : entites,
+        │                        boites), HoloOutlineShader (hololib:outline_composite, contour a travers les murs)
         ├── cancel/              RenderCanceler client : RenderCancels (etat, backend), CancelingEffects (enveloppe des
         │                        effets de dimension), SkyCancelFill (ciel annule avec shaderpack)
         ├── sky/                 SkyRenderer, SkyRenderContext, SkyRenderPass
@@ -114,7 +123,11 @@ com.amynna.hololib
         │                        anneau de la cible, SpaceReferenceLinkRenderer lien et anneau du referentiel),
         │                        monde/spacemap (SpaceMapCubeRenderer), monde/spaceconfigurator (SpaceHandleRenderer,
         │                        SpaceOrbitHandleRenderer, SpaceConfiguratorWindowRenderer : fenetre + apercu),
-        │                        monde/areadisplayer (AreaDisplayerCubeRenderer : terrain, points, trainees, noms)
+        │                        monde/areadisplayer (AreaDisplayerCubeRenderer : terrain, points, trainees, noms),
+        │                        camera/radar (RadarRenderer : WorldRenderer enregistre avant le ciblage, masque
+        │                        HoloOutlineMask, RadarSphere, RadarShaders : shader hololib:radar_composite),
+        │                        camera/targeting (TargetOutlineRenderer : contour vert, TargetLinkRenderer : segment),
+        │                        camera/attackguard (AttackGuardCrossRenderer : croix rouge, HudRenderer)
         ├── holo/                ponts objets -> familles (HoloRouting, 4 bridges + HoloFocusBridge : fenetre
         │                        d'outils visee au-dessus de tout), HoloObjectRenderer(s), fenetres,
         │                        HoloPicking (objet sous le reticule ; pas un renderer, partage les placements),
@@ -151,6 +164,13 @@ com.amynna.hololib
 - Chaque type de module a **une** compatibilite (`HoloModuleTarget` : DIMENSION, POSITION, PLAYER) et au plus une
   instance par memoire. Gestion en jeu : `/hololib_marker create|remove`, `/hololib_module add|remove
   dimension|world|player ...` (op 2).
+- Une memoire contient les modules **equipes** et des sauvegardes **dormantes** (`HoloMemory.dormant()`) : retirer un
+  module garde sa sauvegarde, relue a sa reinstallation (`HoloContainer` / `HoloMemories`). Remise a zero sans retrait
+  (`reset` : module equipe remplace par son etat initial, createur garde ; dormante effacee) precedee du hook serveur
+  `HoloModule.onReset(level)` (donnees tenues hors de la memoire). Types inconnus (mod retire) conserves, jamais remis a
+  zero. `/holo_memory` (op 2) : `dimension <here|dim>` / `world <marker>` `list | reset <module...>` ; `player <joueur>
+  add <memoire> [copy <joueur> <current|memoire>] | remove <memoire> | list | reset <current|memoire> [<module...>]`
+  (sans module : tous ceux qui ont une sauvegarde) ; autocompletion limitee aux modules ayant une trace.
 - **Inspection** : par defaut personne ne voit les affichages d'un autre joueur. A voit B si A suit l'entite de B et
   que la memoire active de A l'autorise (`HoloInspection` : drapeau "tous", liste, exclusions). Serveur autoritaire
   (`HoloInspections`, ensemble `viewers` de chaque `PlayerHoloContainer`). `/hololib_inspect <on|off> [<joueurs>
@@ -241,7 +261,11 @@ com.amynna.hololib
   est la declaration : la liste les decouvre chaque tick (`ConfigController`).
 - **Regle** : un module configurable detient sa `ConfigWindow` (objet du module cree dans `onLoad`, widgets dans
   `content()`) ; Config l'ouvre devant le regard au clic (`open()`, position relative = `openOffset`, editable dans
-  l'editor), la ferme (croix) et l'epingle (epingle : etat sauvegarde du module Config, par id de type). Ouverture
+  l'editor), la ferme (croix) et l'epingle (epingle : etat sauvegarde du module Config, par id de type). Le
+  proprietaire la deplace aussi en focus en la saisissant par le **cadre** (bande de 3 px du bord ou fond de la barre
+  de titre, clic gauche maintenu, comme la translation `Local` de l'editor) : au lacher, placement envoye
+  (`requestTransform`) et `openOffset` recalcule (`ConfigWindow.Backend.storeOffset`) puis envoye par l'action 1 de
+  Config (le serveur verifie une `ConfigWindow` de la memoire du joueur) : les reouvertures la placent au meme endroit. Ouverture
   decidee par le client du proprietaire (`opened()`) ; a l'ouverture du focus, les fenetres epinglees se rouvrent, les
   autres sont fermees. Ecrou, liste, fenetres Config et roue Quick Action sont `PUBLIC` : un joueur qui inspecte le
   proprietaire les voit (sans s'en servir) ; listes et roues des joueurs inspectes sont remplies par les controleurs.
@@ -296,7 +320,8 @@ ou synthetises) : toute ressource ajoutee y est creditee.
 - **Persistance** : `SpaceArchive` (`SavedData` du niveau, `data/hololib_space.dat`) recopie l'etat vivant a chaque
   sauvegarde du niveau et recoit l'etat au retrait du module ; lue au premier tick serveur, elle remplace l'etat d'une
   installation par commande ou d'une memoire plus ancienne (retrait / reinstallation = tout revient, cible comprise ;
-  remise a zero : supprimer le fichier, L20). Un voyage en cours reprend au chargement.
+  remise a zero : `/holo_memory dimension <dim> reset hololib:space_environment`, dont `onReset` vide l'archive, ou
+  supprimer le fichier, L20). Un voyage en cours reprend au chargement.
 - **Referentiel** (D29) : la vitesse est relative au corps le plus profond dont la **sphere d'influence**
   `a (m / M_parent)^0,4` contient le monde (plancher 10 R ; rayon de jeu x 4 pour une lune, x 1,5 planete / mineur,
   plafond 0,5 a ; hysteresis 1,05, delai, cooldown, fondu) ; le regard ne compte plus, aucune gravite sur le vaisseau.
@@ -417,6 +442,53 @@ ou synthetises) : toute ressource ajoutee y est creditee.
   = bloc du joueur), interrupteurs, resolution a paliers (clic gauche / droit), intervalle, « Actualiser » ; actions
   0-5 relayees a l'API du Displayer ; fenetre relue quand `revision()` du Displayer change ; `HEIGHT` calcule depuis
   la derniere ligne (un widget qui deborde n'est vise que sur sa partie interieure).
+
+### Module Radar (`modules/camera/radar`, `client/modules/camera/radar`, `client/render/modules/camera/radar`)
+
+- `hololib:radar` (joueur) : reglages sauvegardes et synchronises (epaisseur de mur 0-16 ou infinie, rayon 8-128 par
+  pas de 8, joueurs, autres entites vivantes hors porte-armures), `Configurable` (fenetre « Radar ») et
+  `QuickActionProvider` (`activate`, `deactivate`). Fenetre `RadarWindow` en camera normale (`Local` relatif,
+  `PUBLIC`, acces `OWNER`, editable) : Activer (relance l'onde) / Desactiver, ligne d'etat ; retiree (`shown()`) quand
+  la memoire contient `hololib:quick_action` (presence calculee par le serveur, synchronisee).
+- Onde et reperages **purement clients**, vus du seul proprietaire (`RadarModule.Backend` -> `RadarClient`) : origine
+  figee au lancement, 1,6 bloc / tick jusqu'au rayon, puis effacement ; une entite atteinte est testee une fois
+  (filtre, puis blocs `canOcclude()` comptes de l'oeil a la cible par `BlockGetter.traverseBlocks`) et reste reperee
+  jusqu'a Desactiver (64 au plus). Rien sur le reseau.
+- Rendu sans Mixin ni glowing vanilla (non forcable cote client) : `RadarRenderer` (`WorldRenderer`, une instance a
+  l'origine de l'onde, enregistre apres les autres sauf le ciblage, dont le contour passe au-dessus) copie la
+  profondeur de la scene, redessine les entites reperees dans une cible masque (types de contour vanilla rediriges, `HoloOutlineMask` partage), puis compose en plein ecran
+  (`assets/hololib/shaders/core/radar_composite`, `RegisterShadersEvent`) : trait de l'onde au rayon sur la scene (bord
+  de la sphere seulement), interieur bleu la ou la scene est devant l'entite, contour bleu autour du masque ; sphere en
+  triangles (`RadarSphere`) testee contre la profondeur du monde, segments amincis avec le rayon (0,4 bloc -> 0 au
+  rayon maximal) et faces estompees au meme rythme. Limites : l'onde colore aussi les entites ; avec un shaderpack la composition passe
+  sur la main.
+- Compatibilite Ciblage : `RadarModule implements TargetingThroughWalls` (`Backend.detected()`) : une entite reperee
+  regardee a travers un mur est ciblee a l'ouverture du focus au lieu du bloc entre les deux.
+
+### Ciblage, Keys, Keys Editor, Attack Guard (`modules/camera/targeting|keys|keyseditor|attackguard`)
+
+- `hololib:targeting` (joueur, aucun objet, **requiert `hololib:focus`**) : a l'ouverture du focus, cible = ce que le
+  joueur regarde jusqu'a 64 blocs (`TargetingClient.pick` : entite visible, sinon entite d'un module
+  `TargetingThroughWalls` traversee par le rayon, sinon bloc), gardee pendant le focus (le joueur ou la cible
+  bougent), retiree a la fermeture, au changement de niveau, entite retiree ou bloc devenu air. Le client du
+  proprietaire decide et envoie (`requestEntity` / `requestBlock` / `requestClear`) ; le serveur garde une copie
+  validee (128 blocs) pour les autres modules (`TargetingModule.of(uuid)`, `targetPlayer`), ni sauvee ni renvoyee.
+  Rendu (joueur local) : contour vert facon glowing a travers les murs (`TargetOutlineRenderer`, entite ou forme du
+  bloc) et segment centre de l'ecran -> cible quand le rayon de la camera ne passe plus par elle (`TargetLinkRenderer`,
+  `ViewRenderer` `WORLD`).
+- `hololib:keys` (joueur, aucun objet ni action) : `KeySet` (ordre d'ajout, 64 cles de 32 caracteres, `normalize`),
+  sauvee, synchronisee au **proprietaire seulement**. Interrogation serveur par les modules d'autres joueurs :
+  `KeysModule.haveKey(uuid, cle)`, `of(uuid)` ; modification par l'API serveur `addKey` / `removeKey` (l'appelant
+  verifie les droits). Widget partage `KeyListEditor` (champ, Ajouter au clic seulement, liste avec croix).
+- `hololib:keys_editor` (joueur, `Configurable`, fenetre « Cles ») : onglets « Soi-meme » (sa memoire) / « Cible »
+  (joueur cible par son Ciblage, **ops niveau 2**) ; sujet, statut et cles resolus par le serveur chaque tick et
+  envoyes au proprietaire seulement (fenetre `PUBLIC`) ; actions `MODE` / `ADD` / `REMOVE`, sujet resolu de nouveau.
+- `hololib:attack_guard` (joueur, `Configurable`) : whitelist de cles (proprietaire seulement) ; serveur : ids des
+  joueurs proteges du niveau toutes les 10 ticks (**sans limite de distance** : armes a distance),
+  `AttackEntityEvent` annule. Client (`AttackGuardClient`) : regard direct a toute distance (rayon coupant la boite
+  d'un joueur protege elargie de 0,5 bloc, tolerance des tirs constante ; sans bloc avant le point touche ni devant
+  le joueur ; radar ignore ; calcule a chaque tick et a l'input) -> captor passif du
+  mapping `key.attack`, `CROSSHAIR` annule, croix rouge (`AttackGuardCrossRenderer`, `HudRenderer`, premiere personne).
 
 ### RenderCanceler (`holo/render`, `client/render/cancel`)
 

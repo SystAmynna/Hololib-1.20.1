@@ -71,6 +71,15 @@ public final class SpaceArchive extends SavedData
         setDirty();
     }
 
+    /** Oublie l'etat archive et l'Environment branche (remise a zero, {@code onReset}) ; fichier reecrit vide. */
+    void clear()
+    {
+        env = null;
+        saved = -1L;
+        live = null;
+        setDirty();
+    }
+
     /** Toujours a ecrire tant qu'un Environment est branche : son etat change sans {@code markDirty}. */
     @Override
     public boolean isDirty() { return live != null || super.isDirty(); }

@@ -13,7 +13,8 @@
  *     ancres dans le monde, sa position est envoyee aux clients.</li>
  * </ul>
  * Un type de module n'est installable que dans le genre de memoire de sa compatibilite ({@code HoloModuleTarget}), en
- * une seule instance par memoire. {@link com.amynna.hololib.holo.memory.HoloContainers} tient l'index, gere les
+ * une seule instance par memoire. Une memoire garde aussi la sauvegarde (dormante) d'un module retire, relue a sa
+ * reinstallation ; {@code reset} remet une sauvegarde a zero sans retirer le module (hook {@code HoloModule.onReset}). {@link com.amynna.hololib.holo.memory.HoloContainers} tient l'index, gere les
  * evenements et expose l'API serveur ; {@link com.amynna.hololib.holo.memory.HoloMemories} modifie une memoire au
  * repos.
  */

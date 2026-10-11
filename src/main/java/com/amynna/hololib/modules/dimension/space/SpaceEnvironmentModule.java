@@ -457,6 +457,17 @@ public final class SpaceEnvironmentModule extends HoloModule
     }
 
     /**
+     * Remise a zero ({@code /holo_memory ... reset}) : l'archive du niveau est videe, sinon elle rendrait l'etat au
+     * module neuf ; debranchee, {@link #onUnload} ne la remplit plus.
+     */
+    @Override
+    public void onReset(ServerLevel level)
+    {
+        if (level != null) SpaceArchive.of(level).clear();
+        archive = null;
+    }
+
+    /**
      * Serveur : complete un etat charge, restaure ou vide (galaxie par defaut, repli du systeme courant, pose par
      * defaut provisoire si elle manque).
      */

@@ -149,6 +149,24 @@ public final class HoloContainers
         return HoloMemoryBank.of(player).create(name);
     }
 
+    /**
+     * Cree pour {@code target} une memoire copiee de la memoire {@code sourceName} de {@code source} (sa memoire
+     * active : etat vivant). {@code null} si la source n'existe pas, ou si le nom est invalide ou pris.
+     */
+    public static HoloMemory copyMemory(ServerPlayer target, String name, ServerPlayer source, String sourceName)
+    {
+        HoloMemoryBank sourceBank = HoloMemoryBank.of(source);
+        HoloMemory memory = sourceBank.find(sourceName);
+        if (memory == null) return null;
+        PlayerHoloContainer live = player(source);
+        if (memory == sourceBank.active() && live != null) {
+            HoloMemory snapshot = new HoloMemory(sourceName);
+            live.saveInto(snapshot);
+            memory = snapshot;
+        }
+        return HoloMemoryBank.of(target).createCopy(name, memory);
+    }
+
     /** Supprime une memoire de joueur inactive ; faux si elle n'existe pas ou est active. */
     public static boolean deleteMemory(ServerPlayer player, String name)
     {

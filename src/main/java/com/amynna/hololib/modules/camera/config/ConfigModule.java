@@ -1,6 +1,11 @@
 package com.amynna.hololib.modules.camera.config;
 
+import com.amynna.hololib.holo.memory.HoloContainers;
+import com.amynna.hololib.holo.memory.player.PlayerHoloContainer;
 import com.amynna.hololib.holo.module.HoloModule;
+import com.amynna.hololib.holo.object.HoloAnchor;
+import com.amynna.hololib.holo.object.HoloObject;
+import com.amynna.hololib.holo.object.HoloTransform;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
@@ -10,6 +15,7 @@ import net.minecraft.server.level.ServerPlayer;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Config : point d'entree de la configuration en jeu des modules {@link Configurable} de la memoire du joueur. Deux
@@ -21,11 +27,17 @@ import java.util.Set;
  * Etat : les fenetres epinglees (rouvertes avec le focus), par identifiant de type du module configurable (celui de
  * Config pour la liste). Sauvegarde, synchronise au proprietaire, modifie par {@link #requestPinned}. L'ouverture des
  * fenetres est locale au client ({@code client.modules.camera.config.ConfigController}).
+ * <p>
+ * Relaie aussi la position relative au regard d'une fenetre deplacee au cadre ({@link #requestOffset}) : l'objet
+ * appartient a un module voisin de la memoire du joueur, que le serveur retrouve par son {@code instanceId}.
  */
 public final class ConfigModule extends HoloModule
 {
     private static final int MAX_ID_LENGTH = 256;
     private static final int MAX_PINNED = 64;
+    private static final int MAX_KEY_LENGTH = 64;
+    private static final byte ACTION_PIN = 0;
+    private static final byte ACTION_OFFSET = 1;
 
     private final Set<String> pinned = new HashSet<>();
     private ConfigNutWindow nut;
@@ -37,6 +49,7 @@ public final class ConfigModule extends HoloModule
         nut = addObject(new ConfigNutWindow("nut", button -> toggleList()));
         list = addObject(new ConfigListWindow("list"));
         list.link(on -> requestPinned(listId(), on));
+        list.linkMoved(() -> requestOffset(list));
     }
 
     public ConfigNutWindow nut() { return nut; }
@@ -54,7 +67,29 @@ public final class ConfigModule extends HoloModule
         if (!host().canAct() || pinned.contains(id) == on || id.length() > MAX_ID_LENGTH) return;
         if (on) pinned.add(id);
         else pinned.remove(id);
-        sendAction(buf -> buf.writeUtf(id, MAX_ID_LENGTH).writeBoolean(on));
+        sendAction(buf -> {
+            buf.writeByte(ACTION_PIN);
+            buf.writeUtf(id, MAX_ID_LENGTH).writeBoolean(on);
+        });
+    }
+
+    /**
+     * Cote client (proprietaire) : envoie la position relative au regard de {@code window} (fenetre de Config d'un
+     * module de la memoire du joueur), deja recalculee localement apres un deplacement au cadre.
+     */
+    public void requestOffset(ConfigWindow window)
+    {
+        HoloModule owner = window.module();
+        if (!host().canAct() || owner == null || window.openOffset() == null
+                || window.key().length() > MAX_KEY_LENGTH) {
+            return;
+        }
+        HoloTransform offset = window.openOffset().copy();
+        sendAction(buf -> {
+            buf.writeByte(ACTION_OFFSET);
+            buf.writeUUID(owner.instanceId()).writeUtf(window.key(), MAX_KEY_LENGTH);
+            offset.write(buf);
+        });
     }
 
     /** Cote client : clic sur l'ecrou. */
@@ -68,9 +103,34 @@ public final class ConfigModule extends HoloModule
     @Override
     public void handleAction(ServerPlayer player, FriendlyByteBuf buf)
     {
-        String id = buf.readUtf(MAX_ID_LENGTH);
-        boolean on = buf.readBoolean();
-        if (on ? pinned.size() < MAX_PINNED && pinned.add(id) : pinned.remove(id)) markDirty();
+        byte action = buf.readByte();
+        if (action == ACTION_PIN) {
+            String id = buf.readUtf(MAX_ID_LENGTH);
+            boolean on = buf.readBoolean();
+            if (on ? pinned.size() < MAX_PINNED && pinned.add(id) : pinned.remove(id)) markDirty();
+        } else if (action == ACTION_OFFSET) {
+            UUID instanceId = buf.readUUID();
+            String key = buf.readUtf(MAX_KEY_LENGTH);
+            applyOffset(instanceId, key, HoloTransform.read(buf));
+        }
+    }
+
+    /**
+     * Serveur : position relative d'une {@link ConfigWindow} d'un module de la memoire du proprietaire (seul a pouvoir
+     * envoyer une action sans source), bornee comme une edition ; translation et rotation (l'echelle reste celle du
+     * serveur). Synchronisee et sauvegardee par le framework.
+     */
+    private void applyOffset(UUID instanceId, String key, HoloTransform offset)
+    {
+        PlayerHoloContainer container = owner() != null ? HoloContainers.player(owner()) : null;
+        HoloModule module = container != null ? container.module(instanceId) : null;
+        HoloObject object = module != null ? module.object(key) : null;
+        if (!(object instanceof ConfigWindow) || object.openOffset() == null
+                || !new HoloAnchor.Local(true).acceptable(offset)) {
+            return;
+        }
+        object.openOffset().setTranslation(offset.x(), offset.y(), offset.z())
+                .setRotation(offset.yaw(), offset.pitch(), offset.roll());
     }
 
     @Override

@@ -16,6 +16,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -25,12 +26,25 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Argument {@code <module...>} : un ou plusieurs identifiants de modules separes par des espaces (dernier argument de
- * la commande). L'autocompletion porte sur le dernier mot : modules compatibles avec la memoire visee, absents pour un
- * ajout, presents pour un retrait, sans reproposer ceux deja ecrits.
+ * la commande). L'autocompletion porte sur le dernier mot, sans reproposer ceux deja ecrits : modules compatibles avec
+ * la memoire visee absents pour un ajout, presents pour un retrait, ayant une trace (installes ou sauvegarde dormante)
+ * pour une remise a zero.
  */
 final class ModuleListArgument
 {
     private static final String NAME = "modules";
+
+    /** Operation appliquee a chaque module de la liste. */
+    enum Mode
+    {
+        ADD("ajoute(s)"),
+        REMOVE("retire(s)"),
+        RESET("remis a zero");
+
+        private final String verb;
+
+        Mode(String verb) { this.verb = verb; }
+    }
 
     /** Resout la memoire visee a partir des arguments precedents. */
     @FunctionalInterface
@@ -41,15 +55,49 @@ final class ModuleListArgument
 
     private ModuleListArgument() {}
 
-    static RequiredArgumentBuilder<CommandSourceStack, String> argument(boolean add, SlotResolver resolver)
+    static RequiredArgumentBuilder<CommandSourceStack, String> argument(Mode mode, SlotResolver resolver)
     {
         return Commands.argument(NAME, StringArgumentType.greedyString())
-                .suggests((ctx, builder) -> suggest(ctx, builder, add, resolver))
-                .executes(ctx -> execute(ctx, add, resolver.resolve(ctx)));
+                .suggests((ctx, builder) -> suggest(ctx, builder, mode, resolver))
+                .executes(ctx -> {
+                    Set<ResourceLocation> ids = new LinkedHashSet<>();
+                    for (String word : StringArgumentType.getString(ctx, NAME).trim().split("\\s+")) {
+                        ResourceLocation id = ResourceLocation.tryParse(word);
+                        if (id == null) {
+                            ctx.getSource().sendFailure(Component.literal("Identifiant invalide : " + word));
+                        } else {
+                            ids.add(id);
+                        }
+                    }
+                    return execute(ctx.getSource(), mode, resolver.resolve(ctx), ids);
+                });
+    }
+
+    /** Applique l'operation a chacun des {@code ids} et rend compte ; nombre de modules traites. */
+    static int execute(CommandSourceStack source, Mode mode, ModuleSlot slot, Collection<ResourceLocation> ids)
+    {
+        // Le joueur qui installe devient proprietaire du module pour l'edition (la console : personne).
+        UUID creator = source.getPlayer() != null ? source.getPlayer().getUUID() : null;
+        int done = 0;
+        for (ResourceLocation id : ids) {
+            String error = switch (mode) {
+                case ADD -> add(slot, id, creator);
+                case REMOVE -> slot.remove(id) ? null : "absent";
+                case RESET -> reset(slot, id);
+            };
+            if (error != null) {
+                source.sendFailure(Component.literal(id + " : " + error));
+            } else {
+                done++;
+            }
+        }
+        int count = done;
+        source.sendSuccess(() -> Component.literal(count + " module(s) " + mode.verb), true);
+        return count;
     }
 
     private static CompletableFuture<Suggestions> suggest(CommandContext<CommandSourceStack> ctx,
-                                                          SuggestionsBuilder builder, boolean add,
+                                                          SuggestionsBuilder builder, Mode mode,
                                                           SlotResolver resolver)
     {
         ModuleSlot slot;
@@ -61,45 +109,20 @@ final class ModuleListArgument
         String remaining = builder.getRemaining();
         int lastWord = remaining.lastIndexOf(' ') + 1;
         Set<ResourceLocation> typed = parse(remaining.substring(0, lastWord));
-        Set<ResourceLocation> present = slot.present();
         List<ResourceLocation> candidates = new ArrayList<>();
-        for (Map.Entry<ResourceKey<HoloModuleType<?>>, HoloModuleType<?>> entry
-                : HoloModuleTypes.registry().getEntries()) {
-            ResourceLocation id = entry.getKey().location();
-            if (entry.getValue().target() != slot.target() || typed.contains(id)) continue;
-            if (add != present.contains(id)) candidates.add(id);
+        if (mode == Mode.RESET) {
+            for (ResourceLocation id : slot.resettable()) if (!typed.contains(id)) candidates.add(id);
+        } else {
+            Set<ResourceLocation> present = slot.present();
+            for (Map.Entry<ResourceKey<HoloModuleType<?>>, HoloModuleType<?>> entry
+                    : HoloModuleTypes.registry().getEntries()) {
+                ResourceLocation id = entry.getKey().location();
+                if (entry.getValue().target() != slot.target() || typed.contains(id)) continue;
+                if ((mode == Mode.ADD) != present.contains(id)) candidates.add(id);
+            }
         }
         SuggestionsBuilder word = builder.createOffset(builder.getStart() + lastWord);
         return SharedSuggestionProvider.suggestResource(candidates, word);
-    }
-
-    private static int execute(CommandContext<CommandSourceStack> ctx, boolean add, ModuleSlot slot)
-    {
-        CommandSourceStack source = ctx.getSource();
-        Set<ResourceLocation> ids = new LinkedHashSet<>();
-        for (String word : StringArgumentType.getString(ctx, NAME).trim().split("\\s+")) {
-            ResourceLocation id = ResourceLocation.tryParse(word);
-            if (id == null) {
-                source.sendFailure(Component.literal("Identifiant invalide : " + word));
-            } else {
-                ids.add(id);
-            }
-        }
-        // Le joueur qui installe devient proprietaire du module pour l'edition (la console : personne).
-        UUID creator = source.getPlayer() != null ? source.getPlayer().getUUID() : null;
-        int done = 0;
-        for (ResourceLocation id : ids) {
-            String error = add ? add(slot, id, creator) : remove(slot, id);
-            if (error != null) {
-                source.sendFailure(Component.literal(id + " : " + error));
-            } else {
-                done++;
-            }
-        }
-        int count = done;
-        String verb = add ? "ajoute(s)" : "retire(s)";
-        source.sendSuccess(() -> Component.literal(count + " module(s) " + verb), true);
-        return count;
     }
 
     /** @return message d'erreur, ou {@code null} si le module a ete ajoute */
@@ -111,10 +134,11 @@ final class ModuleListArgument
         return slot.add(type, creator) ? null : "deja present";
     }
 
-    /** @return message d'erreur, ou {@code null} si le module a ete retire */
-    private static String remove(ModuleSlot slot, ResourceLocation id)
+    /** @return message d'erreur, ou {@code null} si la sauvegarde du module a ete remise a zero */
+    private static String reset(ModuleSlot slot, ResourceLocation id)
     {
-        return slot.remove(id) ? null : "absent";
+        if (slot.unknown().contains(id)) return "type inconnu, conserve tel quel";
+        return slot.reset(id) ? null : "aucune sauvegarde dans cette memoire";
     }
 
     private static Set<ResourceLocation> parse(String words)

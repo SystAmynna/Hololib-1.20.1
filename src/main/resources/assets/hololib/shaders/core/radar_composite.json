@@ -1,0 +1,23 @@
+{
+    "vertex": "hololib:radar_composite",
+    "fragment": "hololib:radar_composite",
+    "attributes": [
+        "Position"
+    ],
+    "samplers": [
+        { "name": "Sampler0" },
+        { "name": "Sampler1" }
+    ],
+    "uniforms": [
+        { "name": "InvViewProj", "type": "matrix4x4", "count": 16, "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] },
+        { "name": "CameraPos", "type": "float", "count": 3, "values": [ 0.0, 0.0, 0.0 ] },
+        { "name": "TexelSize", "type": "float", "count": 2, "values": [ 0.001, 0.001 ] },
+        { "name": "Radius", "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "Front", "type": "float", "count": 1, "values": [ 0.6 ] },
+        { "name": "WaveAlpha", "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "WaveColor", "type": "float", "count": 3, "values": [ 0.25, 0.75, 1.0 ] },
+        { "name": "HasMask", "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "FillAlpha", "type": "float", "count": 1, "values": [ 0.45 ] },
+        { "name": "MarkColor", "type": "float", "count": 3, "values": [ 0.2, 0.45, 1.0 ] }
+    ]
+}

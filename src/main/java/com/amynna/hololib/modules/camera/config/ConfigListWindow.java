@@ -79,6 +79,7 @@ public final class ConfigListWindow extends ConfigWindow
             ConfigWindow window = entry.configWindow();
             String id = ((HoloModule) entry).type().id().toString();
             window.link(pinned -> config.requestPinned(id, pinned));
+            window.linkMoved(() -> config.requestOffset(window));
             windows.add(window);
             ids.add(id);
             rows.add(list.addItem(new HoloWidgetButton(0, 0, 1, ROW_HEIGHT, entry.configName(),

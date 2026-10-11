@@ -37,19 +37,20 @@ import java.util.List;
  *     <li>{@code world <marker> <module...>} : memoire de position du marker (chargee ou non).</li>
  *     <li>{@code player <joueur> <current|memoire> <module...>} : une memoire d'un joueur connecte.</li>
  * </ul>
- * Seuls les modules de la compatibilite correspondante sont acceptes et proposes.
+ * Seuls les modules de la compatibilite correspondante sont acceptes et proposes. Un module retire laisse sa sauvegarde
+ * dans la memoire (relue s'il est reajoute ; remise a zero par {@code /holo_memory ... reset}).
  */
 @Mod.EventBusSubscriber(modid = HoloLib.MODID)
 public final class HoloModuleCommand
 {
     /** Nom reserve designant la memoire active du joueur. */
-    private static final String CURRENT = "current";
+    static final String CURRENT = "current";
 
     private static final DynamicCommandExceptionType UNKNOWN_MARKER =
             new DynamicCommandExceptionType(id -> Component.literal("Marker inconnu : " + id));
-    private static final DynamicCommandExceptionType UNKNOWN_MEMORY =
+    static final DynamicCommandExceptionType UNKNOWN_MEMORY =
             new DynamicCommandExceptionType(name -> Component.literal("Memoire inconnue : " + name));
-    private static final DynamicCommandExceptionType UNAVAILABLE =
+    static final DynamicCommandExceptionType UNAVAILABLE =
             new DynamicCommandExceptionType(what -> Component.literal("Memoire indisponible : " + what));
 
     private HoloModuleCommand() {}
@@ -58,53 +59,56 @@ public final class HoloModuleCommand
     public static void onRegisterCommands(RegisterCommandsEvent event)
     {
         event.getDispatcher().register(Commands.literal("hololib_module").requires(source -> source.hasPermission(2))
-                .then(action("add", true))
-                .then(action("remove", false)));
+                .then(action("add", ModuleListArgument.Mode.ADD))
+                .then(action("remove", ModuleListArgument.Mode.REMOVE)));
     }
 
-    private static LiteralArgumentBuilder<CommandSourceStack> action(String name, boolean add)
+    private static LiteralArgumentBuilder<CommandSourceStack> action(String name, ModuleListArgument.Mode mode)
     {
         return Commands.literal(name)
                 .then(Commands.literal("dimension")
                         .then(Commands.literal("here")
-                                .then(ModuleListArgument.argument(add,
+                                .then(ModuleListArgument.argument(mode,
                                         ctx -> dimension(ctx.getSource().getLevel()))))
                         .then(Commands.argument("dim", DimensionArgument.dimension())
-                                .then(ModuleListArgument.argument(add,
+                                .then(ModuleListArgument.argument(mode,
                                         ctx -> dimension(DimensionArgument.getDimension(ctx, "dim"))))))
                 .then(Commands.literal("world")
                         .then(Commands.argument("marker", StringArgumentType.word())
                                 .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
                                         HoloMarkerCommand.markerIds(ctx.getSource()), builder))
-                                .then(ModuleListArgument.argument(add, HoloModuleCommand::position))))
+                                .then(ModuleListArgument.argument(mode, HoloModuleCommand::position))))
                 .then(Commands.literal("player")
                         .then(Commands.argument("player", EntityArgument.player())
                                 .then(Commands.argument("memory", StringArgumentType.word())
                                         .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
                                                 memoryNames(ctx), builder))
-                                        .then(ModuleListArgument.argument(add, HoloModuleCommand::player)))));
+                                        .then(ModuleListArgument.argument(mode, HoloModuleCommand::player)))));
     }
 
-    // ---------------------------------------------------------------- resolution des memoires
+    // ---------------------------------------------------------------- resolution des memoires (aussi /holo_memory)
 
-    private static ModuleSlot dimension(ServerLevel level) throws CommandSyntaxException
+    static ModuleSlot dimension(ServerLevel level) throws CommandSyntaxException
     {
         DimensionHoloContainer container = HoloContainers.dimension(level);
         if (container == null) throw UNAVAILABLE.create(level.dimension().location());
         return ModuleSlot.of(container);
     }
 
-    private static ModuleSlot position(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException
+    /** Memoire du marker de l'argument {@code marker}. */
+    static ModuleSlot position(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException
     {
         String id = StringArgumentType.getString(ctx, "marker");
         HoloMarkers markers = HoloMarkers.of(ctx.getSource().getServer());
         HoloMarkers.Record record = markers.get(id);
         if (record == null) throw UNKNOWN_MARKER.create(id);
         if (record.live() != null) return ModuleSlot.of(record.live());
-        return ModuleSlot.offline(record.memory(), record.scope(), HoloModuleTarget.POSITION, markers::setDirty);
+        return ModuleSlot.offline(record.memory(), record.scope(), HoloModuleTarget.POSITION,
+                ctx.getSource().getServer().getLevel(record.dimension()), markers::setDirty);
     }
 
-    private static ModuleSlot player(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException
+    /** Memoire {@code memory} ({@code current} = l'active) du joueur de l'argument {@code player}. */
+    static ModuleSlot player(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException
     {
         ServerPlayer player = EntityArgument.getPlayer(ctx, "player");
         String name = StringArgumentType.getString(ctx, "memory");
@@ -117,22 +121,26 @@ public final class HoloModuleCommand
         HoloMemory memory = bank.find(name);
         if (memory == null) throw UNKNOWN_MEMORY.create(name);
         // Memoire inactive : modifiee au repos, sauvegardee avec le joueur.
-        return ModuleSlot.offline(memory, new HoloScope.Player(player.getUUID()), HoloModuleTarget.PLAYER, () -> {});
+        return ModuleSlot.offline(memory, new HoloScope.Player(player.getUUID()), HoloModuleTarget.PLAYER,
+                player.serverLevel(), () -> {});
     }
 
     // ---------------------------------------------------------------- suggestions
 
-    /** {@code current} en premier, puis les memoires du joueur. */
-    private static List<String> memoryNames(CommandContext<CommandSourceStack> ctx)
+    /** {@code current} en premier, puis les memoires du joueur de l'argument {@code player}. */
+    static List<String> memoryNames(CommandContext<CommandSourceStack> ctx) { return memoryNames(ctx, "player", true); }
+
+    /** Memoires du joueur de l'argument {@code playerArgument}, precedees de {@code current} si demande. */
+    static List<String> memoryNames(CommandContext<CommandSourceStack> ctx, String playerArgument, boolean current)
     {
         List<String> names = new ArrayList<>();
-        names.add(CURRENT);
+        if (current) names.add(CURRENT);
         try {
-            for (HoloMemory memory : HoloMemoryBank.of(EntityArgument.getPlayer(ctx, "player")).memories()) {
+            for (HoloMemory memory : HoloMemoryBank.of(EntityArgument.getPlayer(ctx, playerArgument)).memories()) {
                 names.add(memory.name());
             }
         } catch (CommandSyntaxException | IllegalStateException e) {
-            // Joueur introuvable : seul "current" est propose.
+            // Joueur introuvable : seul "current" est propose (s'il est demande).
         }
         return names;
     }

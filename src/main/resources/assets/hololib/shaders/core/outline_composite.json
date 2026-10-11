@@ -1,0 +1,14 @@
+{
+    "vertex": "hololib:outline_composite",
+    "fragment": "hololib:outline_composite",
+    "attributes": [
+        "Position"
+    ],
+    "samplers": [
+        { "name": "Sampler0" }
+    ],
+    "uniforms": [
+        { "name": "TexelSize", "type": "float", "count": 2, "values": [ 0.001, 0.001 ] },
+        { "name": "OutlineColor", "type": "float", "count": 4, "values": [ 0.25, 1.0, 0.375, 1.0 ] }
+    ]
+}

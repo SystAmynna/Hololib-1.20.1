@@ -4,6 +4,7 @@ import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.holo.module.HoloModuleTarget;
 import com.amynna.hololib.holo.module.HoloModuleType;
 import com.amynna.hololib.holo.module.HoloModuleTypes;
+import com.amynna.hololib.modules.camera.attackguard.AttackGuardModule;
 import com.amynna.hololib.modules.camera.config.ConfigModule;
 import com.amynna.hololib.modules.camera.crosshaircancel.CrosshairCancelModule;
 import com.amynna.hololib.modules.camera.editor.DimensionEditorModule;
@@ -14,9 +15,13 @@ import com.amynna.hololib.modules.camera.editor.OwnFixEditorModule;
 import com.amynna.hololib.modules.camera.editor.OwnHudEditorModule;
 import com.amynna.hololib.modules.camera.editor.WorldEditorModule;
 import com.amynna.hololib.modules.camera.focus.FocusModule;
+import com.amynna.hololib.modules.camera.keys.KeysModule;
+import com.amynna.hololib.modules.camera.keyseditor.KeysEditorModule;
 import com.amynna.hololib.modules.camera.quickaction.QuickActionModule;
+import com.amynna.hololib.modules.camera.radar.RadarModule;
 import com.amynna.hololib.modules.camera.spaceknowledge.SpaceKnowledgeModule;
 import com.amynna.hololib.modules.camera.spacepilot.SpacePilotModule;
+import com.amynna.hololib.modules.camera.targeting.TargetingModule;
 import com.amynna.hololib.modules.dimension.planet1.Planet1Module;
 import com.amynna.hololib.modules.dimension.skycancel.SkyCancelModule;
 import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
@@ -78,6 +83,16 @@ public final class HoloLibModules
             "sky_cancel", () -> new HoloModuleType<>(HoloModuleTarget.DIMENSION, SkyCancelModule::new));
     public static final RegistryObject<HoloModuleType<CrosshairCancelModule>> CROSSHAIR_CANCEL = REGISTER.register(
             "crosshair_cancel", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, CrosshairCancelModule::new));
+    public static final RegistryObject<HoloModuleType<RadarModule>> RADAR = REGISTER.register(
+            "radar", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, RadarModule::new));
+    public static final RegistryObject<HoloModuleType<TargetingModule>> TARGETING = REGISTER.register(
+            "targeting", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, TargetingModule::new));
+    public static final RegistryObject<HoloModuleType<KeysModule>> KEYS = REGISTER.register(
+            "keys", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, KeysModule::new));
+    public static final RegistryObject<HoloModuleType<KeysEditorModule>> KEYS_EDITOR = REGISTER.register(
+            "keys_editor", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, KeysEditorModule::new));
+    public static final RegistryObject<HoloModuleType<AttackGuardModule>> ATTACK_GUARD = REGISTER.register(
+            "attack_guard", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, AttackGuardModule::new));
 
     private HoloLibModules() {}
 }

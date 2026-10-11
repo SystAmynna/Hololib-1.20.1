@@ -9,7 +9,8 @@
  *     module detient.</li>
  *     <li>Liste et fenetres de configuration sont des {@link com.amynna.hololib.modules.camera.config.ConfigWindow} :
  *     croix (fermer) et epingle ; ouvertes devant le regard au clic, fermees avec le focus sauf si elles sont
- *     epinglees (rouvertes alors avec lui).</li>
+ *     epinglees (rouvertes alors avec lui) ; deplacables en les saisissant par le cadre (position relative au regard
+ *     memorisee).</li>
  * </ul>
  * <b>Rendre un module configurable</b> : implementer {@code Configurable} et creer sa {@code ConfigWindow} dans
  * {@code onLoad} (voir {@code demo.DemoConfigurableModule}). Les icones (ecrou, epingle, croix) sont dessinees en

@@ -145,6 +145,15 @@ public abstract class HoloModule
     /** Le module est retire ou sa memoire dechargee (deux cotes). */
     public void onUnload() {}
 
+    /**
+     * Serveur : la sauvegarde du module va etre remise a zero ({@code /holo_memory ... reset}). Appele sur l'instance
+     * vivante, ou sur une instance recreee depuis la sauvegarde (module non equipe, memoire au repos), juste avant
+     * {@link #onUnload} ; pour effacer les donnees que le module tient hors de sa memoire.
+     *
+     * @param level niveau de la memoire (joueur : celui du joueur), ou {@code null} s'il est indisponible
+     */
+    public void onReset(ServerLevel level) {}
+
     /** Chaque tick serveur, tant que la memoire est chargee ; {@code level} = niveau du joueur ou de la memoire. */
     public void serverTick(ServerLevel level) {}
 
