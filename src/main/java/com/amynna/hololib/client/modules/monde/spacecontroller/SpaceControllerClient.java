@@ -3,7 +3,9 @@ package com.amynna.hololib.client.modules.monde.spacecontroller;
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.client.modules.camera.spacepilot.SpacePilotClient;
 import com.amynna.hololib.modules.monde.spacecontroller.SpaceControllerModule;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.Options;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -12,8 +14,8 @@ import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 /**
  * Backend client du module {@code hololib:space_controller} ({@link SpaceControllerModule.Backend}) : niveau de
  * permission du joueur local (pilotage reserve aux ops), presence de son module Space Pilot (pilotage refuse sans
- * lui, D11) et fraction de tick de la derniere frame (cible du saut cherchee dans le ciel affiche, T22). Installe au
- * setup client. Fil client.
+ * lui, D11), fraction de tick de la derniere frame (cible du saut cherchee dans le ciel affiche, T22) et remise a zero
+ * de Sneak / Sprint en mode bascule pendant le pilotage (T32). Installe au setup client. Fil client.
  */
 @Mod.EventBusSubscriber(modid = HoloLib.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
 public final class SpaceControllerClient implements SpaceControllerModule.Backend
@@ -41,4 +43,20 @@ public final class SpaceControllerClient implements SpaceControllerModule.Backen
     /** Fraction de tick utilisee pour dessiner la derniere frame (figee en pause, {@code Minecraft.getPartialTick}). */
     @Override
     public float partialTick() { return Minecraft.getInstance().getPartialTick(); }
+
+    /**
+     * Mode bascule (options « Accroupissement » / « Sprint » sur « Basculer ») :
+     * {@code ToggleKeyMapping.setDown(false)} est ignore et chaque appui inverse l'etat, donc la neutralisation de la
+     * capture n'a aucun effet ; {@code KeyMapping.resetToggleKeys()} (vanilla, public) remet les mappings a bascule au
+     * repos. Appele seulement si Sneak ou Sprint est en bascule et enfonce.
+     */
+    @Override
+    public void releaseToggleKeys()
+    {
+        Options options = Minecraft.getInstance().options;
+        if (options.toggleCrouch().get() && options.keyShift.isDown()
+                || options.toggleSprint().get() && options.keySprint.isDown()) {
+            KeyMapping.resetToggleKeys();
+        }
+    }
 }

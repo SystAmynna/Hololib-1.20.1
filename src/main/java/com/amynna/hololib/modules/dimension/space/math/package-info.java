@@ -1,7 +1,7 @@
 /**
  * Calculs purs et deterministes des modules Space (T02) : unites, orbites de Kepler, pose du monde, pas de mouvement,
- * entree du pilote, referentiel, saut, passage systeme -> ciel. Specification :
- * {@code docs/space/04-mathematiques.md} par. 1 a 5, 8 et
+ * entree du pilote, referentiel, saut, passage systeme -> ciel, rotation propre des corps (T28), vitesse de croisiere
+ * (T34). Specification : {@code docs/space/04-mathematiques.md} par. 1 a 5, 8, 10, 11 et
  * {@code 05-synchronisation.md} par. 2 (la meme fonction tourne sur le serveur et sur les clients).
  * <p>
  * Contenu :
@@ -13,7 +13,7 @@
  *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpacePose} : pose du monde dans le systeme
  *     (position km, orientation monde -> systeme), interpolation, reseau, NBT ;</li>
  *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpacePilotInput} : entree quantifiee du pilote (gaz,
- *     roulis, taux de lacet et de tangage, frein, visee, saut et sa cible) ;</li>
+ *     roulis, taux de lacet et de tangage, frein, boost (T32), visee, saut et sa cible) ;</li>
  *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpaceMotionSettings} : reglages du mouvement et de
  *     l'horloge (axe avant, vitesse max, taux de rotation, echelle de temps) et vitesse de distorsion du saut (T15),
  *     avec leurs valeurs par defaut ;</li>
@@ -23,13 +23,20 @@
  *     charge / voyage, cible, compteur, duree, orientation et positions galactiques figees au debut), progressions,
  *     reseau, NBT ; fonctions pures : orientation de la charge, duree du voyage, pose d'arrivee (T21, doc 04 par. 8)
  *     ;</li>
- *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpaceMotion} : un pas de tick (referentiel par score
- *     proximite x regard avec delai, cooldown et fondu, gaz a vitesse signee et frein, rotation, entrainement par le
- *     referentiel, freinage d'approche, garde-fou ; variante avec le saut : charge verrouillee, voyage fige), pose
- *     par defaut d'un systeme (et son referentiel), corps le plus proche, interpolation d'affichage dans le repere du
- *     referentiel ;</li>
+ *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpaceMotion} : un pas de tick (referentiel par spheres
+ *     d'influence, T39, avec hysteresis, delai, cooldown et fondu ; masses des corps, aucune gravite appliquee, gaz a
+ *     vitesse signee et frein, pentes renforcees par le boost (T32), rotation, entrainement par le referentiel,
+ *     freinage d'approche, garde-fou ; variante avec le saut : charge verrouillee, voyage fige), pose par defaut d'un
+ *     systeme (et son referentiel), corps le plus proche, interpolation d'affichage dans le repere du referentiel,
+ *     distance d'arret au frein (T32) ;</li>
  *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpaceSkyFrame} : repere du ciel d'une frame (point du
- *     systeme -> direction monde + distance, direction d'un autre systeme).</li>
+ *     systeme -> direction monde + distance, direction d'un autre systeme) ;</li>
+ *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpaceSpin} : rotation propre des corps (T28, doc 04
+ *     par. 10) : orientation (axes locaux du corps -> axes du systeme) au temps simule, rotation synchrone tiree de la
+ *     position orbitale, variante a tampon sans allocation ;</li>
+ *     <li>{@link com.amynna.hololib.modules.dimension.space.math.SpaceCruise} : vitesse de croisiere du HUD de Space
+ *     Pilot (T34, doc 04 par. 11) : cible au centre de l'ecran avec hysteresis, vitesse cible (frein normal, temps de
+ *     reaction du pilote, marge), couleur de l'indication. Calcul client seulement.</li>
  * </ul>
  * <p>
  * Regles :
@@ -39,7 +46,8 @@
  *     {@code FriendlyByteBuf}.</li>
  *     <li><b>Determinisme bit a bit</b> des calculs simules ({@link
  *     com.amynna.hololib.modules.dimension.space.math.SpaceOrbits#positions}, {@link
- *     com.amynna.hololib.modules.dimension.space.math.SpaceMotion#step}) : trigonometrie par {@link java.lang.StrictMath}
+ *     com.amynna.hololib.modules.dimension.space.math.SpaceMotion#step}, {@link
+ *     com.amynna.hololib.modules.dimension.space.math.SpaceSpin#orientation}) : trigonometrie par {@link java.lang.StrictMath}
  *     (meme resultat sur toute JVM), arithmetique des quaternions et vecteurs ecrite ici
  *     ({@code SpaceRotations}, sans {@code Math.fma} : les methodes JOML changent de resultat selon
  *     {@code joml.useMathFma}), aucun hasard, aucune horloge, aucun ordre de {@code HashMap}. Seule l'interpolation
@@ -60,7 +68,7 @@
  * {@code U = R x F} ({@code (0, 1, 0)} pour un avant horizontal). Signes du pilotage (a verifier en jeu en T07) :
  * {@code yawRate > 0} tourne l'avant vers la droite, {@code pitchRate > 0} leve l'avant, {@code roll > 0} roule a
  * droite. Vitesse nominale <b>signee</b> {@code V} dans {@code [-V_max, V_max]} ({@code V < 0} : le monde part en
- * arriere), <b>relative au corps de reference</b> (score proximite x regard, D8 ; le monde suit son mouvement
+ * arriere), <b>relative au corps de reference</b> (spheres d'influence, D29 ; le monde suit son mouvement
  * orbital) : {@code throttle > 0} la pousse vers {@code +V_max}, {@code throttle < 0} vers {@code -V_max} (en
  * freinant d'abord jusqu'a 0 si elle est de l'autre signe) ; le frein la ramene a 0 et prime sur les gaz.
  */

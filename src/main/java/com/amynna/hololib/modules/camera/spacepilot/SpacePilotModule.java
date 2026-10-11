@@ -3,18 +3,18 @@ package com.amynna.hololib.modules.camera.spacepilot;
 import com.amynna.hololib.holo.memory.HoloContainers;
 import com.amynna.hololib.holo.memory.player.PlayerHoloContainer;
 import com.amynna.hololib.holo.module.HoloModule;
-import com.amynna.hololib.holo.widget.HoloCanvas;
+import com.amynna.hololib.holo.object.HoloTransform;
 import com.amynna.hololib.modules.camera.config.ConfigWindow;
 import com.amynna.hololib.modules.camera.config.Configurable;
-import com.amynna.hololib.modules.camera.quickaction.QuickAction;
-import com.amynna.hololib.modules.camera.quickaction.QuickActionProvider;
 import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
 import com.amynna.hololib.modules.dimension.space.SpaceFormat;
+import com.amynna.hololib.modules.dimension.space.math.SpaceCruise;
 import com.amynna.hololib.modules.dimension.space.math.SpaceJump;
 import com.amynna.hololib.modules.dimension.space.math.SpaceMotion;
 import com.amynna.hololib.modules.dimension.space.math.SpaceMotionSettings;
 import com.amynna.hololib.modules.dimension.space.math.SpaceOrbits;
 import com.amynna.hololib.modules.dimension.space.math.SpacePose;
+import com.amynna.hololib.modules.dimension.space.math.SpaceUnits;
 import com.amynna.hololib.modules.dimension.space.model.SpaceBody;
 import com.amynna.hololib.modules.dimension.space.model.SpaceGalaxy.BackgroundStar;
 import com.amynna.hololib.modules.dimension.space.model.SpaceSystem;
@@ -23,85 +23,102 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.util.Mth;
 import org.joml.Vector3d;
 
-import java.util.List;
+import java.util.Objects;
 
 /**
- * Module {@code hololib:space_pilot} (memoire de joueur) : affichage personnel du pilote dans une dimension munie d'un
- * Space Environment. Il porte les <b>reglages d'affichage</b>, lus par les renderers du joueur local (surcouche du
- * ciel, lien vers le referentiel, HUD de navigation : T18 a T20), et le <b>joystick</b> de pilotage (T19) :
+ * Module {@code hololib:space_pilot} (memoire de joueur) : aides au <b>pilotage</b> dans une dimension munie d'un
+ * Space Environment, pour le joueur local seulement. Reduit en T33 (D25, C75) : la connaissance du ciel (anneaux,
+ * orbites, etoiles exterieures, nom au regard) et la Quick Action sont passees a Space Knowledge
+ * ({@code hololib:space_knowledge}). Il garde :
  * <ul>
- *     <li>{@link #enabled()} : interrupteur general, bascule par l'action de la roue Quick Action ; faux, il coupe la
- *     surcouche, le HUD et le lien, mais pas le joystick ni la roue de charge, necessaires au pilotage (C44) ;</li>
- *     <li>{@link #orbits()}, {@link #bodies()} (reperage des corps : anneau + nom), {@link #stars()} (etoiles
- *     exterieures), {@link #names()} (nom au regard, corps et etoiles), {@link #nameAngle()} (angle regard / objet
- *     sous lequel le nom s'affiche, {@value #MIN_NAME_ANGLE} a {@value #MAX_NAME_ANGLE} degres), {@link #hud()}
- *     (donnees de navigation), {@link #refLink()} (lien vers le referentiel).</li>
+ *     <li>le <b>joystick</b> (T19, D11 : sans ce module, le Space Controller refuse le pilotage,
+ *     {@link #of(ServerPlayer)}) : deux objets {@code Local} {@code PRIVATE}, {@link SpaceJoystickForward} (cercle
+ *     avant = zone morte, place par {@link #clientTick} sur l'axe avant de l'Environment) et {@link SpaceJoystickAim}
+ *     (cercle de visee au centre de l'ecran), dessines seulement pendant que le joueur local pilote
+ *     ({@link #joystickShown()}) ;</li>
+ *     <li>le <b>saut</b> (T22) : cible, roue de charge et aide a la visee, dessinees pour le pilote local par
+ *     {@code SpaceJumpRenderer} (client) ;</li>
+ *     <li>le <b>lien vers le referentiel</b> et l'anneau du referentiel ({@link #refLink()}), dessines pour le pilote
+ *     local par {@code SpaceReferenceLinkRenderer} (client), <b>seulement pendant le pilotage</b> (C75) ;</li>
+ *     <li>le <b>HUD de navigation</b> (T20) : objet {@code Hud} {@code PRIVATE} {@link SpacePilotHud} (cle
+ *     {@code hud}), deplacable par l'Own HUD Editor ; {@link #clientTick} lit le miroir de l'Environment : ligne de
+ *     vitesse chaque tick (T34), referentiel et distance au plus 4 fois par seconde ({@value #HUD_REFRESH_TICKS}
+ *     ticks) ; affiche si {@link #hudShown()}, c'est-a-dire <b>seulement pendant le pilotage</b> (T33). Pendant le
+ *     voyage d'un saut (T22), la ligne de distance montre la cible et le temps restant ;</li>
+ *     <li>la <b>vitesse de croisiere</b> (T34, D25, C76 ; reglage {@link #cruise()}) : chaque tick client, cible =
+ *     corps du systeme courant le plus proche du centre de l'ecran (regard de la camera, lu par le {@link Backend},
+ *     hysteresis : {@link SpaceCruise#pickTarget}) et vitesse cible {@code v*} ({@link SpaceCruise#targetSpeed} :
+ *     distance a sa surface, rayon, {@code V_max} ; consigne sure au frein normal avec un temps de reaction humain)
+ *     ; affichees sur la ligne de vitesse et la ligne « Cible » du HUD. Aucune cible pendant un saut.</li>
  * </ul>
- * <b>Joystick</b> (T19, D11 : sans ce module, le Space Controller refuse le pilotage, {@link #of(ServerPlayer)}) : deux
- * objets {@code Local} {@code PRIVATE}, {@link SpaceJoystickForward} (cercle avant = zone morte, place par
- * {@link #clientTick} sur l'axe avant de l'Environment) et {@link SpaceJoystickAim} (cercle de visee au centre de
- * l'ecran), dessines seulement pendant que le joueur local pilote ({@link #joystickShown()}) ; pas coupes par
- * {@link #enabled()} (C44).
- * <p>
- * <b>HUD de navigation</b> (T20) : objet {@code Hud} {@code PRIVATE} {@link SpacePilotHud} (cle {@code hud}),
- * deplacable par l'Own HUD Editor ; {@link #clientTick} lit le miroir de l'Environment et le rafraichit au plus
- * 4 fois par seconde ({@value #HUD_REFRESH_TICKS} ticks) ; affiche si {@link #hudShown()}. Pendant le voyage d'un
- * saut (T22), la ligne de distance montre la cible et le temps restant.
- * <p>
- * <b>Saut</b> (T22) : la roue de charge et le reperage de la cible sont dessines pour le pilote local par
- * {@code SpaceJumpRenderer} (client), qui lit le pad du Space Controller et le miroir de l'Environment ; pas coupes
- * par {@link #enabled()} (C44), sauf l'aide a la visee (etoile qui serait choisie, sans la touche du saut).
- * <p>
  * Etat sauvegarde et synchronise au proprietaire seulement : {@link #sharedWithObservers()} faux et objets
- * {@code PRIVATE} (C45), un joueur qui inspecte ne voit ni la fenetre de Config ni l'action de la roue. Les widgets
- * appliquent le reglage localement (prediction) puis l'envoient ({@code sendAction}) ; le serveur le valide
- * (proprietaire, bornes) et renvoie l'etat.
+ * {@code PRIVATE} (C45), un joueur qui inspecte ne voit ni la fenetre de Config ni les rendus. Les widgets appliquent
+ * le reglage localement (prediction) puis l'envoient ({@code sendAction}) ; le serveur le valide (proprietaire,
+ * bornes) et renvoie l'etat. Les cles d'etat du lot 2 qui ne servent plus ({@code enabled}, {@code orbits},
+ * {@code bodies}, {@code stars}, {@code names}, {@code nameAngle}) sont ignorees au chargement, sans erreur (L22) ;
+ * {@code hud} et {@code refLink} gardent leur valeur.
  * <p>
- * Compatibilites (utilisation de l'API, sans la modifier) : {@link Configurable} (fenetre
- * {@link SpacePilotConfigWindow}) et {@link QuickActionProvider} (action {@code toggle}, dont le nom et l'icone
- * suivent {@link #enabled()} : la roue les relit a chaque frame).
+ * Compatibilite (utilisation de l'API, sans la modifier) : {@link Configurable} (fenetre
+ * {@link SpacePilotConfigWindow}). Plus de Quick Action (C75). Le client passe par un {@link Backend} (regard de la
+ * camera) installe au setup client ({@code client.modules.camera.spacepilot.SpacePilotBackend}).
  * <p>
- * Actions reseau (client vers serveur) : {@code FLAG} = 3 octets (type, indice du reglage, valeur) ; {@code ANGLE} = 2
- * octets (type, angle en degres). Etat synchronise : 2 octets (7 reglages en bits, angle).
+ * Sauvegarde : les 3 reglages et la version de mise en page du HUD ({@code hudLayout}, T34 : un HUD sauve avant est
+ * recale une fois par {@link #serverTick}).
+ * <p>
+ * Action reseau (client vers serveur) : {@code FLAG} = 3 octets (type, indice du reglage, valeur). Etat synchronise :
+ * 1 octet (3 reglages en bits).
  */
-public final class SpacePilotModule extends HoloModule implements Configurable, QuickActionProvider
+public final class SpacePilotModule extends HoloModule implements Configurable
 {
-    /** Bornes et defaut de l'angle du nom au regard, en degres (C46). */
-    public static final int MIN_NAME_ANGLE = 1;
-    public static final int MAX_NAME_ANGLE = 30;
-    public static final int DEFAULT_NAME_ANGLE = 5;
-
     // Indices des reglages booleens (bits de la synchro, actions FLAG, cles NBT).
-    static final int ENABLED = 0;
-    static final int ORBITS = 1;
-    static final int BODIES = 2;
-    static final int STARS = 3;
-    static final int NAMES = 4;
-    static final int HUD = 5;
-    static final int REF_LINK = 6;
-    private static final int FLAG_COUNT = 7;
+    static final int HUD = 0;
+    static final int REF_LINK = 1;
+    static final int CRUISE = 2;
+    private static final int FLAG_COUNT = 3;
     private static final int ALL_FLAGS = (1 << FLAG_COUNT) - 1;
-    private static final String[] FLAG_KEYS = {"enabled", "orbits", "bodies", "stars", "names", "hud", "refLink"};
+    private static final String[] FLAG_KEYS = {"hud", "refLink", "cruise"};
 
     private static final byte ACTION_FLAG = 0;
-    private static final byte ACTION_ANGLE = 1;
 
     private static final Component NAME = Component.literal("Space Pilot");
 
-    /** Intervalle de rafraichissement du HUD de navigation, en ticks (4 fois par seconde au plus). */
+    /**
+     * Intervalle de rafraichissement des lignes de referentiel et de distance du HUD, en ticks (4 fois par seconde au
+     * plus) ; la ligne de vitesse (et la vitesse de croisiere) est rafraichie chaque tick.
+     */
     static final int HUD_REFRESH_TICKS = 5;
 
-    // Etat (deux cotes) : bits des reglages (tous vrais par defaut) et angle du nom.
+    /**
+     * Fraction de tick de la pose et des positions lues par la vitesse de croisiere : fin de l'intervalle affiche, au
+     * tick de {@link SpaceEnvironmentModule#speed()} (dernier tick simule).
+     */
+    private static final float CRUISE_PARTIAL_TICK = 1f;
+    /**
+     * Cosinus de l'ecart maximal entre le regard et le point d'interception pour garder la cible courante (T39, C118) :
+     * {@code TARGET_ANGLE + TARGET_HYSTERESIS}, comme l'hysteresis de {@link SpaceCruise#pickTarget}.
+     */
+    private static final double KEEP_INTERCEPT_COS =
+            Math.cos(Math.toRadians(SpaceCruise.TARGET_ANGLE + SpaceCruise.TARGET_HYSTERESIS));
+
+    /** Pont vers le client (regard de la camera), installe au setup client ; {@code null} sur un serveur dedie. */
+    private static Backend backend;
+
+    /** Cle NBT de la version de mise en page du HUD (absente avant T34 : placement a recaler, {@link #serverTick}). */
+    private static final String HUD_LAYOUT_KEY = "hudLayout";
+    /** Version courante de la mise en page du HUD (T34 : fenetre de 240 x 50). */
+    private static final int HUD_LAYOUT = 2;
+
+    // Etat (deux cotes) : bits des reglages (tous vrais par defaut).
     private int flags = ALL_FLAGS;
-    private int nameAngle = DEFAULT_NAME_ANGLE;
+    /** Serveur : placement du HUD sauve avant T34, a recaler au premier tick ({@link #serverTick}). */
+    private boolean hudLayoutPending;
 
     // Objets (deux cotes).
     private SpacePilotConfigWindow config;
-    private List<QuickAction> actions = List.of();
     private SpaceJoystickForward forward;
     private SpaceJoystickAim aim;
     private SpacePilotHud navigation;
@@ -112,41 +129,59 @@ public final class SpacePilotModule extends HoloModule implements Configurable, 
     private int hudCountdown;
     private SpacePose hudPose;
     private Vector3d[] hudPositions;
+    // Client : vitesse de croisiere (T34), espace de travail cree au premier calcul.
+    /** Id de la cible courante ({@code 0} sans cible : reglage coupe, saut, rien pres du centre) : hysteresis. */
+    private int cruiseTargetId;
+    /** Vitesse cible du dernier calcul, km/tick (valable si {@link #cruiseTargetId} n'est pas nul). */
+    private double cruiseSpeed;
+    private Vector3d cruiseLook;
+    /** Positions des corps un tick apres {@link #hudPositions} (eloignement de la cible, T39), creees au besoin. */
+    private Vector3d[] cruiseNext;
+    private Vector3d cruiseLookSystem;
+    /** Direction du point d'interception (axes du systeme, unitaire), T39, C118. */
+    private Vector3d cruiseAim;
+    /** Vrai si le point d'interception du dernier calcul s'ecarte visiblement de la cible. */
+    private boolean cruiseInterceptShown;
+
+    // ---------------------------------------------------------------- pont client
+
+    /** Pont vers le client, installe au setup client. */
+    public interface Backend
+    {
+        /**
+         * Regard de la camera du joueur local (vecteur unitaire, axes du monde Minecraft, derniere frame dessinee) dans
+         * {@code dest} ; faux si la camera n'est pas prete (dest inchange).
+         */
+        boolean cameraLook(Vector3d dest);
+    }
+
+    /** Branche le client (setup client). */
+    public static void install(Backend backend) { SpacePilotModule.backend = Objects.requireNonNull(backend); }
 
     // ---------------------------------------------------------------- reglages (lus par les renderers)
-
-    /** Interrupteur general (Quick Action) : faux, surcouche, HUD et lien sont coupes (pas le joystick, C44). */
-    public boolean enabled() { return flag(ENABLED); }
-
-    /** Orbites des corps du systeme courant. */
-    public boolean orbits() { return flag(ORBITS); }
-
-    /** Reperage des corps : anneau autour de chaque corps visible. */
-    public boolean bodies() { return flag(BODIES); }
-
-    /** Etoiles exterieures (autres systemes) : anneau double. */
-    public boolean stars() { return flag(STARS); }
-
-    /** Nom de l'objet (corps ou etoile) le plus proche du regard, sous {@link #nameAngle()}. */
-    public boolean names() { return flag(NAMES); }
-
-    /** Angle maximal regard / objet pour afficher son nom, en degres (1 a 30, defaut 5). */
-    public int nameAngle() { return nameAngle; }
 
     /** HUD de navigation (vitesse, referentiel, distance). */
     public boolean hud() { return flag(HUD); }
 
-    /** Lien pointille entre l'axe avant et le corps de reference. */
+    /**
+     * Lien pointille entre le cercle avant et le corps de reference, et anneau du referentiel : dessines seulement
+     * pendant le pilotage (C75).
+     */
     public boolean refLink() { return flag(REF_LINK); }
+
+    /** Calculateur de vitesse de croisiere du HUD (T34) : partie droite de la ligne de vitesse et ligne « Cible ». */
+    public boolean cruise() { return flag(CRUISE); }
 
     /**
      * Client : vrai si le HUD de navigation ({@link SpacePilotHud}) doit etre affiche : miroir du joueur local
-     * ({@code ownerView}), Space Environment dans sa dimension (relu a chaque tick client, pas par frame), interrupteur
-     * general et reglage {@link #hud()} actifs.
+     * ({@code ownerView}), Space Environment dans sa dimension (relu a chaque tick client, pas par frame), reglage
+     * {@link #hud()} actif et joueur local aux commandes ({@link SpacePilotPad#localPilot()}, comme le joystick : T33,
+     * C75).
      */
     public boolean hudShown()
     {
-        return host().clientSide() && host().ownerView() && environmentPresent && enabled() && hud();
+        return host().clientSide() && host().ownerView() && environmentPresent && hud()
+                && SpacePilotPad.localPilot() != null;
     }
 
     /** HUD de navigation (deux cotes). */
@@ -203,7 +238,6 @@ public final class SpacePilotModule extends HoloModule implements Configurable, 
         forward = addObject(new SpaceJoystickForward("joystick_forward"));
         aim = addObject(new SpaceJoystickAim("joystick_aim"));
         navigation = addObject(new SpacePilotHud("hud"));
-        actions = List.of(new ToggleAction());
         config.refresh();
     }
 
@@ -225,38 +259,142 @@ public final class SpacePilotModule extends HoloModule implements Configurable, 
     }
 
     /**
-     * Client : relit vitesse, corps de reference et altitude au-dessus de lui dans le miroir de l'Environment, au plus
-     * une fois tous les {@value #HUD_REFRESH_TICKS} ticks, et les passe au HUD (qui ne reconstruit que les lignes
-     * changees). Valeurs arrondies a trois chiffres significatifs, comme la fenetre du Space Controller. Rafraichi meme
-     * masque : une session d'edition le revele, et le calcul est leger (orbites du systeme courant, 4 fois par
-     * seconde).
-     * <p>
-     * L'altitude n'est pas synchronisee (calculee par le serveur seulement) : elle est recalculee ici au temps
-     * d'affichage du ciel ({@code pose(0)} et {@code bodyPositions(0)}, meme repere et meme instant), donc coherente
-     * avec ce que voit le joueur.
-     * <p>
+     * Client : relit le miroir de l'Environment et met le HUD a jour (qui ne reconstruit que les lignes changees).
+     * Valeurs arrondies a trois chiffres significatifs, comme la fenetre du Space Controller. Rafraichi meme masque :
+     * une session d'edition le revele, et le calcul est leger (orbites du systeme courant).
+     * <ul>
+     *     <li>chaque tick : ligne de vitesse et, avec la vitesse de croisiere ({@link #cruise()}), cible et vitesse
+     *     cible ({@link #updateCruise}) : en freinage rapide la vitesse change de 22 % par tick, une consigne vieille
+     *     de 5 ticks ne servirait a rien ;</li>
+     *     <li>au plus une fois tous les {@value #HUD_REFRESH_TICKS} ticks : corps de reference et altitude au-dessus
+     *     de lui. L'altitude n'est pas synchronisee (calculee par le serveur seulement) : elle est recalculee ici au
+     *     temps d'affichage du ciel ({@code pose(0)} et {@code bodyPositions(0)}, meme repere et meme instant), donc
+     *     coherente avec ce que voit le joueur.</li>
+     * </ul>
      * Pendant un saut ({@code jumpAt(0)} en phase {@code CHARGE} ou {@code TRAVEL}, T22, C63) : nom de l'etoile cible
      * (etoile de fond, {@code "?"} si inconnue), puis en voyage le temps restant en secondes entieres, a la place de
-     * la distance ; l'altitude n'est pas recalculee.
+     * la distance ; l'altitude n'est pas recalculee ; pas de cible de croisiere.
      */
     private void refreshHud(SpaceEnvironmentModule env)
     {
+        if (!host().ownerView()) return;
+        boolean cruise = cruise();
+        navigation.setCruise(cruise);
+        SpaceJump jump = env.jumpAt(0f);
+        boolean jumping = jump.phase() == SpaceJump.Phase.TRAVEL || jump.phase() == SpaceJump.Phase.CHARGE;
+        double speed = SpaceFormat.round3(env.speed());
+        SpaceBody target = cruise && !jumping ? updateCruise(env) : null;
+        if (target == null) {
+            cruiseTargetId = 0;
+            cruiseInterceptShown = false;
+        }
+        navigation.showSpeed(speed, target != null ? SpaceFormat.round3(cruiseSpeed) : Double.NaN,
+                target != null ? target.name() : null);
+
         if (--hudCountdown > 0) return;
         hudCountdown = HUD_REFRESH_TICKS;
-        if (!host().ownerView()) return;
-        double speed = SpaceFormat.round3(env.speed());
         SpaceBody body = env.referenceBody();
         String reference = body != null ? body.name() : null;
-        SpaceJump jump = env.jumpAt(0f);
-        if (jump.phase() == SpaceJump.Phase.TRAVEL || jump.phase() == SpaceJump.Phase.CHARGE) {
+        if (jumping) {
             BackgroundStar star = env.backgroundStar(jump.target());
             int seconds = jump.phase() == SpaceJump.Phase.CHARGE ? SpacePilotHud.CHARGING
                     : SpaceFormat.wholeSeconds(env.jumpRemainingSeconds(0f));
-            navigation.show(speed, reference, Double.POSITIVE_INFINITY, star != null ? star.name() : "?", seconds);
+            navigation.show(reference, Double.POSITIVE_INFINITY, star != null ? star.name() : "?", seconds);
             return;
         }
         double distance = body != null ? SpaceFormat.round3(referenceAltitude(env, body)) : Double.POSITIVE_INFINITY;
-        navigation.show(speed, reference, distance, null, 0);
+        navigation.show(reference, distance, null, 0);
+    }
+
+    /**
+     * Client : cible et vitesse cible de la vitesse de croisiere (T34, {@code docs/space/04-mathematiques.md} par. 11),
+     * au temps de la vitesse lue ({@code pose(1)}, {@code bodyPositions(1)} : {@code speed()} est celle du dernier tick
+     * simule, environ un tick apres {@code pose(0)} ; une distance plus vieille d'un tick surestimerait {@code v*}).
+     * Regard de la camera ramene dans les axes du systeme ({@code Q} de la pose). Cible : la cible courante est gardee
+     * tant que le regard reste a moins de {@code TARGET_ANGLE + TARGET_HYSTERESIS} de son point d'interception affiche
+     * (le pilote vise ce point, parfois loin de la cible) ; sinon {@link SpaceCruise#pickTarget} (hysteresis sur
+     * {@link #cruiseTargetId}). Puis (T39, C118) {@code v*} et point d'interception par
+     * {@link SpaceCruise#interceptSpeed} : mouvement de la cible relatif au mouvement d'entrainement du monde sur un
+     * tick (positions un tick plus tard a l'echelle de temps courante ; referentiel, ou melange des deux pendant le
+     * fondu d'une bascule ; nul si la cible est le referentiel hors fondu). Sans allocation apres le premier appel.
+     *
+     * @return la cible (et {@link #cruiseTargetId}, {@link #cruiseSpeed}, {@link #cruiseAim} a jour), ou {@code null}
+     */
+    private SpaceBody updateCruise(SpaceEnvironmentModule env)
+    {
+        SpaceSystem system = env.currentSystem();
+        if (system == null || backend == null) return null;
+        if (cruiseLook == null) {
+            cruiseLook = new Vector3d();
+            cruiseLookSystem = new Vector3d();
+            cruiseAim = new Vector3d();
+        }
+        if (!backend.cameraLook(cruiseLook)) return null;
+        ensureHudWork();
+        int count = env.bodyPositions(CRUISE_PARTIAL_TICK, hudPositions);
+        env.pose(CRUISE_PARTIAL_TICK, hudPose);
+        hudPose.orientation().transform(cruiseLook, cruiseLookSystem);
+        int index = -1;
+        if (cruiseTargetId != 0 && cruiseInterceptShown && cruiseLookSystem.dot(cruiseAim) >= KEEP_INTERCEPT_COS) {
+            index = system.indexOf(cruiseTargetId);
+            if (index >= count) index = -1;
+        }
+        if (index < 0) {
+            index = SpaceCruise.pickTarget(system, hudPositions, count, hudPose.position(), cruiseLookSystem,
+                    cruiseTargetId);
+        }
+        cruiseInterceptShown = false;
+        if (index < 0) return null;
+        SpaceBody body = system.bodies().get(index);
+        cruiseTargetId = body.id();
+        // Mouvement de la cible relatif au mouvement d'entrainement du monde (referentiel, fondu compris : juste apres
+        // la bascule sur la cible, le monde suit encore l'ancien referentiel et la consigne ne saute pas).
+        if (cruiseNext == null) cruiseNext = SpaceOrbits.newPositionArray();
+        double next = env.displayDays(CRUISE_PARTIAL_TICK) + SpaceUnits.elapsedDays(1.0, env.settings().timeScale());
+        SpaceOrbits.positions(system, next, cruiseNext);
+        double mx = cruiseNext[index].x - hudPositions[index].x;
+        double my = cruiseNext[index].y - hudPositions[index].y;
+        double mz = cruiseNext[index].z - hudPositions[index].z;
+        int reference = system.indexOf(env.referenceBodyId());
+        int from = system.indexOf(env.referenceBlendFromId());
+        double sigma = from >= 0 && from < count ? env.referenceBlend() : 1.0;
+        if (reference >= 0 && reference < count) {
+            mx -= sigma * (cruiseNext[reference].x - hudPositions[reference].x);
+            my -= sigma * (cruiseNext[reference].y - hudPositions[reference].y);
+            mz -= sigma * (cruiseNext[reference].z - hudPositions[reference].z);
+        }
+        if (sigma < 1.0) {
+            mx -= (1.0 - sigma) * (cruiseNext[from].x - hudPositions[from].x);
+            my -= (1.0 - sigma) * (cruiseNext[from].y - hudPositions[from].y);
+            mz -= (1.0 - sigma) * (cruiseNext[from].z - hudPositions[from].z);
+        }
+        cruiseSpeed = SpaceCruise.interceptSpeed(hudPose.position(), hudPositions[index], mx, my, mz, body.radius(),
+                env.settings().maxSpeed(), cruiseAim);
+        cruiseInterceptShown = SpaceCruise.interceptShown(hudPose.position(), hudPositions[index], body.radius(),
+                cruiseAim);
+        return body;
+    }
+
+    /**
+     * Client : point d'interception de la vitesse de croisiere (T39, C118), direction unitaire <b>dans les axes du
+     * systeme</b> (a tourner par la pose du ciel), copiee dans {@code dest} ; faux sans cible, croisiere coupee,
+     * pendant un saut, ou si le point est sur le disque de la cible ({@link SpaceCruise#interceptShown}). Mis a jour
+     * chaque tick client du HUD ; lecture sans allocation (renderer du pilote local).
+     */
+    public boolean cruiseIntercept(Vector3d dest)
+    {
+        if (!cruiseInterceptShown || cruiseTargetId == 0 || !cruise() || cruiseAim == null) return false;
+        dest.set(cruiseAim);
+        return true;
+    }
+
+    /** Client : pose et positions de travail du HUD, creees au premier usage (jamais cote serveur). */
+    private void ensureHudWork()
+    {
+        if (hudPose == null) {
+            hudPose = new SpacePose();
+            hudPositions = SpaceOrbits.newPositionArray();
+        }
     }
 
     /** Client : altitude au-dessus de {@code body} (corps du systeme courant) au temps d'affichage, km. */
@@ -266,10 +404,7 @@ public final class SpacePilotModule extends HoloModule implements Configurable, 
         if (system == null) return Double.POSITIVE_INFINITY;
         int index = system.indexOf(body.id());
         if (index < 0) return Double.POSITIVE_INFINITY;
-        if (hudPose == null) {
-            hudPose = new SpacePose();
-            hudPositions = SpaceOrbits.newPositionArray();
-        }
+        ensureHudWork();
         if (env.bodyPositions(0f, hudPositions) <= index) return Double.POSITIVE_INFINITY;
         env.pose(0f, hudPose);
         return SpaceMotion.altitude(hudPose.position(), body, hudPositions[index]);
@@ -284,28 +419,15 @@ public final class SpacePilotModule extends HoloModule implements Configurable, 
     @Override
     public ConfigWindow configWindow() { return config; }
 
-    @Override
-    public List<QuickAction> quickActions() { return actions; }
-
     // ---------------------------------------------------------------- client (proprietaire)
 
-    /** Cote client : reglage booleen demande par la fenetre ou la roue ; applique aussitot, puis envoye. */
+    /** Cote client : reglage booleen demande par la fenetre ; applique aussitot, puis envoye. */
     void requestFlag(int index, boolean on)
     {
         if (index < 0 || index >= FLAG_COUNT) return;
         setFlag(index, on);
         config.refresh();
         sendAction(buf -> buf.writeByte(ACTION_FLAG).writeByte(index).writeBoolean(on));
-    }
-
-    /** Cote client : angle du nom demande par la fenetre, en degres ; applique aussitot, puis envoye. */
-    void requestNameAngle(int degrees)
-    {
-        int angle = Mth.clamp(degrees, MIN_NAME_ANGLE, MAX_NAME_ANGLE);
-        if (angle == nameAngle) return;
-        nameAngle = angle;
-        config.refresh();
-        sendAction(buf -> buf.writeByte(ACTION_ANGLE).writeByte(angle));
     }
 
     // ---------------------------------------------------------------- serveur
@@ -322,7 +444,6 @@ public final class SpacePilotModule extends HoloModule implements Configurable, 
                 if (index < 0 || index >= FLAG_COUNT) return;
                 setFlag(index, on);
             }
-            case ACTION_ANGLE -> nameAngle = Mth.clamp(buf.readByte(), MIN_NAME_ANGLE, MAX_NAME_ANGLE);
             default -> {
                 return;
             }
@@ -331,11 +452,28 @@ public final class SpacePilotModule extends HoloModule implements Configurable, 
         markDirty();
     }
 
+    /**
+     * Serveur : migration du placement du HUD sauvegarde avant T34 ({@link #HUD_LAYOUT_KEY} absente) : le transform
+     * d'un {@code Hud} place le <b>centre</b> de la fenetre, agrandie en T34 (150 x 39 -> 240 x 50) ; il est decale
+     * d'une demi-difference de taille pour garder le coin haut gauche ou le joueur l'avait mis. Une seule fois, puis
+     * sauvegarde ({@code markDirty}) ; le transform modifie est synchronise par le framework.
+     */
+    @Override
+    public void serverTick(ServerLevel level)
+    {
+        if (!hudLayoutPending || navigation == null) return;
+        hudLayoutPending = false;
+        HoloTransform transform = navigation.transform();
+        transform.setTranslation(transform.x() + 0.5f * (SpacePilotHud.WIDTH - SpacePilotHud.COMPACT_WIDTH),
+                transform.y() + 0.5f * (SpacePilotHud.HEIGHT - SpacePilotHud.COMPACT_HEIGHT), transform.z());
+        markDirty();
+    }
+
     @Override
     public void save(CompoundTag tag)
     {
         for (int i = 0; i < FLAG_COUNT; i++) tag.putBoolean(FLAG_KEYS[i], flag(i));
-        tag.putInt("nameAngle", nameAngle);
+        tag.putInt(HUD_LAYOUT_KEY, HUD_LAYOUT);
     }
 
     @Override
@@ -345,76 +483,20 @@ public final class SpacePilotModule extends HoloModule implements Configurable, 
         for (int i = 0; i < FLAG_COUNT; i++) {
             if (tag.contains(FLAG_KEYS[i], Tag.TAG_BYTE)) setFlag(i, tag.getBoolean(FLAG_KEYS[i]));
         }
-        nameAngle = tag.contains("nameAngle", Tag.TAG_INT)
-                ? Mth.clamp(tag.getInt("nameAngle"), MIN_NAME_ANGLE, MAX_NAME_ANGLE) : DEFAULT_NAME_ANGLE;
+        // Cles du lot 2 (enabled, orbits, bodies, stars, names, nameAngle) : ignorees (L22).
+        // Etat sauve avant T34 (cle hud presente, pas de version de mise en page) : HUD a recaler (serverTick).
+        hudLayoutPending = tag.contains(FLAG_KEYS[HUD], Tag.TAG_BYTE) && tag.getInt(HUD_LAYOUT_KEY) < HUD_LAYOUT;
     }
 
     @Override
     public void writeSync(FriendlyByteBuf buf, boolean forOwner)
     {
         buf.writeByte(flags);
-        buf.writeByte(nameAngle);
     }
 
     @Override
     public void readSync(FriendlyByteBuf buf)
     {
         flags = buf.readByte() & ALL_FLAGS;
-        nameAngle = Mth.clamp(buf.readByte(), MIN_NAME_ANGLE, MAX_NAME_ANGLE);
-    }
-
-    // ---------------------------------------------------------------- Quick Action
-
-    /**
-     * Action {@code toggle} : bascule {@link #enabled()}. Nom et icone decrivent l'effet du clic et suivent l'etat
-     * (relus par la roue a chaque frame) : « Space Pilot : OFF » et planete barree quand l'affichage est actif,
-     * « Space Pilot : ON » et planete allumee sinon.
-     */
-    private final class ToggleAction implements QuickAction
-    {
-        private static final Component NAME_OFF = Component.literal("Space Pilot : OFF");
-        private static final Component NAME_ON = Component.literal("Space Pilot : ON");
-        private static final int SEGMENTS = 16;
-
-        @Override
-        public String id() { return "toggle"; }
-
-        @Override
-        public Component name() { return enabled() ? NAME_OFF : NAME_ON; }
-
-        @Override
-        public void drawIcon(HoloCanvas canvas, float size)
-        {
-            boolean on = enabled();
-            float c = size / 2f;
-            // Planete, puis son anneau incline, puis (actif) la barre rouge : une couche par forme.
-            canvas.beginLayer();
-            disk(canvas, c, c, 0.27f * size, on ? 0xFF607080 : 0xFF40C0FF);
-            canvas.endLayer();
-            canvas.beginLayer();
-            canvas.ellipse(c, c, 0.47f * size, 0.17f * size, Math.max(1f, 0.06f * size), SEGMENTS,
-                    on ? 0xFF8090A0 : 0xFFA0E0FF);
-            canvas.endLayer();
-            if (on) {
-                canvas.beginLayer();
-                canvas.line(0.15f * size, 0.85f * size, 0.85f * size, 0.15f * size, Math.max(1.5f, 0.1f * size),
-                        0xFFFF5050);
-                canvas.endLayer();
-            }
-        }
-
-        @Override
-        public void run() { requestFlag(ENABLED, !enabled()); }
-
-        /** Disque plein en eventail. */
-        private static void disk(HoloCanvas canvas, float cx, float cy, float r, int color)
-        {
-            for (int i = 0; i < SEGMENTS; i++) {
-                float a0 = i * Mth.TWO_PI / SEGMENTS;
-                float a1 = (i + 1) * Mth.TWO_PI / SEGMENTS;
-                canvas.quad(cx, cy, cx + r * Mth.cos(a0), cy + r * Mth.sin(a0), cx + r * Mth.cos(a1),
-                        cy + r * Mth.sin(a1), cx + r * Mth.cos(a1), cy + r * Mth.sin(a1), color);
-            }
-        }
     }
 }

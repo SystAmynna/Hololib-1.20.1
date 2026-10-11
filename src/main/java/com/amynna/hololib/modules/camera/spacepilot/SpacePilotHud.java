@@ -9,36 +9,57 @@ import com.amynna.hololib.holo.widget.HoloTextMetrics;
 import com.amynna.hololib.holo.window.HoloWindow;
 import com.amynna.hololib.modules.camera.config.ConfigWindow;
 import com.amynna.hololib.modules.dimension.space.SpaceFormat;
+import com.amynna.hololib.modules.dimension.space.math.SpaceCruise;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
+
+import java.util.Objects;
 
 /**
  * HUD de navigation de Space Pilot (T20, D14) : objet de {@link SpacePilotModule}, ancrage {@code Hud} au coin haut
- * gauche de l'ecran (dessine sous le HUD vanilla, famille {@code HUD}), {@code PRIVATE}. Trois lignes :
+ * gauche de l'ecran (dessine sous le HUD vanilla, famille {@code HUD}), {@code PRIVATE}. Lignes :
  * <ul>
  *     <li>« Vitesse : v » : vitesse signee relative au referentiel, km/s ou UA/s (meme format que la fenetre du Space
- *     Controller, {@link SpaceFormat#speed}) ;</li>
+ *     Controller, {@link SpaceFormat#speed}) ; avec la <b>vitesse de croisiere</b> (T34, D25, C76) et une cible :
+ *     « Vitesse : v - fleche v* », meme unite des deux cotes (choisie sur la plus grande), fleche haut s'il faut
+ *     accelerer, bas s'il faut ralentir (glyphes U+2191 / U+2193 de la police vanilla, {@code nonlatin_european.png}),
+ *     fleche et {@code v*} en couleur : vert si {@code |v - v*| <= 10 % v*}, rouge au-dela de 30 %, degrade entre
+ *     ({@link SpaceCruise#redness}, {@value #COLOR_STEPS} paliers) ;</li>
  *     <li>« Reference : nom » : corps de reference (referentiel), nom raccourci s'il depasse la fenetre ;</li>
  *     <li>« Distance : d » : altitude au-dessus du corps de reference (comme l'« Altitude » du Controller), km ou UA
  *     ({@link SpaceFormat#distance}) ; pendant la charge d'un saut, « Saut -> cible », puis pendant le voyage
  *     (T22, livrable 4 de T20) « Distorsion -> cible : n s » (nom de l'etoile cible raccourci s'il le faut, temps
- *     restant en secondes entieres) a sa place.</li>
+ *     restant en secondes entieres) a sa place ;</li>
+ *     <li>« Cible : nom » (T34, seulement avec la vitesse de croisiere) : corps vise par le calculateur, « aucune »
+ *     sans cible.</li>
  * </ul>
- * Fenetre plutot qu'objet dessine a la main : trois {@link HoloLabel} dessines par le renderer generique des fenetres
- * (aucun renderer propre a enregistrer), et le cadre HUD de l'editor connait deja la taille d'une fenetre.
+ * Fenetre plutot qu'objet dessine a la main : des {@link HoloLabel} dessines par le renderer generique des fenetres
+ * (aucun renderer propre a enregistrer), et le cadre HUD de l'editor connait deja la taille d'une fenetre. La fenetre
+ * est declaree a sa taille avec la vitesse de croisiere ({@value #WIDTH} x {@value #HEIGHT}) ; sans elle, le panneau
+ * racine (fond et bordure) est ramene a {@value #COMPACT_WIDTH} x {@value #COMPACT_HEIGHT} depuis le coin haut gauche
+ * ({@link #setCruise}) et la ligne « Cible » masquee.
  * <p>
  * Deplacable par l'Own HUD Editor ({@link HoloEditTranslation} seulement : glisser dans le cadre, molette = ordre de
  * dessin ; capacite {@code OWN_HUD} deduite de l'ancrage), placement sauvegarde par le framework.
- * {@link #shown()} : client du proprietaire, Space Environment dans sa dimension, interrupteur general et reglage
- * {@code hud} actifs ({@link SpacePilotModule#hudShown()}). Le routage du {@code Hud} le masque en F5 ; non partage,
+ * {@link #shown()} : client du proprietaire, Space Environment dans sa dimension, reglage {@code hud} actif et
+ * joueur local aux commandes ({@link SpacePilotModule#hudShown()} : seulement pendant le pilotage depuis T33, C75 ;
+ * une session d'edition le revele pour le deplacer). Le routage du {@code Hud} le masque en F5 ; non partage,
  * un joueur qui inspecte ne le voit jamais (C45).
  * <p>
- * Textes reconstruits par {@link #show} (appele par le module au plus 4 fois par seconde), seulement pour les lignes
- * dont la valeur arrondie a change : aucune chaine allouee par frame.
+ * Textes reconstruits seulement quand leur valeur arrondie (ou la couleur, qui en derive) change : la ligne de
+ * vitesse par {@link #showSpeed} (chaque tick), les autres par {@link #show} (au plus 4 fois par seconde) ; aucune
+ * chaine allouee par frame.
  */
 public final class SpacePilotHud extends HoloWindow implements HoloEditTranslation
 {
-    public static final int WIDTH = 150;
-    public static final int HEIGHT = 39;
+    /** Largeur avec la vitesse de croisiere : « Vitesse : -1 490 000 km/s - v 1 490 000 km/s » tient (230 px). */
+    public static final int WIDTH = 240;
+    /** Hauteur avec la vitesse de croisiere (quatre lignes). */
+    public static final int HEIGHT = 50;
+    /** Largeur sans la vitesse de croisiere (T20). */
+    public static final int COMPACT_WIDTH = 150;
+    /** Hauteur sans la vitesse de croisiere (trois lignes, T20). */
+    public static final int COMPACT_HEIGHT = 39;
     /** Taille d'un pixel de fenetre ; l'echelle du transform la compense : 1 pixel de fenetre = 1 pixel GUI. */
     private static final float PIXEL_SCALE = 1f / 160f;
     /** Marge au bord de l'ecran, pixels GUI (placement par defaut). */
@@ -47,8 +68,14 @@ public final class SpacePilotHud extends HoloWindow implements HoloEditTranslati
     private static final int LINE_HEIGHT = 11;
     private static final int TEXT = 0xFFE0F0FF;
     private static final String SPEED = "Vitesse : ";
+    private static final String SEPARATOR = " - ";
+    /** Fleche haut (U+2191) : accelerer. Glyphe de {@code nonlatin_european.png}, 5 px + 1. */
+    private static final String UP = "↑ ";
+    /** Fleche bas (U+2193) : ralentir. */
+    private static final String DOWN = "↓ ";
     private static final String REFERENCE = "Reference : ";
     private static final String DISTANCE = "Distance : ";
+    private static final String TARGET = "Cible : ";
     private static final String WARP = "Distorsion -> ";
     private static final String CHARGE = "Saut -> ";
     /** Valeur de {@code warpSeconds} pendant la charge d'un saut (pas de temps restant affiche). */
@@ -56,13 +83,33 @@ public final class SpacePilotHud extends HoloWindow implements HoloEditTranslati
     private static final String ELLIPSIS = "...";
     private static final Component NO_REFERENCE = Component.literal(REFERENCE + "aucune");
     private static final Component NO_DISTANCE = Component.literal(DISTANCE + "-");
+    private static final Component NO_TARGET = Component.literal(TARGET + "aucune");
+    /** Couleur de l'indication proche de la consigne ({@code |v - v*| <= 10 %}). */
+    private static final int GREEN = 0x55FF55;
+    /** Couleur de l'indication loin de la consigne ({@code |v - v*| >= 30 %}). */
+    private static final int RED = 0xFF5555;
+    /** Paliers du degrade vert -> rouge (le texte n'est reconstruit qu'au changement de palier). */
+    private static final int COLOR_STEPS = 8;
+    /** Styles du degrade, palier 0 (vert) a {@link #COLOR_STEPS} (rouge) : crees une fois. */
+    private static final Style[] STYLES = new Style[COLOR_STEPS + 1];
+
+    static {
+        for (int i = 0; i <= COLOR_STEPS; i++) STYLES[i] = Style.EMPTY.withColor(mix(GREEN, RED, i / (float) COLOR_STEPS));
+    }
 
     private final HoloLabel speedLine;
     private final HoloLabel referenceLine;
     private final HoloLabel distanceLine;
+    private final HoloLabel targetLine;
 
+    /** Vitesse de croisiere affichee (taille du panneau, ligne « Cible »). */
+    private boolean cruise = true;
     // Valeurs affichees (arrondies) : une ligne n'est reconstruite que si la sienne change.
     private double shownSpeed = Double.NaN;
+    /** Vitesse cible affichee, {@code NaN} sans cible ; {@link Double#NEGATIVE_INFINITY} = a reconstruire. */
+    private double shownTarget = Double.NEGATIVE_INFINITY;
+    private String shownTargetName;
+    private boolean targetNameShown;
     private String shownReference;
     private double shownDistance = Double.NaN;
     /** Cible du saut affichee ({@code null} hors saut) et seconde restante affichee ({@link #CHARGING} en charge). */
@@ -83,16 +130,76 @@ public final class SpacePilotHud extends HoloWindow implements HoloEditTranslati
                 .setColor(TEXT));
         distanceLine = root().add(new HoloLabel(PADDING, 3 + 2 * LINE_HEIGHT, width, LINE_HEIGHT, NO_DISTANCE)
                 .setColor(TEXT));
+        targetLine = root().add(new HoloLabel(PADDING, 3 + 3 * LINE_HEIGHT, width, LINE_HEIGHT, NO_TARGET)
+                .setColor(TEXT));
     }
 
-    /** Client du proprietaire : Environment dans sa dimension, {@code enabled} et {@code hud} actifs. */
+    /** Client du proprietaire : Environment dans sa dimension, {@code hud} actif, joueur local aux commandes. */
     @Override
     public boolean shown() { return module() instanceof SpacePilotModule pilot && pilot.hudShown(); }
 
     /**
-     * Met a jour les lignes dont la valeur a change (client, appele par le module au plus 4 fois par seconde).
+     * Reglage « Vitesse de croisiere » (deux cotes, sans effet s'il ne change pas) : taille du panneau racine
+     * (fond et bordure) et ligne « Cible » ; les textes raccourcis a la largeur du panneau seront reconstruits.
+     */
+    void setCruise(boolean on)
+    {
+        if (on == cruise) return;
+        cruise = on;
+        root().setBounds(0f, 0f, on ? WIDTH : COMPACT_WIDTH, on ? HEIGHT : COMPACT_HEIGHT);
+        targetLine.setVisible(on);
+        shownTarget = Double.NEGATIVE_INFINITY;
+        shownReference = null;
+        shownWarp = null;
+        shownDistance = Double.NaN;
+        targetNameShown = false;
+    }
+
+    /**
+     * Ligne de vitesse et ligne « Cible » (client, appele par le module a chaque tick) ; reconstruites seulement si
+     * une valeur arrondie change (la fleche et la couleur en derivent).
      *
-     * @param speed       vitesse signee arrondie ({@link SpaceFormat#round3}), km par tick
+     * @param speed      vitesse signee arrondie ({@link SpaceFormat#round3}), km par tick
+     * @param target     vitesse cible arrondie {@code v* >= 0}, km par tick, ou {@code NaN} sans cible (ou sans
+     *                   vitesse de croisiere) : partie droite masquee
+     * @param targetName nom de la cible, ou {@code null} sans cible
+     */
+    void showSpeed(double speed, double target, String targetName)
+    {
+        boolean hasTarget = cruise && !Double.isNaN(target);
+        double value = hasTarget ? target : Double.NaN;
+        if (Double.compare(speed, shownSpeed) != 0 || Double.compare(value, shownTarget) != 0) {
+            shownSpeed = speed;
+            shownTarget = value;
+            speedLine.setText(hasTarget ? cruiseText(speed, target)
+                    : Component.literal(SPEED + SpaceFormat.speed(speed)));
+        }
+        if (!cruise) return;
+        String name = hasTarget ? targetName : null;
+        if (targetNameShown && Objects.equals(name, shownTargetName)) return;
+        targetNameShown = true;
+        shownTargetName = name;
+        targetLine.setText(name == null ? NO_TARGET : Component.literal(fit(TARGET, name, "")));
+    }
+
+    /**
+     * « Vitesse : v - fleche v* » : meme unite des deux cotes (la plus grande vitesse la choisit), fleche haut si
+     * {@code v < v*} (ou {@code v = v* > 0}), bas sinon ; fleche et {@code v*} dans la couleur du palier de
+     * {@link SpaceCruise#redness}.
+     */
+    private static Component cruiseText(double speed, double target)
+    {
+        boolean au = SpaceFormat.speedInAu(Math.max(Math.abs(speed), target));
+        boolean up = speed < target || speed == target && target > 0.0;
+        int step = Math.round((float) SpaceCruise.redness(speed, target) * COLOR_STEPS);
+        return Component.literal(SPEED + SpaceFormat.speed(speed, au) + SEPARATOR)
+                .append(Component.literal((up ? UP : DOWN) + SpaceFormat.speed(target, au)).withStyle(STYLES[step]));
+    }
+
+    /**
+     * Met a jour les lignes de referentiel et de distance dont la valeur a change (client, appele par le module au
+     * plus 4 fois par seconde).
+     *
      * @param reference   nom du corps de reference, ou {@code null} sans referentiel
      * @param distance    altitude arrondie au-dessus de ce corps, km (ignoree sans referentiel)
      * @param warpTarget  nom de l'etoile cible pendant la charge ou le voyage d'un saut, ou {@code null} hors saut :
@@ -100,14 +207,10 @@ public final class SpacePilotHud extends HoloWindow implements HoloEditTranslati
      * @param warpSeconds temps de voyage restant, secondes entieres ({@link SpaceFormat#wholeSeconds}), ou
      *                    {@link #CHARGING} pendant la charge ; ignore hors saut
      */
-    void show(double speed, String reference, double distance, String warpTarget, int warpSeconds)
+    void show(String reference, double distance, String warpTarget, int warpSeconds)
     {
-        if (Double.compare(speed, shownSpeed) != 0) {
-            shownSpeed = speed;
-            speedLine.setText(Component.literal(SPEED + SpaceFormat.speed(speed)));
-        }
         if (reference == null) {
-            if (shownReference != null) {
+            if (shownReference != null || referenceLine.text() != NO_REFERENCE) {
                 shownReference = null;
                 referenceLine.setText(NO_REFERENCE);
             }
@@ -137,11 +240,11 @@ public final class SpacePilotHud extends HoloWindow implements HoloEditTranslati
 
     /**
      * {@code prefix + text + suffix}, {@code text} raccourci avec {@value #ELLIPSIS} pour tenir dans la largeur d'une
-     * ligne.
+     * ligne du panneau courant.
      */
-    private static String fit(String prefix, String text, String suffix)
+    private String fit(String prefix, String text, String suffix)
     {
-        int max = WIDTH - 2 * PADDING;
+        int max = (cruise ? WIDTH : COMPACT_WIDTH) - 2 * PADDING;
         String line = prefix + text + suffix;
         if (HoloTextMetrics.width(line) <= max) return line;
         for (int end = text.length() - 1; end > 0; end--) {
@@ -149,5 +252,14 @@ public final class SpacePilotHud extends HoloWindow implements HoloEditTranslati
             if (HoloTextMetrics.width(line) <= max) return line;
         }
         return prefix + ELLIPSIS + suffix;
+    }
+
+    /** Melange lineaire de deux couleurs RGB, {@code t} dans {@code [0, 1]}. */
+    private static int mix(int from, int to, float t)
+    {
+        int r = Math.round((from >> 16 & 0xFF) + t * ((to >> 16 & 0xFF) - (from >> 16 & 0xFF)));
+        int g = Math.round((from >> 8 & 0xFF) + t * ((to >> 8 & 0xFF) - (from >> 8 & 0xFF)));
+        int b = Math.round((from & 0xFF) + t * ((to & 0xFF) - (from & 0xFF)));
+        return r << 16 | g << 8 | b;
     }
 }

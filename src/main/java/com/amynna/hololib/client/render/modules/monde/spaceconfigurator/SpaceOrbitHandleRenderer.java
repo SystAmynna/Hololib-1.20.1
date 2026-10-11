@@ -10,7 +10,7 @@ import com.amynna.hololib.modules.dimension.space.model.SpaceBody;
 import com.amynna.hololib.modules.dimension.space.model.SpaceSystem;
 import com.amynna.hololib.modules.monde.spaceconfigurator.SpaceConfiguratorModule;
 import com.amynna.hololib.modules.monde.spaceconfigurator.SpaceOrbitHandle;
-import com.amynna.hololib.modules.monde.spaceconfigurator.SpaceSystemScale;
+import com.amynna.hololib.modules.monde.spacemap.SpaceMapModule;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -29,9 +29,11 @@ import org.joml.Vector3f;
  * l'echelle, l'ellipse montre deja l'orbite qui sera enregistree. Epaisseur constante en blocs.
  * <p>
  * Dessin : deux rubans croises (dans le plan de l'orbite et selon sa normale), un segment foyer -> periapse (sens de
- * l'orientation) et un petit octaedre au foyer. Pendant « Animer », la poignee reste posee au temps fige
- * {@code t_edit} : si le parent bouge (orbite d'une lune), l'ellipse est decalee de son deplacement affiche pour
- * rester autour de lui (la poignee elle-meme, ses gizmos et sa visee, ne bougent pas).
+ * l'orientation) et un petit octaedre au foyer. La poignee est posee au temps fige {@code t_edit} du Configurator
+ * (T42) alors que la Space Map suit le temps vivant : si le parent bouge dans la vue de la Map (vue centree sur un autre
+ * corps), l'ellipse est decalee de son deplacement affiche entre {@code t_edit} et le temps vivant pour rester autour
+ * de lui (la poignee elle-meme, ses gizmos et sa visee, ne bougent pas) ; nul si le parent est au centre de la vue
+ * (« Orbite ») ou immobile.
  * <p>
  * {@link HoloRenderTypes#TRANSLUCENT_QUADS}, aucune allocation, aucun etat GL modifie.
  */
@@ -63,7 +65,7 @@ public final class SpaceOrbitHandleRenderer implements HoloObjectRenderer<SpaceO
     private final Quaternionf rotation = new Quaternionf();
     private final Vector3f offset = new Vector3f();
     private final Vector3d[] frozen = SpaceOrbits.newPositionArray();
-    private final Vector3d[] animated = SpaceOrbits.newPositionArray();
+    private final Vector3d[] live = SpaceOrbits.newPositionArray();
     /** Sommet transforme : {@code VertexConsumer.vertex(Matrix4f, ...)} alloue un vecteur par sommet. */
     private final Vector3f transformed = new Vector3f();
 
@@ -121,30 +123,27 @@ public final class SpaceOrbitHandleRenderer implements HoloObjectRenderer<SpaceO
     }
 
     /**
-     * {@link #offset} : deplacement affiche du parent entre {@code t_edit} et le temps anime, dans le repere tourne de
-     * la poignee (blocs), dans la vue courante (systeme entier ou zoom) ; nul hors animation, pour un parent immobile
-     * (centre du systeme) ou pour le corps zoome lui-meme (centre de la vue).
+     * {@link #offset} : deplacement affiche du parent entre {@code t_edit} et le temps vivant de la Space Map, dans le
+     * repere tourne de la poignee (blocs), dans la vue courante de la Map (positions relatives a son centre au meme
+     * temps) ; nul sans Map, sans corps a orbite selectionne, ou pour un parent au centre de la vue.
      */
     private void animationOffset(SpaceOrbitHandle handle, HoloTransform t, float partialTick)
     {
         offset.set(0f, 0f, 0f);
         SpaceConfiguratorModule module = handle.configurator();
-        if (module == null || !module.animating() || module.cube() == null) return;
-        SpaceSystem system = module.editedSystem();
-        SpaceBody body = module.selectedBodyData();
-        if (system == null || body == null || body.orbit() == null) return;
+        SpaceMapModule map = module != null ? module.map() : null;
+        SpaceSystem system = map != null && map.cube() != null ? map.shownSystem() : null;
+        SpaceBody body = system != null && map.selectedBody() != 0 ? system.body(map.selectedBody()) : null;
+        if (body == null || body.orbit() == null) return;
         int parent = system.parentIndex(system.indexOf(body.id()));
-        if (parent < 0 || system.parentIndex(parent) < 0) return;
-        // Vue courante (systeme entier ou zoom, T25) : chaque position est relative au corps zoome a son propre temps.
-        double half = module.viewHalf();
-        int zoom = module.zoomIndex();
-        SpaceSystemScale.positions(system, module.editTime(), half, zoom, frozen);
-        SpaceSystemScale.positions(system, module.displayDays(partialTick), half, zoom, animated);
+        if (parent < 0 || parent == map.centerIndex()) return;
+        map.bodyPoints(module.editTime(), frozen);
+        map.bodyPoints(map.viewDays(partialTick), live);
         // Positions en unites du cube (demi-arete comprise) : echelle du cube seulement.
-        HoloTransform cube = module.cube().transform();
-        offset.set((float) (animated[parent].x - frozen[parent].x) * cube.scaleX(),
-                (float) (animated[parent].y - frozen[parent].y) * cube.scaleY(),
-                (float) (animated[parent].z - frozen[parent].z) * cube.scaleZ());
+        HoloTransform cube = map.cube().transform();
+        offset.set((float) (live[parent].x - frozen[parent].x) * cube.scaleX(),
+                (float) (live[parent].y - frozen[parent].y) * cube.scaleY(),
+                (float) (live[parent].z - frozen[parent].z) * cube.scaleZ());
         // Repere du cube -> monde -> repere tourne de la poignee.
         HoloEditMath.rotation(rotation, cube).transform(offset);
         HoloEditMath.rotation(rotation, t).conjugate().transform(offset);

@@ -1,0 +1,33 @@
+{
+  "space.engine_hum": {
+    "sounds": [{ "name": "hololib:space/engine_hum", "preload": true }]
+  },
+  "space.engine_whine": {
+    "sounds": [{ "name": "hololib:space/engine_whine", "preload": true }]
+  },
+  "space.jump_charge": {
+    "sounds": [{ "name": "hololib:space/jump_charge", "preload": true }]
+  },
+  "space.hull_groan": {
+    "sounds": ["hololib:space/hull_groan1", "hololib:space/hull_groan2", "hololib:space/hull_groan3",
+      "hololib:space/hull_groan4"]
+  },
+  "space.hull_tonk": {
+    "sounds": ["hololib:space/hull_tonk1", "hololib:space/hull_tonk2", "hololib:space/hull_tonk3"]
+  },
+  "space.warp_engine": {
+    "sounds": ["hololib:space/warp_engine"]
+  },
+  "space.warp_flash": {
+    "sounds": ["hololib:space/warp_flash"]
+  },
+  "space.warp_rumble": {
+    "sounds": [{ "name": "hololib:space/warp_rumble", "preload": true }]
+  },
+  "space.warp_wind": {
+    "sounds": [{ "name": "hololib:space/warp_wind", "preload": true }]
+  },
+  "space.warp_arrival": {
+    "sounds": ["hololib:space/warp_arrival"]
+  }
+}

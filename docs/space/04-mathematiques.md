@@ -1,7 +1,8 @@
 # 04 — Mathématiques
 
 Package `modules/dimension/space/math/` (T02) pour les §§ 1 à 6 ; le § 7 est implémenté par le Configurator (T11,
-T12). Calculs en `double` (JOML `Vector3d`, `Quaterniond`, `Matrix3d` — JOML est fourni par Minecraft), conversion en
+T12) ; le § 10 (rotation propre, T28) par `math/SpaceSpin` ; le § 11 (vitesse de croisière, T34) par
+`math/SpaceCruise`. Calculs en `double` (JOML `Vector3d`, `Quaterniond`, `Matrix3d` — JOML est fourni par Minecraft), conversion en
 `float` seulement au moment de dessiner. Aucune allocation dans les fonctions appelées par frame : paramètres
 `dest` réutilisés, comme `HoloEditMath`.
 
@@ -46,10 +47,21 @@ avant au nord).
 
 ## 3. Orbites (Kepler)
 
-Temps simulé en jours : `t = (gameTime + partialTick) × échelle / 86 400`, avec `échelle` = secondes simulées par tick
-(réglage de l'Environment, défaut 3 600 : un tick = une heure, une année terrestre ≈ 7 min 18 s). `gameTime` est
-`level.getGameTime()` des deux côtés (synchronisé par vanilla) : le calcul est **déterministe**, rien n'est envoyé
-pour animer les orbites.
+Temps simulé en jours (T38, D28) : `t = t_e + (gameTime − T_e + partialTick) × échelle / 86 400`, avec `échelle` =
+secondes simulées par tick (réglage de l'Environment, défaut **360** depuis T38 : un jour simulé = 240 ticks = 12 s, un
+mois lunaire ≈ 5,5 min, une année terrestre ≈ 73 min ; 3 600 avant T38) et **époque** `(T_e, t_e)` = tick de jeu et
+temps simulé où l'échelle a été posée (`SpaceMotionSettings.epochTick` / `epochDays`, réglages synchronisés et
+sauvegardés). Seul calcul : `SpaceMotionSettings.days(gameTime, partialTick)` (via `SpaceEnvironmentModule.days` dans
+le module : serveur, rejeu client, prédiction, affichage ; le Configurator lit `days()` pour `t_edit` et
+`elapsedDays` pour son animation). `gameTime` est `level.getGameTime()` des deux côtés (synchronisé par vanilla) : le
+calcul est **déterministe**, rien n'est envoyé pour animer les orbites ; `gameTime − T_e` est calculé en `long`.
+
+**Changement d'échelle** (`setTimeScale`, ou tout `setSettings` qui change l'échelle) : l'époque est reposée au tick de
+l'état `T` (`t_e = t_ancienne(T)`, `T_e = T`) : `t` est continu (égal bit à bit en `T`), seule sa pente change ; aucun
+astre ne saute, le vaisseau reste à sa place par rapport à son référentiel. Une échelle nulle fige les orbites au
+temps courant (avant T38 : au temps 0). L'époque n'est jamais réglée à la main. Époque `(0, 0)` = formule d'avant T38,
+bit à bit. Migration d'un monde ancien : [`03`](03-modele-donnees.md) § 4 ; côté client : [`05`](05-synchronisation.md)
+§ 2.
 
 Pour un corps d'orbite `(a, e, orientation R_o, période P, phase φ₀)` :
 
@@ -89,6 +101,23 @@ rel = p_i − s ;  d = |rel| ;  w = Q⁻¹ · rel / d          (direction, axes 
   `t·sin β / s` en radial et `(1 − t·cos β) / s` vers l'œil (la formule orthographique
   `u·B_u + v·B_v + √(1−u²−v²)·(−w)` assombrissait à tort l'horizon d'une planète proche ; loin, les deux coïncident) ; éclairage `0,06 + max(0, n·l)` avec `l` = direction corps → étoile (repère monde). Les
   étoiles ne sont pas éclairées : couleur pleine + halo translucide en couronne autour du disque (jusqu'à 2,5 α, plafonné à 100°, alpha décroissant).
+- **Textures et rotation propre** (T30, D21) : le disque garde son maillage polaire tourné vers l'œil (résolution là
+  où l'on regarde, de près comme de loin : un maillage UV de la sphère n'aurait que quelques mailles sur la calotte
+  visible au plancher d'altitude). Chaque sommet reçoit les coordonnées de texture du point de la sphère qu'il vise —
+  la même normale exacte `n_W` que l'éclairage — ramené dans les axes du corps au temps d'affichage :
+  `n_B = q_B⁻¹ · Q · n_W` (`q_B` : § 10, `Q` : pose, § 2), puis `λ = atan2(−n_B.z, n_B.x)`,
+  `φ = atan2(n_B.y, √(n_B.x² + n_B.z²))`, `u = 0,5 + λ / 2π`, `v = 0,5 − φ / π` (C85 : longitude 0 au centre, nord
+  en haut). En pratique, la base du disque `(b_u, b_v, w)` est tournée une fois par corps et par frame, et chaque
+  sommet combine ses trois images. **Couture** : dans un quad dont les `u` s'étalent sur plus d'un demi-tour, les
+  `u < 0,5` reçoivent `+1` (texture répétée en `u`, bord figé en `v`) ; un quad qui contient un pôle (au plus 15° au
+  niveau 0, 1,9° au niveau 3) reste approximatif, adouci par le mipmap. Couleur des sommets : planètes, texture en
+  couleurs × ombrage (`0,06 + max(0, n·l)`) ; étoiles, texture en luminance × couleur du corps × `k`, sans ombrage, avec
+  `k = min(1 / luminance moyenne, 1 / max(r, g, b))` (éclat moyen ramené vers celui de la couleur unie) et l'opacité du
+  halo multipliée par l'éclat moyen obtenu `min(1, luminance × k)` (son bord intérieur jamais plus lumineux que le
+  disque). Texture pas encore chargée (ou illisible) : disque en couleur unie comme avant. Points (`α < 0,12°`) :
+  jamais texturés ; couleur moyenne de la texture si elle est chargée (× couleur du corps × `k` pour une texture
+  teintée), sinon couleur du corps : pas de saut de couleur au seuil. Sommets émis par corps (quads × 4) : 576, 2 304, 9 216, 36 864 selon le niveau
+  (sommets distincts de la grille : 175, 637, 2 425, 9 457).
 - **Taille minimale** : si `α < 0,12°`, dessiner un point de taille `0,12°` dont l'éclat décroît avec `α` (une
   planète lointaine reste visible comme un point).
 - **Étoiles de fond** : quads de taille angulaire fixe (≈ 0,15° à 0,4° selon l'éclat) à 110 blocs ; éclat
@@ -98,33 +127,90 @@ rel = p_i − s ;  d = |rel| ;  w = Q⁻¹ · rel / d          (direction, axes 
 ## 5. Mouvement du monde (`SpaceMotion`, un pas par tick)
 
 État : pose `(s, Q)`, vitesse nominale `V` (km/tick). Entrée du pilote `SpacePilotInput` : `throttle ∈ {−1, 0, 1}`,
-`roll ∈ {−1, 0, 1}`, `yawRate, pitchRate ∈ [−1, 1]`, `brake` (booléen, touche Saut), visée `aimYaw, aimPitch` (écart du regard au cercle avant, octets signés, 1 = 30/127°,
-`aimPitch > 0` = au-dessus). Réglages : `V_max` (défaut 10⁷ km/tick), `turn` (défaut
+`roll ∈ {−1, 0, 1}`, `yawRate, pitchRate ∈ [−1, 1]`, `brake` (booléen, touche Saut), `boost` (booléen, touche Sprint,
+lot 3, T32), visée `aimYaw, aimPitch` (écart du regard au cercle avant, octets signés, 1 = 30/127°,
+`aimPitch > 0` = au-dessus ; sans effet sur le pas depuis T39). Masses des corps (T39) : seulement pour le
+référentiel (point 0). Réglages : `V_max` (défaut 10⁷ km/tick), `turn` (défaut
 1,5 °/tick), `rollSpeed` (défaut 2 °/tick).
 
-0. **Référentiel** (D7, règle de choix D8) : la vitesse `V` est relative à un **corps de référence** `ref` (état de
-   l'Environment, synchronisé et sauvegardé, id de corps stable). Choix **une seule fois, au début du pas**, positions au temps `t` (état `SpaceFrameState` mis à jour en place) :
-   - **Score** de chaque corps `S_i = P_i · G_i` :
-     `P_i = 1 / max(h_i, 1 km)` (proximité, `h_i` = altitude) ;
-     `G_i = 1 / (1 + (θ_i / θ₀)²)`, `θ₀ = 20°` (regard ; 10° jugé trop sélectif), où `θ_i = max(0, angle(a, w_i) − α_i)` : angle entre la
-     **direction de visée** `a` et la direction du corps `w_i`, moins son rayon angulaire `α_i` (viser n'importe où
-     sur le disque compte comme viser le centre). `a` = regard du pilote `(ψ_F + aimYaw, θ_F − aimPitch)` tourné par `Q`, ou l'axe avant du
-     monde sans pilote (`ZERO`) ; le regard propre d'un joueur qui ne pilote pas ne compte pas. Rayon angulaire non
-     plafonné dans le score ; égalité → premier corps. Très près d'un corps, `P` domine (il gagne même hors du
-     regard) ; loin de tout, les `P` sont proches et `G` départage (le corps visé gagne).
-   - **Bascule** : `c = argmax S`. Si `c ≠ ref` et `S_c > 1,25 · S_ref` pendant **10 ticks consécutifs** (délai,
-     0,5 s), et si **60 ticks** (cooldown, 3 s) se sont écoulés depuis la bascule précédente → `ref = c`. `ref` absent
-     (supprimé, système changé, aucun) → `c` immédiatement, sans délai ni fondu.
+0. **Référentiel** (D7, règle de choix **D29**, T39 ; remplace le score proximité × regard de D8) : la vitesse `V`
+   est relative à un **corps de référence** `ref` (état de l'Environment, synchronisé et sauvegardé, id de corps
+   stable). Choix **une seule fois, au début du pas**, positions au temps `t` (état `SpaceFrameState` mis à jour en
+   place). Le référentiel est l'astre qui a **le plus d'influence gravitationnelle** sur le vaisseau, au sens des
+   **sphères d'influence** (comme Kerbal Space Program). La masse ne sert qu'à ce choix : **aucune gravité n'est
+   appliquée au vaisseau** et les orbites gardent leur période (`SpaceOrbit`).
+   - **Sphère d'influence** d'un corps `i` de parent `p` : **rayon de base** (`SpaceMotion.baseInfluenceRadius`)
+     `r_i = a_i · (m_i / m_p)^(2/5)` (`a_i` = demi-grand axe en km, `StrictMath.pow`), au moins **`10 R_i`**
+     (`INFLUENCE_FLOOR`, porté de 2 à 10 à la demande de l'utilisatrice) ; puis **rayon de jeu**
+     (`SpaceMotion.influenceRadius`, seul utilisé pour le référentiel ; retouche après essai en jeu : « extrêmement
+     compliqué d'atteindre une lune sans la louper ») : rayon de base × **4** pour une lune (`MOON`, y compris autour
+     d'un objet mineur), × **1,5** pour une planète ou un objet mineur
+     (`MOON_INFLUENCE_FACTOR`, `PLANET_INFLUENCE_FACTOR`), **plafonné à `0,5 a_i`**
+     (`INFLUENCE_MAX_ORBIT_FRACTION` : la sphère d'une lune ne contient jamais le centre de son parent) ; une **étoile
+     compagne** garde son rayon de base (ni facteur, ni plafond). Corps sans
+     parent : sphère **infinie**. Calculées une fois par système (instance immuable : une édition en donne une autre).
+     Sol (banc T39, base → jeu) : Terre 924 650 → **1 387 000 km**, Mars 577 000 → 866 000 km, Jupiter 48,2 → **72,3 M
+     km**, Vénus 924 000, Mercure 169 000, Saturne 81,8 M, Neptune 130 M, Cérès 115 500, Pluton 4,72 M km ; Lune
+     66 184 → **192 200 km** (plafond `0,5 a`), Io 18 216 → 72 864 km, Europe 15 608 → 62 432 km, Ganymède 26 341 →
+     105 364 km, Callisto 37 681 → 150 725 km, Rhéa 7 638 → 30 552 km, Titan 43 321 → 173 285 km, Phobos 112,7 →
+     451 km, Déimos 62 → 248 km, Charon 8 445 → 9 796 km (plafond `0,5 a`). Voisins : étoiles compagnes inchangées
+     (Alpha du Centaure B 21,8 UA, Proxima 3 640 UA, Sirius B 14,9 UA, Procyon B 10,5 UA, 61 Cygni B 83,2 UA) ;
+     planètes : Proxima b 159 000 km, Proxima d et Barnard b à e ≈ 61 000 à 71 000 km.
+   - **Corps visé** `c` (`SpaceMotion.influenceTarget`) : on part des corps sans parent (le plus attirant s'il y en a
+     plusieurs), puis on **descend** tant qu'un enfant du corps retenu contient le vaisseau (distance au centre
+     `d ≤ r`) : étoile → planète → lune. Entre deux sœurs qui le contiennent toutes deux (sphères qui se recouvrent,
+     ex. Alpha du Centaure B et Proxima), la plus forte attraction `m / d²` (`d²` au moins 1 km²) ; à égalité, la
+     première dans l'ordre du système. En gravité brute (`G m / d²` seule), le Soleil l'emporterait sur la Terre dès
+     ≈ 260 000 km : la sphère d'influence évite ce défaut.
+   - **Hystérésis** : la sphère du référentiel courant **et de ses ancêtres** est agrandie de **5 %**
+     (`INFLUENCE_HYSTERESIS` = 1,05) : on ne la quitte qu'au-delà de `1,05 · r` (remplace la marge de score 1,25).
+   - **Bascule** : si `c ≠ ref`, `c` est candidat ; après **10 ticks consécutifs** de candidature (délai, 0,5 s), et si
+     **60 ticks** (cooldown, 3 s) se sont écoulés depuis la bascule précédente → `ref = c`. `ref` absent (supprimé,
+     système changé, aucun) → `c` immédiatement, sans délai ni fondu (même règle, sans hystérésis).
    - **Fondu** : à la bascule de `A` vers `B`, le mouvement d'entraînement passe de `A` à `B` en **40 ticks** (2 s) :
      `Δp_frame = (1 − σ) · Δp_A + σ · Δp_B`, `σ = smoothstep(ticks depuis la bascule / 40)` (`σ = 0` au pas de la bascule). Le changement ne
      modifie ni `s` ni `V`. Pendant le fondu, le freinage d'approche du référentiel utilise aussi la règle `min`.
-   - Constantes réglables dans `SpaceMotion` (θ₀, 1,25, 10, 60, 40). État à synchroniser et sauver : `ref`, `ref`
+   - Le **regard** (visée du pilote, `aimYaw`, `aimPitch` de `SpacePilotInput`) n'entre plus dans le choix : il reste
+     transmis (format inchangé) mais le pas ne le lit plus.
+   - Constantes dans `SpaceMotion` (`INFLUENCE_EXPONENT` 0,4, `INFLUENCE_FLOOR` 10, `MOON_INFLUENCE_FACTOR` 4, `PLANET_INFLUENCE_FACTOR` 1,5,
+     `INFLUENCE_MAX_ORBIT_FRACTION` 0,5, `INFLUENCE_HYSTERESIS` 1,05,
+     `SWITCH_DELAY` 10, `SWITCH_COOLDOWN` 60, `BLEND_TICKS` 40). État à synchroniser et sauver : `ref`, `ref`
      précédent, ticks depuis la bascule, candidat et ticks de candidature.
+   - Exemples (banc T39, rayons de jeu) : à 20 000 km de la Lune → Lune ; entre la Terre et la Lune, hors de la
+     sphère de la Lune (150 000 km de la Terre, 238 000 de la Lune) → Terre ; à 1,5 M km de la Terre → Soleil ; Lune à
+     180 000 km → Lune, à 200 000 km → Terre ; référentiel Lune, monde à `1,03 r` → reste Lune, à `1,06 r` → Terre
+     après le délai.
+   - **Lunes** (banc T39, croisière) : une lune n'est captée que si le vaisseau reste 10 ticks (délai, inchangé) dans
+     sa sphère. Plancher de 2 rayons : Io, Europe, Rhéa captées seulement en arrivant lentement, Phobos et Déimos jamais ;
+     plancher de 10 rayons : Europe atteinte, Rhéa captée par moments, Io non ; **rayon de jeu** (× 4, plafond
+     `0,5 a`) : depuis leur planète ou une lune voisine, le pilote nominal capte et atteint la Lune, Io, Europe,
+     Ganymède, Callisto, Rhéa, Titan et Charon (arrêt à ≈ 1,97 R en 15 à 40 s) ; Déimos est captée mais pas atteinte
+     par le pilote nominal (le pilote brutal s'y pose au plancher) ; **Phobos** n'est toujours pas captée (la poursuite
+     du banc passe à 496 km au plus près, sphère de 451 km ; 770 km/tick autour de Mars).
 1. **Gaz** (vitesse **signée**, `V ∈ [−V_max, V_max]` ; `V < 0` = le monde part en arrière ; D6) :
    - `brake` (Espace maintenu) **prime** sur `throttle` : `V = V · 0,92`, et `V = 0` quand `|V| < 1` km/tick ;
    - sinon `throttle = s ≠ 0` : si `V` est de signe opposé à `s`, `V = V · 0,92` (et `0` sous 1 km/tick) ; sinon
      `V = s · min(V_max, max(1, |V| · 1,05))` (accélère dans le sens `s`, en partant de 1 km/tick) ;
    - pas de touche : `V` inchangée (le monde garde son élan). `|V|` est bornée à `V_max` à chaque pas.
+   - **Boost** (lot 3, T32, D24, C74 ; Sprint maintenu) : les mêmes règles avec des pentes **triplées en échelle
+     logarithmique** : facteur de décélération `k_b = 0,92³ = 0,778688` (frein et gaz opposé) au lieu de `k = 0,92`,
+     facteur d'accélération `1,05³ = 1,157625` au lieu de `1,05` (`SpaceMotion.BOOST_DECELERATION`,
+     `BOOST_ACCELERATION`). Le boost seul ne change rien ; il est ignoré pendant la charge du saut (frein forcé à
+     0,92, § 8). Vérifié au banc (`V_max` = 10⁷ km/tick) :
+
+     | | sans boost | avec boost |
+     |---|---|---|
+     | de 1 km/tick à `V_max` (gaz) | 331 ticks (16,6 s) | 111 ticks (5,6 s) |
+     | de `V_max` à l'arrêt (frein, ou gaz opposé jusqu'à 0) | 194 ticks (9,7 s) | 65 ticks (3,3 s) |
+     | distance d'arrêt depuis `V_max` | 1,150 · 10⁸ km (0,77 UA) | 3,519 · 10⁷ km (0,24 UA) |
+
+   - **Distance d'arrêt** (relative au référentiel ; utilisée par la vitesse de croisière, T34, § 11) : le frein multiplie
+     `V` par `k` puis le monde avance de la nouvelle vitesse, jusqu'au pas où `|V| < 1` (arrêt net, déplacement nul) :
+     `d(V) = Σ_{n=1..N} |V| · kⁿ`, `N` = plus grand `n` tel que `|V| · kⁿ ≥ 1`, soit
+     `d(V) = k · |V| · (1 − k^N) / (1 − k)`, majorée par `k · |V| / (1 − k)` — **11,5 · |V|** sans boost,
+     **3,5185 · |V|** avec (la borne dépasse `d` de 3,5 à 4,5 km avec boost, de 11,5 à 12,5 km sans : négligeable). Calcul exact :
+     `SpaceMotion.stoppingDistance(V, boost)` (même suite de multiplications que le pas). Le freinage d'approche (point
+     3) ne fait que ralentir davantage près d'un corps : la distance réelle est plus courte, la formule est prudente.
 2. **Rotation**, dans les axes du monde (le monde est le vaisseau) puis composée à droite :
    `Q ← Q · Rot(U_W, −yawRate·turn) · Rot(R_W, pitchRate·turn) · Rot(F_W, roll·rollSpeed)`, puis normalisation.
    Sens voulus (à vérifier en jeu) : regarder à droite du cercle avant fait pivoter l'avant du monde vers la droite
@@ -150,17 +236,42 @@ rel = p_i − s ;  d = |rel| ;  w = Q⁻¹ · rel / d          (direction, axes 
 5. `s = s'`. La fonction est déterministe :
    `SpaceMotion.step(pose, V, frame, input, système, tDébut, tFin, réglages, destPose) → V`, `frame`
    (`SpaceFrameState`) mis à jour en place (méthode d'instance qui porte son espace de travail, une instance par fil ; `tDébut` /
-   `tFin` = `settings.days(T, 0)` / `settings.days(T + 1, 0)` : passer les deux évite une dérive d'arrondi ; `V`
+   `tFin` = `days(T, 0)` / `days(T + 1, 0)`, horloge du § 3 avec son époque : passer les deux évite une dérive d'arrondi ; `V`
    bornée à `V_max` à chaque pas). Le serveur et les clients l'appellent avec les mêmes entrées
    ([`05`](05-synchronisation.md)).
 
 Pose par défaut d'un système (`setCurrentSystem`, réinitialisation ; `SpaceMotion.defaultPose(système, t, réglages,
-dest)`) : sur la droite parent → planète de départ, à `1,02 ×` son demi-grand axe (sans planète : 1 UA sur `+X`), hors de tout corps (altitude ≥ 20 rayons), avant du monde tourné vers l'étoile principale, `V = 0` ; référentiel =
-meilleur score avec la visée sur l'axe avant (Terre pour Sol). **Planète de départ** (T16) : la `PLANET` dont le
+dest)`) : sur la droite parent → planète de départ, **au-delà de la planète, à `min(0,02 a, 0,8 r)` d'elle** (`r` =
+rayon de **base** de sa sphère d'influence, sans facteur de jeu, T39, C115 ; avant T39 : à `1,02 a` du parent, hors de la sphère de la Terre) — sans
+planète : 1 UA sur `+X` —, hors de tout corps (altitude ≥ 20 rayons), avant du monde tourné vers l'étoile principale,
+`V = 0` ; référentiel = corps visé par la règle des sphères (sans hystérésis). Sol (banc T39, `t = 0`) : 0,988 UA du
+Soleil, **739 720 km de la Terre**, Lune à 982 000 km, référentiel = **Terre**. Dans les voisins, une planète proche de
+son étoile a une sphère plus petite que la garde de 20 rayons : le référentiel y est l'étoile (Barnard, Tau Ceti g / h)
+ou une planète plus lointaine (Lalande 21185 c, Tau Ceti f, Epsilon Eridani b) ; la pose utilise le rayon de **base**
+(`baseInfluenceRadius`, sans le facteur de jeu) : elle est inchangée par la retouche des rayons de jeu. Seul le
+référentiel d'Alpha du Centaure change : la pose (à 136 500 km de Proxima b, garde de 20 rayons) est hors de la sphère
+de base de Proxima b (106 000 km) mais dans sa sphère de jeu (× 1,5 = 159 300 km) : Proxima b au lieu de Proxima. **Planète de départ** (T16) : la `PLANET` dont le
 demi-grand axe `a` est le plus proche de 1 UA en échelle logarithmique (`|ln a|` minimal, `StrictMath`, la première en
 cas d'égalité) — la Terre dans Sol, indépendamment de son rang et de son nom ; dans un système voisin, la planète la
 plus « tempérée » (Proxima b, Barnard e, Lalande 21185 c, Epsilon Eridani b, Tau Ceti f) ; objets mineurs et lunes
 jamais retenus.
+
+### 5 bis. Téléportation (D34, T44 suite)
+
+`SpaceEnvironmentModule.teleportTo(système, corps)` (Configurator, ops) pose le vaisseau « comme en orbite » par
+`SpaceMotion.orbitPose(système, i, t, réglages, approche, dest)` :
+- distance au centre du corps `d = max(1,5 R, min(10 R, 0,5 r))`, `r` = rayon **de jeu** de sa sphère d'influence
+  (`influenceRadius`, infini sans parent) : 10 rayons comme l'arrivée d'un saut (C59), mais toujours dans la sphère.
+  Terre 63 710 km, Lune 17 370 km, Phobos 111 km, Soleil 6,96 M km ;
+- côté : vers l'étoile la plus proche dans sa parenté (face éclairée) ; pour une étoile, vers d'où vient le vaisseau
+  (même système : sa position ; autre système : direction galactique du système quitté, comme l'axe d'un saut ;
+  sinon vers son parent, sinon `+X`) ;
+- le point doit avoir le corps pour cible de la règle des sphères (`influenceTarget`, hystérésis du référentiel) et
+  être au-dessus du plancher d'altitude de chaque corps ; sinon les axes `±X, ±Y, ±Z` sont essayés dans l'ordre ;
+  aucun ne convient : premier point gardé ;
+- orientation : avant du monde tourné vers le corps, haut au plus près de `+Y` (même construction que la pose par
+  défaut, `lookAt`) ; `V = 0`, référentiel = le corps sans fondu, saut annulé ; autre système : il devient courant
+  (révision incrémentée).
 
 Affichage (`SpaceMotion.interpolate`) : interpoler `s − P_frame` entre les deux derniers ticks puis rajouter
 `P_frame` au temps d'affichage (fondu compris) : aucun écart avec le mouvement du référentiel entre deux ticks.
@@ -201,7 +312,12 @@ part de l'identité dans l'espace vue, donc `pose.last().pose()` est la matrice 
 l'on trace le segment entre l'origine et ce point. Le renderer ne dessine le segment que si
 `ctx.family() == VIEW`.
 
-## 7. Cube du Configurator (T11, T12)
+## 7. Cube de la carte (T11, T12 ; Space Map T37, Configurator branché T42)
+
+> Depuis T42, le cube, la vue (mode, cadrage, zoom, sélection, origine) et le renderer appartiennent à la **Space Map** ;
+> le Configurator n'a plus que sa fenêtre et ses poignées, placées et relues dans le repère du cube et de la vue de la
+> Map (voir « Configurator branché » plus bas). Les paragraphes historiques ci-dessous (« Animer », action 13, zoom du
+> Configurator) décrivent le lot 2 ; les formules (repère, échelles, poignées) restent valables.
 
 **Repère du cube** : le transform `T` (translation `t`, rotation `R` = `HoloEditMath.rotation`, échelle `σ`) place le
 point local `q` en `P = t + R · (σ ⊙ q)`, `P` dans le repère du marker (axes du monde). Inverse :
@@ -257,6 +373,37 @@ six extrémités, une étiquette donne la coordonnée de cet axe, précise (3 d�
 système). Mode galaxie : `g − g_origine` (al) ; mode système : position relative à l'étoile principale (UA), au
 temps d'affichage. Rayon affiché d'un corps : voir « Rayon affiché (T25) » ci-dessus.
 
+**Space Map (lot 3, T37)** : le cube et son renderer passent dans la Space Map (le Configurator a gardé le sien,
+même renderer, jusqu'à T42). Vue **partagée**, sans `t_edit` : temps **vivant** de l'Environment (client
+`displayDays(partialTick)`, serveur `days()`), donc `p_ship = s` (la formule de C49 reste celle du renderer). Carte
+galactique : centre `c` et demi-étendue `H` continus (`[0,05 ; 200 000]` al) ; recentrer sur un système pose
+`c = g_système`, `H` gardé ; « Vue d'ensemble » = recadrage ci-dessus. Vue système : centre = un corps (`q = (p − p_c) / H`)
+ou l'origine du système, `H` continu (`[1e-6 ; 2e4]` UA) ; recentrer sur un corps pose
+`H = framingHalf = max(H_zoom, nice(1,1 × apoapside))` (le second terme seulement pour un corps sans descendant en
+orbite dont le parent n'est pas une étoile : une lune montre aussi sa planète ; Lune : `H = 0,005` UA, Terre à
+0,54 unité) ; système entier : `H_sys`. Zoom : `H ← H · 1,5^(−crans)`, centre inchangé.
+- **Orbites** : ellipse complète (64 segments, cache) si son apoapside `≤ 4 H` (corde à moins de `0,0048` unité du
+  cube de l'ellipse) ; sinon **arc local** (comme l'arc du corps zoomé de T25) autour de chaque corps visible ; segments
+  hors du cube omis ; corps hors du cube masqués (toujours, plus seulement en zoom).
+- **Carte ajustée au cube** : avant T37, les tailles en blocs (étoiles, anneaux, textes, traits, écarts) ne suivaient
+  pas l'échelle du cube ; elles sont maintenant multipliées par `σ / 1,5` (valeurs des constantes à l'échelle par
+  défaut), portée de lecture des textes `24 · max(1, σ / 1,5)` blocs.
+- **Corps texturés** : disque face caméra de 8 anneaux × 24 secteurs ; le sommet au rayon relatif `sin a`, angle `t`,
+  représente le point de normale `sin a (cos t X + sin t Y) + cos a E` (vue orthographique ; `X`, `Y` axes du billboard,
+  `E` vers l'œil), ramenée dans les axes du corps par `q_B⁻¹ · (R⁻¹ C)` (`SpaceSpin` au temps de la vue) ; `u`, `v`
+  comme le ciel (§ 4, C85), couture par quad ; sans ombrage ; étoile teintée et éclaircie comme le ciel (C92). Repli
+  en couleur unie tant que la texture n'est pas prête.
+
+**Configurator branché (T42, C121–C124)** : poignées dans le repère du cube de la Map et de sa vue (centre, `H`) ;
+chaque écriture retient le système / corps visé, le transform du cube et le cadrage, et la relecture utilise ce
+contexte. La Map suit le temps vivant ; la poignée d'orbite est posée et relue au **temps figé** `t_edit` (état
+synchronisé du Configurator), repris par le serveur seulement au changement de contexte (système montré ou sa copie,
+corps sélectionné, centre, `H`, révision) : aucun envoi par tick, et `HoloEditRules.accepts` reste satisfait pendant
+une édition. Le renderer décale l'ellipse du déplacement du parent entre `t_edit` et le temps vivant ; gizmos et
+visée restent à `t_edit`. Existence : `b_aff ≥ 1e-5`, apoapside `≤ 4` unités du cube, parent à `≤ 2` unités du
+centre. Bouton « Orbite » (action 10) : vue centrée sur le parent, `H = nice(1,1 × apoapside)`, l'orbite entière tient
+dans le cube.
+
 **Poignée d'orbite** (`SpaceOrbitHandle`, `HoloEditRotation` + `HoloEditScale`) : posée sur le parent affiché.
 
 ```
@@ -295,7 +442,7 @@ début de la règle (« 20 al », zéro omis), pas `nice(H / 4)`.
 |---|---|---|
 | `NONE` | — | mouvement normal (§ 5) ; drapeau saut + cible valide (système connu ≠ courant) → `CHARGE` dans le même pas |
 | `CHARGE` | 60 ticks, tant que l'entrée garde le drapeau saut | au pas `n` de la charge (1 à 60) : pas « verrouillé » (frein forcé `V ← 0,92 V`, gaz, roulis et taux ignorés ; référentiel, entraînement, freinage d'approche et garde-fou inchangés, avec l'orientation du début du pas), puis `Q ← slerp(Q₀, Q_cible, lisse(min(n, 40)/40))` (C39, C40). Drapeau perdu → `NONE` et pas normal (orientation atteinte gardée). Au pas 60 → `TRAVEL`, compteur 0, `V = 0` (le frein seul ne l'annule pas : 10⁷ km/tick · 0,92⁶⁰ ≈ 67 000) |
-| `TRAVEL` | `N = max(20, ceil(20 · D / v_w))` ticks | pose figée dans le système d'origine (référentiel inchangé, `V = 0` ; rien n'est dessiné que la distorsion) ; compteur borné à `N` ; à `N`, **serveur seul** : arrivée |
+| `TRAVEL` | `N = max(40, ceil(20 · D / v_w))` ticks (minimum 20 avant T35, C73) | pose figée dans le système d'origine (référentiel inchangé, `V = 0` ; les étoiles convergent puis rien n'est dessiné que la distorsion) ; compteur borné à `N` ; à `N`, **serveur seul** : arrivée |
 
 - **Cible** (T22, C41) : à l'appui de Sneak, le client du pilote choisit l'étoile de fond dont la direction (vue
   depuis la pose, § 4) fait le plus petit angle avec le centre de l'écran, si cet angle ≤ 3° ; il envoie son **id**
@@ -316,8 +463,11 @@ début de la règle (« 20 al », zéro omis), pas `nice(H / 4)`.
   opposées (sin θ < 1e-12) : demi-tour autour du haut du monde `Q₀ · U_W`. Banc : depuis 170°, aligné à 1,4e-16 rad
   au pas 40.
 - **Durée** : `D` = distance galactique (al) entre système d'origine et cible ; `v_w` = vitesse de distorsion (al/s,
-  réglage, défaut 0,5) ; 20 ticks par seconde. Au moins 20 ticks. Sol → Alpha du Centaure (`D` = 4,36999995 al avec la
-  cible en `float`) : 175 ticks. Durée totale d'un saut : 60 + `N` ticks.
+  réglage, défaut 0,5) ; 20 ticks par seconde. Au moins 40 ticks (`SpaceJump.MIN_TRAVEL_TICKS`, C73 : 20 ticks de
+  convergence des étoiles, puis au moins autant de voyage ; un voyage sauvegardé plus court reste valide). Sol →
+  Alpha du Centaure (`D` = 4,36999995 al avec la cible en `float`) : 175 ticks. Durée totale d'un saut : 60 + `N`
+  ticks. Banc (T35) : `D` ≤ 1 al à 0,5 al/s → 40 ; 1,0001 al → 41 ; Alpha du Centaure → 175 ; vitesse nulle ou `D`
+  non fini → 40.
 - **Arrivée** (D10, C59), dans le pas serveur où le compte atteint `N` : système courant ← cible (révision
   incrémentée, comme `setCurrentSystem`) ; `u` = direction origine → cible exprimée dans le repère de la cible (même axes galactiques) ; pose `s = −u · r_a`
   avec `r_a = 10 × R_étoile` (km, étoile principale ; C59 : proche de l'étoile cible, disque d'environ 11°, Soleil
@@ -330,11 +480,44 @@ début de la règle (« 20 al », zéro omis), pas `nice(H / 4)`.
   voyage, rien ne change (C40).
 - **Pendant le voyage**, l'interpolation d'affichage ne mélange jamais deux systèmes : le changement de système est un
   saut d'affichage (comme C22 / T07e), masqué par la distorsion.
+- **Distorsion affichée** (lot 3, T35, D23, C73 ; client seulement, `client/render/modules/dimension/space/warp/`,
+  rien sur le réseau). Temps `e` = `ticks + jumpFraction` du saut affiché, borné à `N` (l'intervalle qui mène à
+  l'état de compte 0 est le premier : `e` va de 0 à `N`, et reste à `N` si le client attend l'arrivée au bout du
+  compte) ; le même chez tous les joueurs. `C = min(20, N/2)` (20 dès que `N` ≥ 40) :
 
-## 9. Surcouche de Space Pilot (lot 2, T18 / T19)
+  | Phase (`SpaceWarpTimeline`) | Temps | Ce qui est dessiné |
+  |---|---|---|
+  | `CONVERGE` | `0 ≤ e < C` (1 s) | ciel normal ; chaque étoile du fond procédural et des autres systèmes glisse vers la cible ; blanc `lisse((e − (C − 3)) / 3)` sur les 3 derniers ticks |
+  | `WARP` | `C ≤ e` | flash d'entrée (blanc 1 à `e = C`, `1 − lisse((e − C) / 10)`), scène du voyage qui apparaît dessous (`sceneRamp = lisse((e − C) / 10)`) ; blanc `lisse((e − (N − 4)) / 4)` sur les 4 derniers ticks (entier à `e = N`) |
+  | `ARRIVAL` | `s` ticks d'affichage depuis la dernière lecture en voyage, `s < 16` | ciel du nouveau système sous un blanc tenu 4 ticks puis `1 − lisse((s − 4) / 12)` (chronométré par l'effet, comme C64 ; aussi après une annulation ou un abandon) |
 
-Tout est calculé dans le repère du **ciel** (`SkyRenderer`, même projection que `SpaceSkyRenderer`, § 4) à partir de
-`pose(partialTick)` et `bodyPositions` du miroir de l'Environment :
+  **Convergence** : fraction de la tête `c = (e / C)³` (départ lent, arrivée rapide), de la queue
+  `c_q = max(0, e/C − 0,12)³`. Étoile de direction `d` (unitaire), cible `T` (axes du système pour le fond procédural :
+  `normalize(cible − origine)` galactique ; axes du monde pour les autres systèmes : direction vue depuis la pose,
+  comme le ciel), `θ = atan2(|d × T|, d · T)`, `k = (d × T) / |d × T|`, `p = (T − d cos θ) / sin θ` (tangente vers
+  `T`) : point tourné de `φ` = `d cos φ + p sin φ`, tangente `m(φ) = p cos φ − d sin φ`. Quad de la queue (`φ = c_q θ`)
+  à la tête (`φ = c θ`), demi-largeur = demi-taille de l'étoile `h` : coins `q − k h − m_q h`, `q + k h − m_q h`,
+  `t + k h + m_t h`, `t − k h + m_t h` (même sens que les carrés du ciel, `k × m` vers l'œil) : un carré à l'arrêt,
+  une traînée qui s'allonge avec la vitesse ; à `c = 1` toutes les têtes sont sur la cible. Étoile sur la cible :
+  immobile ; opposée : grand cercle fixe (axe perpendiculaire quelconque). Corps du système : inchangés.
+
+  **Voyage** : dégradé arc-en-ciel fonction du seul angle `θ` à la cible : violet jusqu'à 6°, spectre violet → bleu →
+  cyan → vert → jaune → orange → rouge de 6° à 150° (`SpaceWarpSpectrum.SPECTRUM_START / END`), puis rouge assombri
+  jusqu'à 180° ; éclat 0,8 ; bandes `1 + 0,12 sin(12 θ − 0,35 t)` qui défilent vers l'arrière. Source dans le plan
+  tangent au point de fuite : noyau 0,7°, halos 2,5° / 6° / 13° / 26° et anneaux 9,5° / 19°, additifs, pulsation
+  `± 7 %` ; deux flares à 4 branches (16° et 10°, trait net et flou superposés) tournant à +0,9° et −1,4° par tick ;
+  240 particules blanches (modèle du tunnel de T23). Brouillard : couleur du dégradé dans le regard × 0,85, mélangée
+  vers le blanc des flashs (hors fluides, C23).
+
+## 9. Surcouche de Space Knowledge, lien et cible de Space Pilot (lot 2, T18 / T19 ; lot 3, T33, T43)
+
+Depuis T33 (D25, C75), la surcouche (anneaux, orbites, étoiles, nom et distance au regard) est dessinée par **Space
+Knowledge** (`SpaceKnowledgeSkyRenderer`) ; le **lien vers le référentiel** et l'anneau du référentiel le sont par
+**Space Pilot**, seulement pendant le pilotage (`SpaceReferenceLinkRenderer`, voir plus bas). Rayon et couleur des
+anneaux de corps sont écrits une seule fois (`SpaceOverlay.bodyRing`, `SpaceOverlay.kindColor`).
+
+La surcouche est calculée dans le repère du **ciel** (`SkyRenderer`, même projection que `SpaceSkyRenderer`, § 4) à
+partir de `pose(partialTick)` et `bodyPositions` du miroir de l'Environment :
 
 - **Anneau d'un corps** : centré sur la direction du corps, rayon apparent = `max(α_corps · 1,6, α_min)` où `α_min`
   donne une taille **constante à l'écran** (≈ 10 px, à calculer depuis le FOV et la hauteur de la fenêtre) ; épaisseur
@@ -357,18 +540,241 @@ Tout est calculé dans le repère du **ciel** (`SkyRenderer`, même projection q
 - **Couleurs** (D18) : planètes et objets mineurs bleu `0x4FA8FF`, étoiles du système jaune `0xFFD84A`, lunes gris
   `0xB8B8B8`, étoiles de fond double cercle blanc ; orbite et nom de la couleur de l'objet.
 - **Nom au regard** : affiché si l'angle entre le regard de la caméra et la direction de l'objet ≤ `nameAngle`, pour
-  l'objet le plus proche du centre seulement ; texte à côté de l'anneau, face caméra.
-- **Visibilité** (D15, C47) : étoiles et planètes toujours ; lune si `‖s − P_parent‖ ≤ 10 · a_max_lunes(parent)` ;
-  objet mineur si `‖s − P_objet‖ ≤ 0,5 UA` ; fondu (alpha) sur les derniers 20 % ; le référentiel toujours.
-- **Lien vers le référentiel** (T19) : segment pointillé sur la sphère du ciel (grand cercle) entre la direction de
-  l'axe avant `F_W` (centre du cercle avant) et la direction du référentiel ; tirets de longueur angulaire constante
-  à l'écran. Réalisé en T19 dans `SpacePilotSkyRenderer` : le trait part du bord du cercle avant (`atan(R_F / 2)`,
-  même sans pilotage) et s'arrête au bord de l'anneau du référentiel (3 px d'écart de chaque côté) ; tirets de 6 px,
-  espaces de 4 px, épaisseur 1,5 px, comptés depuis l'axe avant ; couleur du référentiel (D18) ; rien si l'axe avant
-  est dans l'anneau ou si les deux directions sont quasi opposées ; coupé par `enabled` faux (C44).
+  l'objet le plus proche du centre seulement ; texte à côté de l'anneau, face caméra. **Distance** (T33, réglage
+  `distance`) : sur une seconde ligne juste sous le nom, même couleur ; corps : distance à la **surface**
+  (`‖P − s‖ − R`, `SpaceFormat.distance` : km, ou UA au-delà de 0,01 UA) ; étoile extérieure : distance entre les
+  systèmes en al (`SpaceFormat.lightYears`) ; arrondie à trois chiffres significatifs, texte reconstruit seulement
+  quand cette valeur arrondie (ou l'unité) change.
+- **Visibilité** (D15, C47, D30) : étoiles et planètes toujours ; le référentiel toujours ; objet mineur si
+  `‖s − P_objet‖ ≤ 0,5 UA`, fondu (alpha) sur les derniers 20 % ; **lune** (d'une planète ou d'un objet mineur,
+  T40) selon la séparation angulaire de son orbite vue du monde, `θ = atan(a / d_parent)` (`a` demi-grand axe en km,
+  `d_parent = ‖s − P_parent‖`), convertie en pixels de référence `px = tan θ / pixelTan = a / (d_parent · pixelTan)`
+  (`SpaceOverlay.pixelTan` : FOV et longue-vue comptent) : masquée jusqu'à **24 px** (deux anneaux minimaux de 10 px
+  côte à côte + marge), fondu linéaire de 24 à **36 px**, pleine au-delà (`MOON_MIN_PX`, `MOON_FULL_PX`) ; monde au
+  centre du parent : repérée. Anneau, orbite et nom de la lune suivent ce fondu ; calculé une fois par frame, sans
+  allocation. Remplace le seuil `10 · a_max_lunes(parent)` de C47. Apparition (FOV 70, fenêtre ≥ 1080 px de haut,
+  sans longue-vue ; début du fondu / pleine) : Callisto 60,5 / 40,3 M km, Ganymède 34,4 / 22,9, Europe 21,6 / 14,4,
+  Io 13,6 / 9,0 ; Lune 12,4 / 8,2 M km ; Charon 0,63 / 0,42 M km ; longue-vue (FOV × 0,1) : × 11,4 (Callisto dès
+  4,6 UA). La séparation réelle à l'écran dépend de la phase (une lune devant ou derrière son parent le recouvre) :
+  `a / d` en est le maximum.
+- **Lien vers le référentiel** (T19, refait en T33) : arc pointillé de grand cercle entre le cercle avant (axe avant
+  `F_W`) et la direction du référentiel ; tirets de longueur angulaire constante à l'écran. **Depuis T33** :
+  `SpaceReferenceLinkRenderer` de **Space Pilot**, un `ViewRenderer` en projection `WORLD` (et non plus le ciel :
+  devant le terrain, comme le joystick), sphère de 1,5 bloc, seulement pour le pilote local
+  (`SpacePilotPad.localPilot() != null`), réglage `refLink`, hors voyage et distorsion ; le lien n'est tracé qu'en
+  première personne (en F5 le cercle avant entoure l'œil du joueur, pas la caméra).
+  - **Départ** : exactement sur le **bord extérieur** du cercle avant, sans écart : rayon
+    `ρ = atan((R_F + e) / 2)` (`SpaceJoystickForward.RADIUS`, `DISTANCE` = 2, `SpaceJoystickRenderer.THICKNESS` = e).
+    Le cercle avant est un objet `Local` dessiné en projection **`STABLE`** (FOV des options) alors que le lien est en
+    **`WORLD`** (FOV effectif : vol créatif × 1,1, Rapidité, longue-vue, `fovEffectScale`) : dans l'espace vue
+    (`ViewRenderContext.cameraRotation`), une direction `v` dessinée en `STABLE` tombe à l'écran là où tombe `M v` en
+    `WORLD`, `M = diag(k, k, 1)`, `k = m11_stable / m11_world` (`m11_world = projection().m11()`,
+    `m11_stable = 1 / tan(configuredFov / 2)`). `M` est linéaire : un grand cercle reste un grand cercle. Centre vu du
+    cercle avant `F' = normalize(M F)` ; l'arc `F' → R` est l'image de l'arc `F → M⁻¹ R`, qui coupe le cône du cercle
+    avant en `c = cos ρ · F + sin ρ · T` (`T` tangente en `F` vers `M⁻¹ R`) ; départ `normalize(M c)`, à l'angle
+    `∠(F', M c)` de `F'` sur l'arc. Vérifié par banc (FOV des options, × 1,1, × 0,1, × 1,3, × 1,27) : écart au bord vu
+    du cercle et à la droite `F' → R` ≤ 0,0001 px. Le bobbing est ignoré (joueur immobile aux commandes).
+  - **Arrivée** : exactement sur le **bord extérieur** de l'anneau du référentiel (`ρ_anneau + demi-épaisseur`), sans
+    écart (l'écart de 3 px de T19 est supprimé). Space Pilot dessine lui-même cet anneau dans le même renderer (devant
+    le terrain), même rayon (`SpaceOverlay.bodyRing`) et même couleur (`kindColor`) que celui de Space Knowledge : les
+    deux se confondent quand les deux modules sont actifs.
+  - Inchangé : arc le plus court, tirets de 6 px, espaces de 4 px, un tiret part du bord du cercle avant (motif fixe
+    par rapport à l'axe avant), dernier tiret coupé au bord de l'anneau, épaisseur 1,5 px, opacité 0,8, couleur du
+    référentiel (D18) ; rien si l'axe avant est dans l'anneau ou si les deux directions sont quasi opposées. Plus de
+    dépendance à un interrupteur général (C44 remplacée par C75).
+- **Cible du vaisseau** (T43, D33, C125–C127) : `SpaceTargetRenderer` de Space Pilot, même projection, même sphère
+  et mêmes conditions que le lien (pilote local aux commandes, hors voyage et distorsion), sans dépendre de `refLink`
+  ni de Space Knowledge. Direction : corps du système courant (système entier : étoile principale) depuis
+  `pose(partialTick)` et `bodyPositions`, sinon étoile de fond du système ciblé (comme le saut). **Anneau** vert
+  `0x40FF40` au rayon de `SpaceOverlay.bodyRing` (épaisseur 2 px : il recouvre celui du référentiel et de Space
+  Knowledge), ou de 12 px autour d'une étoile de fond (au moins 0,5°). **Flèche** (première personne) : même
+  conversion `STABLE → WORLD` que le départ du lien ; `T` tangente en `F` vers la préimage `M⁻¹ R` ; flèche masquée
+  si `∠(F, M⁻¹ R) ≤ ρ` (cible dans le cône du bord extérieur du cercle avant) ; base `normalize(M c)`,
+  `c = cos ρ · F + sin ρ · T`, puis triangle dans le plan tangent en la base : direction « extérieure » = tangente du
+  grand cercle `F' → base`, base à 1 px au-delà du bord, pointe 8 px plus loin, largeur 9 px (pixels de référence,
+  `SpaceOverlay.pixelTan`). Deux instances enregistrées autour du lien : flèche avant (le lien passe dessus), anneau
+  après (il recouvre l'anneau du référentiel).
 - **Roue de charge** (T22) : anneau autour de la direction de l'étoile cible, rempli de `0` à `2π` selon
   `ticks / 60` (interpolé par `partialTick`), taille constante à l'écran. Réalisée en T22 dans un `ViewRenderer`
   (`SpaceJumpRenderer`, projection du monde : même FOV que le ciel, mais devant le terrain) : directions calculées
   comme ici (`pose(partialTick)`, positions figées du saut), puis posées sur une sphère de 1,5 bloc dans un repère
   orienté comme le monde ; rayon 20 px (au moins 5 px au-delà du double anneau de la cible), épaisseur 3 px, remplie
   depuis le haut de l'écran dans le sens horaire, reste du tour pâle.
+
+## 10. Rotation propre (lot 3, T28)
+
+Données : `SpaceRotation` du corps ([`03`](03-modele-donnees.md) § 2) — période sidérale `P` (heures, signée, `0` =
+synchrone), obliquité `ε`, longitude du nœud `Ω`, phase `φ` (degrés). Calcul : `SpaceSpin` (`StrictMath`, produits
+de quaternions de `SpaceRotations`, sans JOML ni `fma` : bit à bit identique serveur / clients, vérifié par le banc
+T28 sur les 62 corps à plusieurs instants).
+
+**Orientation** du corps au temps simulé `t` (jours, celui des orbites, § 3), quaternion `q_B` qui envoie les axes
+locaux du corps dans ceux du système (`v_S = q_B · v_B`) :
+
+```
+q_B   = R_ref · Ry(−Ω) · Rx(ε) · Ry(W)
+R_ref = Ry(−yaw) · Rx(pitch) · Rz(roll) de l'orbite (meme R_o qu'au § 3) ; identite pour un corps sans parent
+W     = 2π · frac(frac(24 t / P) + φ / 360)          P ≠ 0 (P < 0 : W decroit, retrograde)
+W     = atan2(−d_z, d_x) + φ                         P = 0 (synchrone), d = direction corps → parent dans le repere
+                                                     du pole : d = Rx(−ε) · Ry(Ω) · (−x_O, 0, −z_O)
+```
+
+- **Axes locaux du corps** : `+Y` = pôle (nord pour `P > 0`), `+X` = méridien origine, équateur dans le plan local
+  `XZ`. Pour une texture équirectangulaire (T30) : latitude `asin(y)`, longitude 0 sur `+X`, croissante dans le sens de
+  la rotation directe (`Ry(W) · (1, 0, 0) = (cos W, 0, −sin W)` : de `+X` vers `−Z`).
+- **Pôle** : `Ry(−Ω) · (0, cos ε, sin ε)` dans le repère de référence, c'est-à-dire incliné de `ε` depuis `+Y` vers
+  la longitude `Ω + 90°` (comptée de `+X` vers `+Z`). `(ε, Ω, P)` ≡ `(180 − ε, Ω + 180, −P)` (même axe, même sens).
+- **Synchrone** : `(x_O, 0, z_O)` = position sur l'orbite dans son repère (`x_O = cos E − e`, `z_O = √(1 − e²) sin E`,
+  Kepler du § 3, demi-grand axe 1 : seule la direction compte). L'axe `+X` vise le parent à chaque instant (projeté sur
+  l'équateur si `ε ≠ 0` : écart ≤ `ε`, Lune 6,68°) ; sur une orbite excentrique, la libration en longitude vient
+  d'elle-même. Direction indéfinie (parent sur l'axe du pôle) : `W = φ`. Sans parent : pas de rotation (`W = φ`).
+- `frac` à chaque terme : la précision ne se dégrade pas avec la durée de la partie (même règle que les orbites).
+- **Variantes** : `SpaceSpin.orientation(corps, t, dest)` et `orientations(système, t, dest[])` (tableau de
+  `newOrientationArray()`, une fois) n'allouent rien (banc : 816 o pour 340 000 orientations, bruit de mesure) ;
+  `orientation(corps, t)` rend un quaternion neuf (hors chemins par frame) ; `spinAngle(corps, t)` rend `W`.
+- **Convention et limite** : le haut `+Y` du repère de référence sert de « nord » (C14 : `+Y` = pôle nord céleste),
+  si bien qu'un corps de période positive tourne comme la Terre vu de son pôle nord (la texture défile vers l'est).
+  Les orbites du modèle, elles, vont de `+X` vers `+Z` (sens horaire vu de `+Y`, héritage du lot 1) : une rotation
+  « directe » est donc de sens opposé au parcours de l'orbite. Invisible en pratique (le ciel n'a pas de haut, le
+  pilote roule) ; la rotation synchrone n'en dépend pas.
+- **Nœuds des planètes de Sol** (annexe) : `Ω = λ_pôle − 90° − ϖ`, où `λ_pôle` est la longitude écliptique du pôle
+  nord IAU et `ϖ` le `yaw` de l'orbite (Soleil, sans parent : `Ω = λ_pôle − 90°`) ; l'inclinaison de l'orbite (quelques
+  degrés) est négligée. Banc : pôle de la Terre à 23,4400° de `+Y`.
+
+## 11. Vitesse de croisière (lot 3, T34)
+
+Calculateur du HUD de Space Pilot (D25, C76) : `SpaceCruise` (fonctions pures, sans allocation), appelé chaque tick
+client par `SpacePilotModule` ; rien n'est simulé ni envoyé.
+
+**Cible** (`SpaceCruise.pickTarget`) : corps du système courant le plus proche du centre de l'écran. Regard de la
+caméra `l_W` (axes du monde) ramené dans les axes du système, `l_S = Q · l_W` (pose `pose(1)`, § 2) ; pour chaque
+corps, au même temps (`bodyPositions(1)`) :
+
+```
+theta_i = max(0, angle(l_S, p_i − s) − alpha_i)        alpha_i = asin(min(1, R_i / |p_i − s|))   (degres)
+```
+
+Viser le disque compte comme viser le centre ; à écart égal (deux disques sous le centre), le plus proche du monde
+gagne (il occulte l'autre). Retenu si `theta ≤ 10°` ; **hystérésis** de 1° : la cible courante reste tant que son écart
+ne dépasse pas 11° et n'est remplacée que par un corps plus près du centre d'au moins 1° (ou plus proche quand les deux
+disques couvrent le centre). Aucune cible → partie droite de la ligne de vitesse masquée, « Cible : aucune ». Pas de
+cible pendant la charge ou le voyage d'un saut.
+
+**Distances** : `d = |p − s| − R`, distance à la surface de la cible au temps de la vitesse lue (`pose(1)`,
+`bodyPositions(1)` : `speed()` est celle du dernier tick simulé, environ un tick après `pose(0)`) ; marge
+`m = (0,01 + 2) · R = 2,01 R` (plancher de D9 plus zone de freinage d'approche, § 5 point 3 ; Lune 3 492 km, Terre
+12 806 km) ; plancher `h_min = 0,01 R`. `d ≤ m` → `v* = 0`.
+
+**Vitesse cible** (retouche T34, après essai en jeu) : la consigne s'adresse à un pilote **humain** qui suit la flèche
+avec le **frein normal** (Espace seul, ou gaz opposé : `k = 0,92` par tick, `S(V)` = `SpaceMotion.stoppingDistance(V,
+false)`, `S(V) ≤ c · V`, `c = k / (1 − k) = 11,5`) et un **temps de réaction** ; le frein rapide (Sprint + Espace)
+n'est plus qu'un rattrapage. `v*` est la plus grande vitesse `V ∈ [0, V_max]` (relative au référentiel) qui respecte :
+
+```
+nominale : g_c(V) = (T_c + 1) · V + S(V)                        ≤ d − m       T_c = 6 ticks (300 ms)
+garantie : g_a(V) = n_1 + … + n_(T_a+1) + S(n_(T_a+1))          ≤ d − h_min   T_a = 10 ticks (500 ms)
+           n_0 = V,  n_i = min(V_max, max(1, a_b · n_(i−1))),  a_b = 1,157625
+```
+
+- **Nominale** : la flèche passe à la baisse, le pilote freine après `T_c` ticks de réaction (plus le tick de
+  décision) passés à vitesse constante, et s'arrête à la marge.
+- **Garantie** : même s'il continue d'**accélérer avec le boost** pendant `T_a + 1` ticks (c'est le cas courant : la
+  consigne est croisée pendant l'accélération), puis freine normalement, il n'atteint pas le plancher ; il entame au
+  pire la marge, où le freinage d'approche agit.
+
+`g_c` et `g_a` sont croissantes : dichotomie (64 pas au plus) sur les fonctions exactes (`SpaceCruise.nominalDistance`,
+`guaranteedDistance`). **Forme close** (sans plafond) :
+
+```
+v* ≈ min( (d − m) / 18,5 ,  (d − h_min) / 86,9 )
+18,5 = T_c + 1 + c        86,9 = a_b (a_b¹¹ − 1) / (a_b − 1) + a_b¹¹ · c        (a_b¹¹ = 5,003)
+```
+
+(à moins de 5,4 % de la valeur exacte au-delà de 10 km/tick). Loin de la cible, la garantie domine ; la nominale ne
+prend le relais qu'à moins d'environ 2,5 R de la surface. `v*` est **proportionnelle à la distance** : elle baisse à
+mesure qu'on approche, la flèche passe à la baisse au bon moment, et suivre `v*` en freinage normal (frein sur `↓`,
+roue libre sur `↑` vert) amène à l'arrêt juste avant la marge. La garantie coûte du temps : suivre une consigne
+proportionnelle à la distance donne une approche exponentielle de constante ≈ 87 ticks (durée ≈ `87 · ln(v_croisement)`
+ticks), d'où des trajets environ deux fois plus longs que l'ancienne consigne, qui elle finissait au plancher.
+
+**Diagnostic de l'ancienne consigne** (`S_b(v*)` au frein rapide depuis le tick suivant ; banc jetable T34 bis, pilote
+simulé qui suit la flèche avec un retard de 0, 3, 6 ou 10 ticks) : elle était dépassée **systématiquement**.
+- (a) Frein normal au lieu du frein rapide : la distance d'arrêt est 3,3 fois plus longue (`11,5 V` au lieu de
+  `3,52 V`). Terre → Lune, sans retard, gaz normal : arrêt **86 000 km sous la surface** (1D, sans garde-fou).
+- (b) Temps de réaction : le gaz est multiplicatif ; pendant 6 ticks de réaction, le boost multiplie la vitesse par
+  2,4 (10 ticks : 4,3). Frein rapide, 6 ticks de retard : 91 000 km sous la surface (gaz normal), 476 000 km (gaz +
+  boost) ; frein normal et boost, 6 ticks : 1 100 000 km. Avec le vrai `SpaceMotion.step`, ces dépassements finissent
+  tous au plancher (17 km pour la Lune), arrêtés par le freinage d'approche et le garde-fou, ou en longeant l'astre.
+- (c) Chemin client : unités (km/tick partout, × 20 seulement à l'affichage), signe, repère (positions et pose au même
+  temps d'affichage, repère système) corrects ; seul écart : `speed()` est celle du dernier tick simulé alors que
+  `pose(0)` a environ un tick de retard (distance surestimée de `V`) : la consigne lit désormais `pose(1)`.
+- (d) Freinage d'approche et bascule du référentiel : sans effet sur le dépassement (la marge est hors de la zone de
+  freinage d'approche) ; voir aussi la vitesse relative ci-dessous.
+
+**Vitesse relative au référentiel et interception** (T39, C118 ; remplace C104 et l'éloignement de C116) : `V`
+(affichée et comparée à `v*`) est relative au référentiel, qui entraîne le monde (D7), et depuis D29 le référentiel ne
+bascule sur la cible qu'à l'entrée de sa sphère d'influence. Le **mouvement complet** de la cible relatif au mouvement
+d'entraînement du monde est donc compté, radial **et** transverse : `u = Δp_cible − Δp_frame` sur un tick (positions
+un tick plus tard à l'échelle de temps courante ; `Δp_frame` = déplacement du référentiel, ou mélange des deux pendant
+le fondu d'une bascule, comme le pas : la consigne ne saute pas quand la cible devient le référentiel ; `u = 0` pour
+une cible référentiel hors fondu, consigne de T34 inchangée). Vitesse conseillée **`w = u + c · n`**
+(`SpaceCruise.interceptSpeed`), `n` = direction monde → cible, `c` = la vitesse d'approche sûre ci-dessus pour la
+distance à la surface ; `v* = min(|w|, V_max)` et **direction à viser `w / |w|`** : en la suivant à cette vitesse, le
+monde se rapproche de la cible à `c` exactement (même sûreté que T34) tout en l'accompagnant, donc il entre dans sa
+sphère et y reste le délai de bascule. **Point d'interception** : cette direction, dessinée par `SpaceJumpRenderer`
+(petit anneau bleu pâle `0x8FD8FF`, 5 px, opacité 0,7) quand elle s'écarte du disque de la cible de plus de 0,5°
+(`SpaceCruise.interceptShown`) ; coupé avec la croisière. Le pilote vise ce point : la cible est gardée tant que le
+regard reste à moins de 11° du point (hystérésis de `pickTarget` appliquée au point d'interception), même loin de la
+cible. Avance mesurée au banc : 9° pour la Lune, 20° pour Vénus, 67° pour Mars, jusqu'à 180° pour une lune quand le
+monde part tout près d'elle (`c < |u|` : il faut d'abord voler dans son sens de marche).
+
+Banc T39 (pilote qui suit la consigne et vise le point, réaction 6 ticks ; un pilote brutal, réaction 10 ticks et
+boost) : Lune, Mars, Vénus, Mercure, Jupiter, Saturne, Neptune, Pluton, Cérès, Terre (depuis la Lune et Mars) atteints
+en 24 à 81 s, arrêt à ≈ 1,97 R ; lunes (rayons de jeu, § 5 point 0) : Io, Europe, Ganymède, Callisto, Rhéa, Titan,
+Charon atteintes depuis leur planète ou une lune voisine en 15 à 37 s ; jamais sous le plancher de D9. Avec
+l'éloignement seul (C116), mêmes résultats sauf Phobos jamais captée et Déimos captée sans arrêt. Avec l'interception,
+**Phobos et Déimos sont captées mais pas tenues** : le monde en ressort pendant le fondu. Limite physique : Phobos fait
+le tour de Mars en 77 ticks (sa direction de marche tourne de 4,7°/tick, plus vite que le lacet du vaisseau,
+1,5°/tick) à 770 km/tick pour une sphère de 451 km ; une erreur de vitesse de 5 % (38 km/tick) la fait quitter en
+quelques ticks (Déimos : 1,2°/tick, 486 km/tick, sphère de 248 km). Restent ignorés : l'écart entre l'axe avant et la
+direction conseillée (la consigne suppose qu'on la vise), les corps sur le chemin (garde-fou, § 5 point 4).
+
+**Couleur** (`SpaceCruise.redness`, C76) : écart relatif `e = |v − v*| / v*` ; vert (`0x55FF55`) si `e ≤ 10 %`, rouge
+(`0xFF5555`) si `e ≥ 30 %`, dégradé linéaire entre, quantifié en 8 paliers (le texte n'est reconstruit qu'au changement
+de palier) ; pour `v* = 0`, vert seulement à l'arrêt. **Flèche** : `↑` si `v < v*` (ou `v = v* > 0`), `↓` sinon ;
+valeurs comparées après arrondi à trois chiffres (celles qui sont affichées).
+
+**Exemple numérique Terre → Lune** (`V_max = 10⁷` km/tick, distance moyenne 384 400 km, départ au plancher de la
+Terre, 64 km) : `d = 384 400 − 6 371 − 64 − 1 737,4 = 376 228` km, `m = 3 492` km, `h_min = 17` km.
+
+| `d` (km) | `v*` (km/tick) | `v*` affichée (arrondie en km/tick, × 20) | forme close | nominale seule `(d − m) / 18,5` |
+|---|---|---|---|---|
+| 376 228 | 4 328 | 86 600 km/s | 4 329 | 20 148 |
+| 100 000 | 1 150 | 23 000 km/s | 1 151 | 5 217 |
+| 20 000 | 230 | 4 600 km/s | 230 | 892 |
+| 10 000 | 115 | 2 300 km/s | 115 | 352 |
+| 5 000 | 57,5 | 1 150 km/s | 57,3 | 81,5 |
+| 3 600 | 6,5 | 129 km/s | 5,8 | 5,8 |
+
+(Ancienne consigne au départ : 71 259 km/tick, 16 fois plus.) **Banc d'acceptation** (jetable, `SpaceMotion.step` réel,
+Sol par défaut, orientation tenue vers la cible ; pilote qui suit la flèche avec un retard de 0, 6 ou 10 ticks, frein
+normal sur `↓`, sur `↑` gaz (règle stricte) ou gaz seulement si `v < 0,9 v*` (règle « zone verte »), gaz avec ou sans
+boost ; Terre → Lune (`V_max` 10⁷ et 10⁵), Terre → Mars, Terre → Jupiter (`V_max` 10⁹), Terre → Soleil, Lune →
+Terre ; orbites animées à 3 600 s/tick et figées ; 48 trajets par retard) :
+
+| retard | nouvelle : au plancher | entament la marge | écart moyen arrêt / marge | durée moyenne | ancienne : au plancher | durée moyenne |
+|---|---|---|---|---|---|---|
+| 0 tick | 0 | 0 | 0,00 R | 38,8 s | 42 / 48 | 17,2 s |
+| 6 ticks | 0 | 48 | 0,20 R | 33,4 s | 46 / 48 | 17,8 s |
+| 10 ticks | 0 | 48 | 0,65 R | 29,1 s | 48 / 48 | 18,1 s |
+
+Terre → Lune (orbites animées, règle zone verte, frein normal) : sans retard 629 ticks (31,5 s) gaz normal, 526 (26,3
+s) gaz + boost, arrêt à 3 499 km ; 6 ticks de retard, gaz + boost : 387 ticks (19,4 s), arrêt à 2 648 km ; 10 ticks :
+270 ticks (13,5 s), arrêt à 1 774 km ; l'ancienne consigne finissait au plancher (17 km) en 196 à 330 ticks. Banc 1D
+(sans garde-fou, 432 cas : 6 cibles, `V_max` 10⁵ à 10⁹, retards 0 / 6 / 10, règles, gaz et frein normal ou rapide) :
+aucun arrêt sous la surface. Phobos (période de 7,6 ticks à 3 600 s/tick) n'est pas une cible praticable, ni avant ni
+après.
+
+Réglages : `SpaceCruise.REACTION_TICKS` (6) et `WORST_REACTION_TICKS` (10). Avec `T_a = 6`, les trajets sont plus
+courts (≈ 30 %) mais un pilote à 10 ticks de réaction qui accélère au boost dépasse la surface (banc 1D : 44 cas sur
+432).

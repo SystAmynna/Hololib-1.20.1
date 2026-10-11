@@ -5,7 +5,8 @@ import net.minecraft.network.FriendlyByteBuf;
 /**
  * Entree du pilote, quantifiee (voir {@code docs/space/04-mathematiques.md} par. 5 et {@code 05-synchronisation.md}
  * par. 3) : gaz et roulis dans {@code {-1, 0, 1}}, taux de lacet et de tangage en octets signes {@code [-127, 127]}
- * ({@code taux = octet / 127}, dans {@code [-1, 1]}), frein (booleen, touche Saut maintenue), <b>visee</b> (ecart du
+ * ({@code taux = octet / 127}, dans {@code [-1, 1]}), frein (booleen, touche Saut maintenue), <b>boost</b> (T32 :
+ * booleen, touche Sprint maintenue, pentes renforcees, {@link SpaceMotion#BOOST_ACCELERATION}), <b>visee</b> (ecart du
  * regard au cercle avant, en lacet et en tangage, octets signes {@code [-127, 127]} quantifies sur le cone :
  * {@code degres = octet x} {@value #AIM_RANGE} {@code / 127}, pas ~0,24 degre) et <b>saut</b> (T21 : drapeau tenu
  * tant que la touche du saut l'est, avec l'id du systeme cible, {@link SpaceJump}). Taille variable sur le reseau
@@ -18,7 +19,8 @@ import net.minecraft.network.FriendlyByteBuf;
  * perdre le drapeau pendant la charge l'annule. Gaz, roulis et taux sont alors transmis tels quels mais ignores par
  * le pas (C40).
  * <p>
- * La visee choisit le referentiel ({@code docs/space/04-mathematiques.md} par. 5 point 0, D8) : c'est l'ecart
+ * Visee : jusqu'a T39 elle choisissait le referentiel (D8) ; depuis D29 (spheres d'influence) le pas ne la lit plus.
+ * Elle reste dans l'entree (format reseau inchange, 2 octets) sans effet sur la simulation. C'est l'ecart
  * <b>reel</b> du regard (pas le taux : elle n'est pas nulle dans la zone morte du joystick). Direction visee dans les
  * axes du monde : regard {@code (yaw_F + aimYaw, pitch_F - aimPitch)} (pitch Minecraft) ; visee nulle = axe avant
  * du monde (aussi sans pilote, {@link #ZERO}).
@@ -28,15 +30,17 @@ import net.minecraft.network.FriendlyByteBuf;
  * {@code brake} ramene la vitesse vers 0 des deux cotes et prime sur {@code throttle}, qui est alors ignore par
  * {@link SpaceMotion#step} (il reste transmis tel quel) ; {@code roll > 0} roule a droite (touche Droite) ;
  * {@code yaw > 0} tourne l'avant du monde vers la droite (regard a droite du cercle avant) ; {@code pitch > 0} leve
- * l'avant (regard au-dessus du cercle avant). Roulis et taux restent actifs pendant le frein. {@code aimYaw > 0} :
+ * l'avant (regard au-dessus du cercle avant). Roulis et taux restent actifs pendant le frein. {@code boost} renforce
+ * les pentes du gaz (acceleration, deceleration d'un gaz oppose) et du frein ; seul, il n'a aucun effet (transmis tel
+ * quel, ignore par le pas), et il est ignore pendant la charge du saut. {@code aimYaw > 0} :
  * regard a droite du cercle avant ; {@code aimPitch > 0} : regard au-dessus (meme sens que {@code pitch}).
  * <p>
  * Le constructeur accepte n'importe quels octets ; les accesseurs de taux et de signe ({@link #yawRate()},
  * {@link #throttleSign()}...) bornent toujours, et {@link #sanitize()} rend une entree canonique (celle que
  * {@link #read} produit).
  */
-public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, boolean brake, byte aimYaw,
-                              byte aimPitch, boolean jump, int target)
+public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, boolean brake, boolean boost,
+                              byte aimYaw, byte aimPitch, boolean jump, int target)
 {
     /** Pas de quantification des taux : {@code taux = octet / RATE_STEPS}. */
     public static final int RATE_STEPS = 127;
@@ -52,6 +56,11 @@ public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, bo
      */
     public static final int FLAG_JUMP = 2;
     /**
+     * Octet de drapeaux sur le reseau : bit du boost (T32, touche Sprint maintenue) ; la taille de l'entree ne change
+     * pas.
+     */
+    public static final int FLAG_BOOST = 4;
+    /**
      * Ecart maximal de la visee, degres, par composante : demi-angle du cone du joystick
      * ({@code SpacePilotPad.CONE_ANGLE}). Un octet de visee vaut {@code AIM_RANGE / 127} degres.
      */
@@ -59,11 +68,11 @@ public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, bo
     /** Pas de quantification de la visee, degres. */
     public static final double AIM_STEP = AIM_RANGE / RATE_STEPS;
     /**
-     * Entree nulle : pas de gaz, pas de rotation, pas de frein (le monde garde sa vitesse nominale), visee sur l'axe
-     * avant.
+     * Entree nulle : pas de gaz, pas de rotation, pas de frein ni de boost (le monde garde sa vitesse nominale), visee
+     * sur l'axe avant.
      */
     public static final SpacePilotInput ZERO = new SpacePilotInput((byte) 0, (byte) 0, (byte) 0, (byte) 0, false,
-            (byte) 0, (byte) 0, false, 0);
+            false, (byte) 0, (byte) 0, false, 0);
 
     /**
      * Entree quantifiee, visee sur l'axe avant.
@@ -92,13 +101,26 @@ public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, bo
     }
 
     /**
-     * Entree quantifiee complete, saut compris (T21).
+     * Entree quantifiee avec saut (T21), sans boost.
      *
      * @param jumpTarget id du systeme cible du saut ({@code > 0} : drapeau du saut leve, tenu tant que la touche l'est)
      *                   ; {@code <= 0} : pas de saut
      */
     public static SpacePilotInput of(int throttle, int roll, double yawRate, double pitchRate, boolean brake,
                                      byte aimYaw, byte aimPitch, int jumpTarget)
+    {
+        return of(throttle, roll, yawRate, pitchRate, brake, false, aimYaw, aimPitch, jumpTarget);
+    }
+
+    /**
+     * Entree quantifiee complete, saut (T21) et boost (T32) compris.
+     *
+     * @param boost      boost (touche Sprint maintenue) : pentes du gaz et du frein renforcees
+     * @param jumpTarget id du systeme cible du saut ({@code > 0} : drapeau du saut leve, tenu tant que la touche l'est)
+     *                   ; {@code <= 0} : pas de saut
+     */
+    public static SpacePilotInput of(int throttle, int roll, double yawRate, double pitchRate, boolean brake,
+                                     boolean boost, byte aimYaw, byte aimPitch, int jumpTarget)
     {
         byte t = (byte) Integer.signum(throttle);
         byte r = (byte) Integer.signum(roll);
@@ -107,8 +129,8 @@ public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, bo
         byte ay = clampRate(aimYaw);
         byte ap = clampRate(aimPitch);
         boolean jump = jumpTarget > 0;
-        if (t == 0 && r == 0 && y == 0 && p == 0 && !brake && ay == 0 && ap == 0 && !jump) return ZERO;
-        return new SpacePilotInput(t, r, y, p, brake, ay, ap, jump, jump ? jumpTarget : 0);
+        if (t == 0 && r == 0 && y == 0 && p == 0 && !brake && !boost && ay == 0 && ap == 0 && !jump) return ZERO;
+        return new SpacePilotInput(t, r, y, p, brake, boost, ay, ap, jump, jump ? jumpTarget : 0);
     }
 
     /**
@@ -118,8 +140,8 @@ public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, bo
     public SpacePilotInput withJump(int jumpTarget)
     {
         boolean jump = jumpTarget > 0;
-        return new SpacePilotInput(throttle, roll, yaw, pitch, brake, aimYaw, aimPitch, jump, jump ? jumpTarget : 0)
-                .sanitize();
+        return new SpacePilotInput(throttle, roll, yaw, pitch, brake, boost, aimYaw, aimPitch, jump,
+                jump ? jumpTarget : 0).sanitize();
     }
 
     /**
@@ -160,12 +182,13 @@ public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, bo
     public double aimPitchDegrees() { return clampRate(aimPitch) * AIM_STEP; }
 
     /**
-     * Vrai si aucune commande n'est active (frein et saut compris) et si la visee est sur l'axe avant :
+     * Vrai si aucune commande n'est active (frein, boost et saut compris) et si la visee est sur l'axe avant :
      * {@link #ZERO}.
      */
     public boolean isZero()
     {
-        return throttle == 0 && roll == 0 && yaw == 0 && pitch == 0 && !brake && aimYaw == 0 && aimPitch == 0 && !jump;
+        return throttle == 0 && roll == 0 && yaw == 0 && pitch == 0 && !brake && !boost && aimYaw == 0 && aimPitch == 0
+                && !jump;
     }
 
     /** Id du systeme cible si le drapeau du saut est leve, {@code 0} sinon. */
@@ -175,7 +198,8 @@ public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, bo
     public boolean rotating() { return roll != 0 || yaw != 0 || pitch != 0; }
 
     /**
-     * Entree canonique : signes pour gaz et roulis, taux et visee bornes a {@code [-127, 127]}, frein garde, saut garde
+     * Entree canonique : signes pour gaz et roulis, taux et visee bornes a {@code [-127, 127]}, frein et boost gardes,
+     * saut garde
      * seulement avec une cible {@code > 0} (sinon drapeau baisse, cible {@code 0}) ; {@code this} si deja valide.
      */
     public SpacePilotInput sanitize()
@@ -192,15 +216,15 @@ public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, bo
                 && j == target) {
             return this;
         }
-        if (t == 0 && r == 0 && y == 0 && p == 0 && !brake && ay == 0 && ap == 0 && !jumping) return ZERO;
-        return new SpacePilotInput(t, r, y, p, brake, ay, ap, jumping, j);
+        if (t == 0 && r == 0 && y == 0 && p == 0 && !brake && !boost && ay == 0 && ap == 0 && !jumping) return ZERO;
+        return new SpacePilotInput(t, r, y, p, brake, boost, ay, ap, jumping, j);
     }
 
     private static double rate(byte value) { return clampRate(value) / (double) RATE_STEPS; }
 
     private static byte clampRate(byte value) { return value < -RATE_STEPS ? (byte) -RATE_STEPS : value; }
 
-    // ---------------------------------------------------------------- reseau (gaz, roulis, taux, frein, visee, saut)
+    // ---------------------------------------------------------------- reseau (gaz, roulis, taux, drapeaux, visee...)
 
     /**
      * Taille exacte sur le reseau, en octets : {@value #BASE_BYTES}, plus le varint de la cible (1 octet jusqu'a 127,
@@ -213,7 +237,8 @@ public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, bo
     }
 
     /**
-     * Sept octets : gaz, roulis, lacet, tangage, drapeaux ({@link #FLAG_BRAKE}, {@link #FLAG_JUMP}), visee en lacet,
+     * Sept octets : gaz, roulis, lacet, tangage, drapeaux ({@link #FLAG_BRAKE}, {@link #FLAG_JUMP},
+     * {@link #FLAG_BOOST}), visee en lacet,
      * visee en tangage ; puis, si {@link #FLAG_JUMP}, l'id du systeme cible (varint, {@code > 0}).
      */
     public void write(FriendlyByteBuf buf)
@@ -223,7 +248,7 @@ public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, bo
         buf.writeByte(roll);
         buf.writeByte(yaw);
         buf.writeByte(pitch);
-        buf.writeByte((brake ? FLAG_BRAKE : 0) | (j > 0 ? FLAG_JUMP : 0));
+        buf.writeByte((brake ? FLAG_BRAKE : 0) | (j > 0 ? FLAG_JUMP : 0) | (boost ? FLAG_BOOST : 0));
         buf.writeByte(aimYaw);
         buf.writeByte(aimPitch);
         if (j > 0) buf.writeVarInt(j);
@@ -241,7 +266,7 @@ public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, bo
         byte yaw = buf.readByte();
         byte pitch = buf.readByte();
         int flags = buf.readUnsignedByte();
-        if ((flags & ~(FLAG_BRAKE | FLAG_JUMP)) != 0) {
+        if ((flags & ~(FLAG_BRAKE | FLAG_JUMP | FLAG_BOOST)) != 0) {
             throw new IllegalArgumentException("Drapeaux d'entree invalides : " + flags);
         }
         byte aimYaw = buf.readByte();
@@ -252,7 +277,7 @@ public record SpacePilotInput(byte throttle, byte roll, byte yaw, byte pitch, bo
             target = buf.readVarInt();
             if (target <= 0) throw new IllegalArgumentException("Cible de saut invalide : " + target);
         }
-        return new SpacePilotInput(throttle, roll, yaw, pitch, (flags & FLAG_BRAKE) != 0, aimYaw, aimPitch, jump,
-                target).sanitize();
+        return new SpacePilotInput(throttle, roll, yaw, pitch, (flags & FLAG_BRAKE) != 0, (flags & FLAG_BOOST) != 0,
+                aimYaw, aimPitch, jump, target).sanitize();
     }
 }

@@ -5,10 +5,11 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 
 /**
- * Etat du referentiel du monde (voir {@code docs/space/04-mathematiques.md} par. 5 point 0, decision D8) : corps de
- * reference, corps precedent (fondu du mouvement d'entrainement), ticks depuis la derniere bascule (cooldown et
- * fondu), candidat a la bascule et nombre de ticks consecutifs de sa candidature (delai). Les corps sont designes par
- * leur id stable ({@code 0} = aucun).
+ * Etat du referentiel du monde (voir {@code docs/space/04-mathematiques.md} par. 5 point 0, decisions D8 puis D29 :
+ * spheres d'influence depuis T39) : corps de reference, corps precedent (fondu du mouvement d'entrainement), ticks
+ * depuis la derniere bascule (cooldown et fondu), candidat a la bascule (corps vise par les spheres d'influence,
+ * different du referentiel) et nombre de ticks consecutifs de sa candidature (delai). Les corps sont designes par leur
+ * id stable ({@code 0} = aucun).
  * <p>
  * Objet <b>mutable</b>, reutilisable : {@link SpaceMotion#step} le lit au debut du pas et le met a jour en place, sans
  * allocation. Chaque suite de pas a le sien (serveur, rejeu client, prediction du pilote, affichage). Etat simule comme
@@ -33,7 +34,10 @@ public final class SpaceFrameState
 
     // ---------------------------------------------------------------- lecture
 
-    /** Id du corps de reference ({@code 0} = aucun : le meilleur score au pas suivant, sans delai ni fondu). */
+    /**
+     * Id du corps de reference ({@code 0} = aucun : le corps vise par les spheres d'influence au pas suivant, sans
+     * delai ni fondu).
+     */
     public int reference() { return reference; }
 
     /** Id du referentiel d'avant la derniere bascule ({@code 0} = aucun) : origine du fondu. */

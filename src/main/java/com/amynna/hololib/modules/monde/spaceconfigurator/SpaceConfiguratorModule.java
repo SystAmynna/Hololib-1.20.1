@@ -5,19 +5,25 @@ import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAccess;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloTransform;
+import com.amynna.hololib.modules.dimension.space.SpaceBodyTextures;
 import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
 import com.amynna.hololib.modules.dimension.space.math.SpaceMotionSettings;
 import com.amynna.hololib.modules.dimension.space.math.SpaceOrbits;
-import com.amynna.hololib.modules.dimension.space.math.SpaceUnits;
 import com.amynna.hololib.modules.dimension.space.model.SpaceBody;
 import com.amynna.hololib.modules.dimension.space.model.SpaceBodyKind;
 import com.amynna.hololib.modules.dimension.space.model.SpaceEditResult;
+import com.amynna.hololib.modules.dimension.space.model.SpaceGalaxy;
 import com.amynna.hololib.modules.dimension.space.model.SpaceLimits;
 import com.amynna.hololib.modules.dimension.space.model.SpaceOrbit;
+import com.amynna.hololib.modules.dimension.space.model.SpaceRotation;
 import com.amynna.hololib.modules.dimension.space.model.SpaceSystem;
 import com.amynna.hololib.modules.dimension.space.model.SpaceSystem.SystemHeader;
+import com.amynna.hololib.modules.dimension.space.model.SpaceTextureRef;
+import com.amynna.hololib.modules.dimension.space.texture.SpaceTextureStore;
+import com.amynna.hololib.modules.monde.spacemap.SpaceMapCube;
+import com.amynna.hololib.modules.monde.spacemap.SpaceMapModule;
+import com.amynna.hololib.modules.monde.spacemap.SpaceMapWindow;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -28,170 +34,160 @@ import org.joml.Quaternionf;
 import org.joml.Vector3d;
 import org.joml.Vector3f;
 
-import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * Module {@code hololib:space_configurator} (memoire de position, marker), reserve aux operateurs : cube editable
- * ({@link SpaceMapCube}) qui montre la carte galactique ou un systeme, et fenetre editable separee
- * ({@link SpaceConfiguratorWindow}, T24 : creee devant la base du cube par defaut, puis independante du cube). Il ne stocke <b>pas</b> la galaxie : il en garde une copie, recopiee depuis le
- * Space Environment de la dimension du marker quand sa revision change, et synchronisee a ses observateurs. Les
- * modifications passent par les methodes serveur de l'Environment ({@code SpaceEditResult} : motif du refus affiche
- * au joueur).
+ * Module {@code hololib:space_configurator} (memoire de position, marker), reserve aux operateurs : <b>fenetre
+ * d'edition</b> ({@link SpaceConfiguratorWindow}) et <b>poignees</b> ({@link SpaceMapHandle}, {@link SpaceOrbitHandle})
+ * de la galaxie du Space Environment de la dimension du marker. Depuis T42 (D20, C78), il n'a plus de carte : il se
+ * branche sur la <b>Space Map du meme marker</b> ({@link SpaceMapModule#of}), dont la selection est l'objet edite
+ * (systeme sur la carte galactique, corps dans la vue systeme) et dont le cube et la vue (centre, zoom, cadrage)
+ * portent les poignees. Il ne stocke ni la galaxie ni sa copie (celle de la Map est lue) ; les modifications passent
+ * par les methodes serveur de l'Environment ({@code SpaceEditResult} : motif du refus affiche au joueur).
  * <p>
- * <b>Etat sauvegarde</b> : mode, systeme et corps selectionnes, corps zoome (T25), origine des coordonnees (T26),
- * cadrage galactique {@code (c, H)}, temps fige du mode systeme {@code t_edit}, marque {@code detached} (T24 : fenetre detachee du cube ; placement, acces, affichage et
- * visibilite des objets le sont par le framework). La copie est recalculee au premier tick.
+ * <b>Sans Space Map</b> sur le marker (C78) : fenetre affichee avec « Space Map requise sur ce marker », boutons
+ * d'edition desactives, aucune poignee, toute action refusee avec ce message.
  * <p>
- * <b>Fenetre</b> (T24) : son placement initial (devant la base du cube <b>par defaut</b>, {@link #windowPlacement})
- * est aussi son transform par defaut (RESET) ; ensuite le module n'y touche plus. Ancienne sauvegarde (sans
- * {@code detached}) : la fenetre est replacee une fois devant la base du cube <b>charge</b>, au premier tick serveur.
+ * <b>Etat sauvegarde</b> : la marque {@code mapped} seulement (placement, acces, affichage et visibilite de la fenetre
+ * le sont par le framework). Une sauvegarde d'avant T42 (sans {@code mapped} : mode, selection, zoom, origine,
+ * cadrage, temps fige) est relue sans erreur, ces cles sont ignorees (L22 : la vue est a recreer par la Map) et la
+ * fenetre est remise une fois a son placement par defaut au premier tick serveur (elle etait devant l'ancien cube, a
+ * la place de la fenetre de la Map).
  * <p>
- * <b>Poignees</b> ({@link SpaceMapHandle}, cle {@code handle} ; {@link SpaceOrbitHandle}, cle {@code orbit}) : la
- * premiere existe seulement si un systeme selectionne figure dans la copie en mode galaxie, la seconde seulement si un
- * corps <b>a orbite</b> du systeme edite est selectionne en mode systeme. Creees dans {@code onLoad} si l'etat le
- * demande (cote client ; cote serveur la copie n'existe qu'au premier tick), puis ajoutees / retirees au changement
- * d'etat : serveur a chaque tick et apres chaque action, client dans {@code onSync}, seulement si absentes / presentes.
+ * <b>Fenetre</b> : placement par defaut (aussi RESET) a droite de la fenetre de la Space Map placee devant la base du
+ * cube par defaut ({@link #defaultWindowTransform}) ; ensuite le module n'y touche plus.
  * <p>
- * <b>Mode systeme</b> (T12) : a l'entree (« Editer »), le temps simule de l'Environment est fige ({@code t_edit},
- * jours) : le cube montre les corps a leurs positions de Kepler a {@code t_edit}, a l'echelle de
- * {@link SpaceSystemScale} (echelle lineaire, tout a l'echelle depuis T25 : plus de loupe des lunes, D13). « Animer »
- * fait avancer localement le temps d'affichage ({@link #displayDays}, client, rien n'est envoye) ; la poignee d'orbite
- * reste posee a {@code t_edit}.
- * <p>
- * <b>Zoom sur un corps</b> (T25, D17) : le corps zoome ({@code 0} = systeme entier) fait partie de l'etat
- * <b>sauvegarde et synchronise</b>, comme la selection : la poignee d'orbite est placee et relue par le serveur, qui
- * doit donc connaitre l'echelle de la vue (un zoom purement client fausserait la conversion de la poignee), et le cube
- * est commun a tous les operateurs. La vue est centree sur le corps ({@link SpaceSystemScale#zoomHalfExtent}) ; la
- * poignee d'orbite n'existe que pour un corps dont le parent est dans le voisinage du zoom (le corps zoome ou un de ses
- * descendants : {@link SpaceSystemScale#orbitInView}). Remis a {@code 0} au changement de mode ou de systeme et si le
- * corps disparait.
- * <p>
- * <b>Origine des coordonnees</b> (T26, C50) : id d'un systeme ({@code 0} = defaut), sauvegarde et synchronise ;
- * systeme effectif resolu par {@link SpaceCoordinates#origin} (le choisi, sinon {@code Sol}, sinon le premier). Remis a
- * {@code 0} (retour au defaut) quand la copie ne contient plus ce systeme. La croix du cube et la ligne d'information
- * de la fenetre donnent les coordonnees galactiques de la selection relativement a lui.
- * <p>
- * <b>Etat synchronise</b> ({@link #writeSync}, envoye seulement au changement de revision de l'Environment ou d'etat
- * d'interface, jamais par tick) :
+ * <b>Etat synchronise</b> ({@link #writeSync}, envoye au changement seulement, jamais par tick) :
  * <pre>
- * byte mode (ordinal), varint systeme selectionne (0 = aucun), varint corps selectionne (0 = aucun),
- * varint corps zoome (0 = systeme entier, T25), varint origine (0 = defaut, T26), double t_edit (jours),
- * double cx, double cy, double cz, double H (cadrage, al),
- * boolean environment
- * si environment : int revision copiee, varint systeme courant de l'Environment,
- *                  byte axe avant (indice de FORWARD_YAW, -1 = autre valeur),
- *                  double vitesse de distorsion (al/s, T24),
- *                  en-tetes de tous les systemes (SystemHeader.writeList),
- *                  boolean systeme edite [+ SpaceSystem.write] (present en mode systeme seulement)
+ * double t_edit (jours, temps fige de la poignee d'orbite), boolean environment
+ * si environment : byte axe avant (indice de FORWARD_YAW, -1 = autre valeur), double vitesse de distorsion (al/s),
+ *                  double echelle de temps (s simulees / tick)
  * </pre>
- * L'axe avant et la vitesse de distorsion sont relus dans les reglages de l'Environment chaque tick (changement de
- * l'instance des reglages) : ses reglages ne changent pas sa revision.
+ * Les reglages sont relus dans l'Environment quand l'instance de ses reglages change (ils ne changent pas sa revision).
+ * <p>
  * <b>Actions</b> ({@code sendAction(window, ...)}), premier octet = type ; le serveur verifie <b>d'abord</b> que le
- * joueur est operateur (refus silencieux sinon), puis que la source est la fenetre :
+ * joueur est operateur (refus silencieux sinon, C9), puis que la source est la fenetre, puis la presence de la Space
+ * Map (sinon message) et de l'Environment. Les actions portent les ids qu'elles visent (jamais lus dans la selection
+ * de la Map au moment de la reception : une selection changee entre-temps par un autre joueur ne detourne pas
+ * l'edition) :
  * <pre>
- * 0 SELECT_SYSTEM + varint id   -> selectionne un systeme (0 = aucun) ; inconnu = message
- * 1 MODE + byte ordinal         -> GALAXY, ou SYSTEM si un systeme est selectionne (sinon message)
- * 2 REFRAME                     -> cadrage recalcule sur tous les systemes (doc 04 par. 7)
- * 3 ADD                         -> addSystem(nom par defaut, centre du cadrage), le nouveau systeme est selectionne
- * 4 REMOVE + varint id          -> removeSystem(id) (refuse pour le dernier) ; selection perdue si c'etait elle
- * 5 RENAME + varint id + utf    -> renameSystem(id, nom) (nom nettoye par le modele, vide refuse)
- * 6 SET_CURRENT + varint id     -> setCurrentSystem(id) (« Monde ici »)
- * 7 FORWARD + byte indice       -> setForward(FORWARD_YAW[i], FORWARD_PITCH[i]) (« Avant du monde »)
- * -- mode systeme (systeme edite = systeme selectionne cote serveur, jamais lu dans l'action) --
- * 8 SELECT_BODY + varint id     -> selectionne un corps du systeme edite (0 = aucun) ; inconnu = message
- * 9 ADD_BODY + byte type + varint parent
- *                               -> addBody(systeme, type, parent) (parent requis, compatibilite verifiee par le
- *                                  modele), le nouveau corps est selectionne
- * 10 REMOVE_BODY + varint id    -> removeBody(systeme, id) (descendants compris ; derniere etoile centrale refusee)
- * 11 UPDATE_BODY + varint id + byte champ + valeur
- *                               -> updateBody(systeme, corps modifie) ; champ : 0 nom (utf), 1 rayon km (double),
- *                                  2 couleur (int ARGB), 3 luminosite (double, etoiles), 4 periode jours (double,
- *                                  corps a orbite), 5 phase degres (double, corps a orbite) ; valeur non finie ou
- *                                  champ sans objet refuses ; bornes appliquees par le modele
- * -- reglages (T24) --
- * 12 WARP_SPEED + double        -> setWarpSpeed(al/s) (« Distorsion », mode galaxie) ; non finie refusee par
- *                                  l'Environment, sinon bornee
- * -- vue (T25) --
- * 13 ZOOM + varint id           -> zoom sur un corps du systeme edite (0 = systeme entier) ; mode systeme requis,
- *                                  corps inconnu = message
- * -- coordonnees (T26) --
- * 14 ORIGIN + varint id         -> origine des coordonnees (0 = defaut) ; systeme inconnu = message
+ * -- galaxie --
+ * 0 ADD                          -> addSystem(nom par defaut, centre de la carte galactique de la Map), puis la Map le
+ *                                   selectionne et le centre
+ * 1 REMOVE + varint id           -> removeSystem(id) (refuse pour le dernier)
+ * 2 RENAME + varint id + utf     -> renameSystem(id, nom) (nom nettoye par le modele, vide refuse)
+ * 3 SET_CURRENT + varint id      -> setCurrentSystem(id) (« Monde ici »)
+ * 4 FORWARD + byte indice        -> setForward(FORWARD_YAW[i], FORWARD_PITCH[i]) (« Avant du monde »)
+ * -- corps (systeme vise porte par l'action) --
+ * 5 ADD_BODY + varint systeme + byte type + varint parent
+ *                                -> addBody(systeme, type, parent) (parent requis, compatibilite verifiee par le
+ *                                   modele), puis la Map selectionne le nouveau corps (cadrage garde)
+ * 6 REMOVE_BODY + varint systeme + varint id
+ *                                -> removeBody(systeme, id) (descendants compris ; derniere etoile centrale refusee)
+ * 7 UPDATE_BODY + varint systeme + varint id + byte champ + valeur
+ *                                -> updateBody(systeme, corps modifie) ; champ : 0 nom (utf), 1 rayon km (double),
+ *                                   2 couleur (int ARGB), 3 luminosite (double, etoiles), 4 periode jours (double,
+ *                                   corps a orbite), 5 phase degres (double, corps a orbite), 6 masse kg (double, T39 :
+ *                                   strictement positive) ; T44 (rotation propre, C71 ; double) : 7 periode de rotation
+ *                                   heures (signee, 0 = synchrone), 8 obliquite, 9 noeud du pole, 10 phase de rotation
+ *                                   (degres) ; 11 texture (utf : auto ou builtin:id d'une texture integree connue, ou
+ *                                   custom:sha1 d'une texture importee stockee pour la dimension, T45) ; valeur non
+ *                                   finie ou champ sans objet refuses ; bornes appliquees par le modele ; seul le
+ *                                   champ vise change, sur la valeur courante du serveur
+ * -- reglages --
+ * 8 WARP_SPEED + double          -> setWarpSpeed(al/s) (« Distorsion ») ; non finie refusee, sinon bornee
+ * 9 TIME_SCALE + double          -> setTimeScale(s simulees / tick) (« Temps », C119) : toute la galaxie de la
+ *                                   dimension, epoque reposee sans saut des astres ; bornee a [0, MAX_TIME_SCALE]
+ * -- vue --
+ * 10 FRAME_ORBIT + varint systeme + varint id
+ *                                -> la Map centre sa vue systeme sur le parent du corps, orbite entiere dans le cube
+ *                                   ({@link SpaceMapModule#frameOrbit} ; « Orbite ») : la poignee d'orbite apparait
+ * -- corps (D34) --
+ * 11 RESET_BODY + varint systeme + varint id
+ *                                -> updateBody(systeme, valeurs par defaut) : le corps de memes ids (et de meme type et
+ *                                   meme parent) de la galaxie par defaut ({@code SpaceGalaxy.createDefault}, creee une
+ *                                   fois) ; sinon un astre neuf de son type (nom, rayon, couleur, luminosite 1, masse
+ *                                   estimee, rotation du type, texture auto), orbite actuelle gardee
+ * 12 TELEPORT + varint systeme + varint id
+ *                                -> env.teleportTo(systeme, id) : vaisseau pres du corps, V = 0, referentiel = le corps,
+ *                                   changement de systeme si besoin
  * </pre>
  * Tout refus de l'Environment (ou son absence) est affiche au joueur dans la barre d'action.
- * <b>Sondage de la poignee</b> ({@code docs/space/04-mathematiques.md} par. 7) : le module retient la derniere position
- * qu'il a ecrite ; un ecart de plus de {@value #HANDLE_EPSILON} bloc dans {@code serverTick} est une edition d'un
- * joueur : {@code q = (R^-1 . (P - t)) / sigma} (unites du cube), borne a {@code [-1, 1]^3}, puis
- * {@code g = c + q . H} et {@code moveSystem}. Le module reecrit la poignee (et retient la valeur) des que la position
- * voulue change : selection, cube, cadrage ou position du systeme. Le cadrage n'est pas recalcule quand une etoile en
- * sort : la poignee reste bornee au cube, « Recadrer » l'agrandit.
  * <p>
- * <b>Sondage de la poignee d'orbite</b> (doc 04 par. 7) : rotation et echelle comparees chaque {@code serverTick} aux
- * dernieres ecrites ({@value #ORBIT_ANGLE_EPSILON} degre, ecart relatif {@value #ORBIT_SCALE_EPSILON}). Rotation
- * changee : {@code R_o = R_cube^-1 . R_poignee} decompose en (yaw, pitch, roll) ; echelle {@code X} ou {@code Z}
- * changee : {@code a = scaleX / sigma . H}, {@code b = scaleZ / sigma . H} ({@code H} = demi-etendue de la vue :
- * systeme entier ou zoom), {@code e = sqrt(1 - (b/a)^2)} borne a {@code [0 ; 0,95]}, {@code 0} si {@code b >= a}.
- * Seules les composantes changees sont recalculees (pas de derive d'arrondi sur les autres), puis {@code updateBody} ;
- * la poignee est ensuite toujours reecrite depuis l'orbite (d'ou {@code scaleY = scaleX}). La conversion utilise
- * l'echelle de la vue <b>avant</b> la modification (celle que le joueur voyait).
+ * <b>Poignee de l'etoile</b> ({@link SpaceMapHandle}, cle {@code handle}, C4) : existe si la Map montre la carte
+ * galactique avec un systeme selectionne ; posee sur son etoile dans le repere du cube de la Map
+ * ({@code q = (g - c) / H} borne a {@code [-1, 1]^3}, puis {@code P = t + R . (sigma (.) q)}). Le module retient la
+ * position ecrite, le systeme, le cadrage {@code (c, H)} et le transform du cube de cette ecriture ; un ecart de plus
+ * de {@value #HANDLE_EPSILON} bloc dans {@code serverTick} est une edition d'un joueur, convertie avec ces valeurs
+ * retenues ({@code q = (R^-1 . (P - t)) / sigma}, borne, {@code g = c + q . H}, {@code moveSystem}). Un deplacement
+ * hors du cadrage reste borne au cube (la Map le recadre).
  * <p>
- * <b>Sondage du cube</b> : le framework applique les editions sans callback ({@code HoloContainers.handleEdit}).
- * Chaque {@code serverTick} compare le transform du cube a la derniere valeur vue (copie exacte des neuf
- * composantes) ; a la difference : echelle ramenee a la moyenne si elle n'est plus uniforme (C11), valeur retenue. La
- * fenetre ne suit plus le cube (T24). Le client replace les poignees localement ({@code clientTick}, meme calcul, sans
- * toucher a l'echelle) pour qu'elles suivent le cube pendant la manipulation.
+ * <b>Poignee d'orbite</b> ({@link SpaceOrbitHandle}, cle {@code orbit}, C5) : existe si la Map montre un systeme dont
+ * le corps selectionne a une orbite affichee a l'echelle de sa vue : demi-petit axe d'au moins
+ * {@value #MIN_HANDLE_AXIS} unite du cube, apoapside d'au plus {@value #MAX_HANDLE_REACH} unites (la Map dessine alors
+ * l'ellipse entiere, C109), parent affiche a moins de {@value #PARENT_LIMIT} unites du centre. Posee sur le parent
+ * affiche au <b>temps fige</b> {@code t_edit} (T42, 4 bis) : la Map suit le temps vivant, mais le serveur relit la
+ * poignee et refuse toute edition qui deplace sa translation (outils Rotation et Echelle seulement) ; elle ne peut donc
+ * pas suivre le parent tick apres tick sans trafic. {@code t_edit} = {@code days()} de l'Environment, repris
+ * seulement quand le contexte change (systeme montre ou sa copie, corps selectionne, centre ou demi-etendue de la vue :
+ * selection, zoom, edition) : aucun envoi par tick. Le renderer de la poignee decale l'ellipse du deplacement du
+ * parent entre {@code t_edit} et le temps vivant (gizmos et visee restent a {@code t_edit}) ; avec « Orbite », le
+ * parent est au centre de la vue et ne derive pas. Rotation {@code R_cube . R_orbite}, echelle
+ * {@code (a_aff . sigma, a_aff . sigma, b_aff . sigma)}. Sondage (doc 04 par. 7) : rotation et echelle comparees
+ * chaque {@code serverTick} aux dernieres ecrites ({@value #ORBIT_ANGLE_EPSILON} degre, ecart relatif
+ * {@value #ORBIT_SCALE_EPSILON}), conversion avec le transform du cube, l'unite de la vue et les ids retenus a
+ * l'ecriture ; seules les composantes changees sont recalculees ; la periode suit {@code a} (C36).
+ * <p>
+ * <b>Objets dynamiques</b> : poignees creees et retirees des deux cotes, memes cles, seulement si absentes /
+ * presentes ({@code addObject} leve sur une cle deja utilisee) : serveur chaque tick et apres chaque action, client
+ * chaque tick (l'etat de la Map arrive dans ses propres paquets). Le serveur les replace des que leur placement voulu
+ * change ; le client ne les place lui-meme qu'a leur creation (le transform envoye par le serveur avant la creation
+ * locale est perdu) et quand le cube de la Map bouge (elles le suivent pendant la manipulation) ; sinon le transform du
+ * serveur fait foi.
  * <p>
  * <b>Acces</b> de la fenetre : {@code HoloAccess.players(<operateurs connectes>)}, recalcule chaque tick serveur et
- * reaffecte seulement s'il change. Cube et fenetre ne sont dessines que chez un operateur ({@code shown()}, backend).
+ * reaffecte seulement s'il change. Fenetre et poignees ne sont dessinees que chez un operateur ({@code shown()},
+ * backend) ; la Map, elle, est visible de tous.
+ * <p>
+ * <b>Import d'une texture</b> (T45, D27) : le bouton « Importer » de la fenetre passe par le backend
+ * ({@link Backend#importTexture}) : choix du fichier, preparation et envoi au serveur par le canal des textures Space
+ * ({@code modules.dimension.space.texture}), puis, la texture stockee, demande d'application par l'action 7
+ * ({@link #applyImportedTexture} : {@code custom:<sha1>}, refusee si le fichier n'est pas stocke pour la dimension).
  * <p>
  * Le client passe par un {@link Backend} installe au setup client ({@code client.modules.monde.spaceconfigurator}).
  */
 public final class SpaceConfiguratorModule extends HoloModule
 {
-    /** Mode du Configurator. */
-    public enum Mode
-    {
-        /** Le cube montre la carte galactique. */
-        GALAXY,
-        /** Le cube montre le systeme selectionne (copie complete synchronisee). */
-        SYSTEM
-    }
-
-    /** Type d'action : selection d'un systeme (varint id, 0 = aucun). */
-    public static final int ACTION_SELECT_SYSTEM = 0;
-    /** Type d'action : changement de mode (octet : ordinal de {@link Mode}). */
-    public static final int ACTION_MODE = 1;
-    /** Type d'action : « Recadrer ». */
-    public static final int ACTION_REFRAME = 2;
-    /** Type d'action : « Ajouter » (systeme au centre du cadrage). */
-    public static final int ACTION_ADD = 3;
+    /** Type d'action : « Ajouter » (systeme au centre de la carte galactique de la Map). */
+    public static final int ACTION_ADD = 0;
     /** Type d'action : « Retirer » (varint id). */
-    public static final int ACTION_REMOVE = 4;
+    public static final int ACTION_REMOVE = 1;
     /** Type d'action : renommer (varint id, chaine). */
-    public static final int ACTION_RENAME = 5;
+    public static final int ACTION_RENAME = 2;
     /** Type d'action : « Monde ici » (varint id). */
-    public static final int ACTION_SET_CURRENT = 6;
+    public static final int ACTION_SET_CURRENT = 3;
     /** Type d'action : « Avant du monde » (octet : indice de {@link #FORWARD_YAW}). */
-    public static final int ACTION_FORWARD = 7;
-    /** Type d'action : selection d'un corps du systeme edite (varint id, 0 = aucun). */
-    public static final int ACTION_SELECT_BODY = 8;
-    /** Type d'action : ajout d'un corps (octet : ordinal de {@link SpaceBodyKind}, varint id du parent). */
-    public static final int ACTION_ADD_BODY = 9;
-    /** Type d'action : retrait d'un corps et de ses descendants (varint id). */
-    public static final int ACTION_REMOVE_BODY = 10;
-    /** Type d'action : modification d'un champ d'un corps (varint id, octet champ, valeur). */
-    public static final int ACTION_UPDATE_BODY = 11;
-    /** Type d'action : vitesse de distorsion du saut (double, al/s ; T24). */
-    public static final int ACTION_WARP_SPEED = 12;
-    /** Type d'action : zoom sur un corps du systeme edite (varint id, 0 = systeme entier ; T25). */
-    public static final int ACTION_ZOOM = 13;
-    /** Type d'action : origine des coordonnees (varint id d'un systeme, 0 = defaut ; T26). */
-    public static final int ACTION_ORIGIN = 14;
+    public static final int ACTION_FORWARD = 4;
+    /** Type d'action : ajout d'un corps (varint systeme, octet : ordinal de {@link SpaceBodyKind}, varint parent). */
+    public static final int ACTION_ADD_BODY = 5;
+    /** Type d'action : retrait d'un corps et de ses descendants (varint systeme, varint id). */
+    public static final int ACTION_REMOVE_BODY = 6;
+    /** Type d'action : modification d'un champ d'un corps (varint systeme, varint id, octet champ, valeur). */
+    public static final int ACTION_UPDATE_BODY = 7;
+    /** Type d'action : vitesse de distorsion du saut (double, al/s). */
+    public static final int ACTION_WARP_SPEED = 8;
+    /** Type d'action : echelle de temps des astres (double, secondes simulees par tick ; C119). */
+    public static final int ACTION_TIME_SCALE = 9;
+    /** Type d'action : vue de la Map cadree sur l'orbite d'un corps (varint systeme, varint id ; « Orbite »). */
+    public static final int ACTION_FRAME_ORBIT = 10;
+    /** Type d'action : corps remis a ses valeurs par defaut (varint systeme, varint id ; « RESET », D34). */
+    public static final int ACTION_RESET_BODY = 11;
+    /** Type d'action : vaisseau teleporte pres d'un corps (varint systeme, varint id ; « Se teleporter », D34). */
+    public static final int ACTION_TELEPORT = 12;
     /** Champ de {@link #ACTION_UPDATE_BODY} : nom (utf). */
     public static final int FIELD_NAME = 0;
     /** Champ : rayon en km (double). */
@@ -204,6 +200,18 @@ public final class SpaceConfiguratorModule extends HoloModule
     public static final int FIELD_PERIOD = 4;
     /** Champ : phase en degres (double ; corps a orbite). */
     public static final int FIELD_PHASE = 5;
+    /** Champ : masse en kg (double, finie et positive, bornee par le modele ; T39). */
+    public static final int FIELD_MASS = 6;
+    /** Champ : periode de rotation propre en heures (double, signee, {@code 0} = synchrone ; T44). */
+    public static final int FIELD_ROTATION_PERIOD = 7;
+    /** Champ : obliquite de la rotation propre en degres (double, bornee a {@code [0, 180]} ; T44). */
+    public static final int FIELD_OBLIQUITY = 8;
+    /** Champ : longitude du noeud du pole en degres (double, ramenee a {@code [-180, 180[} ; T44). */
+    public static final int FIELD_NODE = 9;
+    /** Champ : phase du meridien origine a {@code t = 0} en degres (double, ramenee a {@code [0, 360[} ; T44). */
+    public static final int FIELD_ROTATION_PHASE = 10;
+    /** Champ : texture (utf, forme texte de {@code SpaceTextureRef} ; T44). */
+    public static final int FIELD_TEXTURE = 11;
     /** Ecart (degres) au-dela duquel un angle de la poignee d'orbite a ete edite. */
     public static final float ORBIT_ANGLE_EPSILON = 1e-3f;
     /** Ecart relatif au-dela duquel une echelle de la poignee d'orbite a ete editee. */
@@ -215,11 +223,14 @@ public final class SpaceConfiguratorModule extends HoloModule
     /** Echelle minimale ecrite dans la poignee d'orbite (un transform exige une echelle positive). */
     private static final float MIN_ORBIT_SCALE = 1e-6f;
     /**
-     * Demi-petit axe affiche minimal (unites du cube) d'une orbite pour avoir une poignee (T25) : en dessous (Phobos
-     * dans la vue de Sol entier : 3e-7), l'echelle de la poignee serait bornee par {@link #MIN_ORBIT_SCALE} et sa
-     * relecture fausse ; l'orbite s'edite alors dans le zoom sur le parent. Ne depend que de l'etat synchronise.
+     * Demi-petit axe affiche minimal (unites du cube) d'une orbite pour avoir une poignee : en dessous, l'echelle de
+     * la poignee serait bornee par {@link #MIN_ORBIT_SCALE} et sa relecture fausse ; il faut rapprocher la vue.
      */
-    private static final double MIN_HANDLE_AXIS = 1e-5;
+    public static final double MIN_HANDLE_AXIS = 1e-5;
+    /** Apoapside affichee maximale (unites du cube) d'une orbite pour avoir une poignee : ellipse entiere dans la Map. */
+    public static final double MAX_HANDLE_REACH = 4.0;
+    /** Distance maximale (unites du cube, par axe) du parent affiche au centre de la vue pour avoir une poignee. */
+    public static final double PARENT_LIMIT = 2.0;
     /**
      * Choix de l'axe avant du monde : nord, est, sud, ouest, haut, bas (yaw en degres, convention de
      * {@link SpaceMotionSettings#forward} : 180 = nord {@code -Z}, -90 = est {@code +X}). Haut et bas sont bornes au
@@ -235,125 +246,138 @@ public final class SpaceConfiguratorModule extends HoloModule
     public static final float HANDLE_EPSILON = 1e-4f;
     /** Longueur maximale (caracteres) d'un nom lu dans une action ; le modele le borne ensuite. */
     private static final int MAX_NAME_READ = SpaceLimits.MAX_NAME_LENGTH * 4;
+    /** Longueur maximale (caracteres) d'une texture lue dans une action ({@code custom:} + 40 : 47). */
+    private static final int MAX_TEXTURE_READ = 64;
     /** Niveau de permission d'un operateur (comme les commandes du mod et l'edition). */
     public static final int OP_LEVEL = 2;
-    /** Demi-etendue minimale du cadrage galactique, al. */
-    public static final double MIN_HALF_EXTENT = 1.0;
-    /** Marge du recadrage : {@code H = nice(REFRAME_MARGIN x demi-etendue max)}. */
-    public static final double REFRAME_MARGIN = 1.1;
-    /** Ecart entre la fenetre et la face avant du cube (placement initial), en blocs. */
+    /** Ecart horizontal entre la fenetre de la Map et celle du Configurator (placement par defaut), en blocs. */
     public static final float WINDOW_GAP = 0.25f;
-    /** Ecart relatif tolere entre les echelles du cube avant de les uniformiser. */
-    private static final float UNIFORM_EPSILON = 1e-4f;
-    private static final Component UNKNOWN_SYSTEM = Component.literal("Systeme inconnu");
-    private static final Component NO_SELECTION = Component.literal("Selectionner d'abord un systeme");
+    private static final Component NO_MAP = Component.literal("Space Map requise sur ce marker");
     private static final Component NO_ENVIRONMENT =
             Component.literal("Aucun Space Environment dans cette dimension");
-    private static final Component NOT_SYSTEM_MODE = Component.literal("Passer d'abord en mode systeme");
+    private static final Component UNKNOWN_SYSTEM = Component.literal("Systeme inconnu");
     private static final Component UNKNOWN_BODY = Component.literal("Corps inconnu");
     private static final Component PARENT_REQUIRED = Component.literal("Un parent est requis");
     private static final Component NON_FINITE = Component.literal("Valeur invalide");
     private static final Component FIELD_UNUSED = Component.literal("Ce champ ne s'applique pas a ce corps");
+    private static final Component NO_ORBIT = Component.literal("Ce corps n'a pas d'orbite");
+    private static final Component BAD_TEXTURE = Component.literal("Texture invalide");
+    private static final Component UNKNOWN_TEXTURE = Component.literal("Texture inconnue");
+    private static final Component ALREADY_DEFAULT = Component.literal("Deja aux valeurs par defaut");
+    private static final Component MISSING_TEXTURE = Component.literal("Texture importee absente du serveur");
+    /** Etat de l'import d'une texture ({@link Backend#importProgress}) : aucun import en cours. */
+    public static final int IMPORT_IDLE = -1;
+    /** Etat de l'import : choix du fichier ou preparation de l'image. */
+    public static final int IMPORT_PREPARING = -2;
+
+    /** Galaxie par defaut (valeurs du RESET, D34), creee une fois a la premiere demande (fil serveur), jamais modifiee. */
+    private static SpaceGalaxy defaultGalaxy;
 
     private static Backend backend;
 
-    // ---------------------------------------------------------------- etat sauvegarde et synchronise
+    // ---------------------------------------------------------------- etat synchronise
 
-    private Mode mode = Mode.GALAXY;
-    /** Id du systeme selectionne, {@code 0} = aucun. */
-    private int selectedSystem;
-    /** Id du corps selectionne dans le systeme edite (mode systeme), {@code 0} = aucun. */
-    private int selectedBody;
-    /** Id du corps zoome dans le systeme edite (mode systeme, T25), {@code 0} = systeme entier. */
-    private int zoomBody;
-    /** Id du systeme origine des coordonnees (T26), {@code 0} = defaut ({@link SpaceCoordinates#origin}). */
-    private int origin;
-    /** Centre du cadrage galactique, al. */
-    private double frameX;
-    private double frameY;
-    private double frameZ;
-    /** Demi-etendue du cadrage, al ; {@code <= 0} : pas encore cadre (recadrage a la premiere copie). */
-    private double frameHalf;
-    /** Temps simule fige a l'entree du mode systeme ({@code t_edit}), jours. */
+    /** Temps fige de la poignee d'orbite ({@code t_edit}), jours ; repris par le serveur au changement de contexte. */
     private double editTime;
-    /**
-     * Faux apres la lecture d'une sauvegarde d'avant T24 : la fenetre sera replacee une fois devant la base du cube
-     * charge (serveur). Vrai par defaut (installation par commande : {@code load} n'est pas appele).
-     */
-    private boolean windowDetached = true;
-
-    // ---------------------------------------------------------------- copie synchronisee (recalculee)
-
     private boolean environment;
-    private int copiedRevision;
-    private int currentSystemId;
     /** Indice du choix de l'axe avant ({@link #FORWARD_YAW}), {@code -1} = autre valeur ou pas d'Environment. */
     private int forward = -1;
     /** Vitesse de distorsion de l'Environment (copie), al/s. */
     private double warpSpeed = SpaceMotionSettings.DEFAULT_WARP_SPEED;
-    private List<SystemHeader> headers = List.of();
-    private SpaceSystem editedSystem;
+    /** Echelle de temps des astres de l'Environment (copie), secondes simulees par tick. */
+    private double timeScale = SpaceMotionSettings.DEFAULT_TIME_SCALE;
+
+    /** Vrai apres la lecture d'une sauvegarde d'avant T42 : fenetre remise a son placement par defaut (serveur). */
+    private boolean legacyWindow;
 
     // ---------------------------------------------------------------- serveur
 
-    /** Environment de la derniere copie (une nouvelle instance force une recopie). */
-    private SpaceEnvironmentModule lastEnvironment;
-    private boolean copied;
-    /** Reglages de l'Environment deja lus (instance remplacee a chaque changement). */
+    /** Reglages de l'Environment deja lus (instance remplacee a chaque changement) ; {@link #settingsRead} si lus. */
     private SpaceMotionSettings lastSettings;
+    private boolean settingsRead;
     private final Set<UUID> ops = new HashSet<>();
+    /** Contexte du dernier {@code t_edit} (systeme montre, corps, centre, demi-etendue, revision de la copie). */
+    private SpaceSystem frozenSystem;
+    private int frozenBody;
+    private int frozenCenter;
+    private double frozenHalf;
+    private int frozenRevision;
+    private boolean frozenKnown;
 
     // ---------------------------------------------------------------- deux cotes (une instance par cote)
 
-    /** Derniere valeur vue du transform du cube (sondage). */
-    private final HoloTransform lastCube = new HoloTransform();
-    private boolean cubeKnown;
+    /** Space Map du meme marker, relue a chaque tick ({@link SpaceMapModule#of}), {@code null} sans Map. */
+    private SpaceMapModule map;
+    private SpaceConfiguratorWindow window;
     private final Quaternionf rotation = new Quaternionf();
-    private final Vector3f axis = new Vector3f();
+    private final Vector3f point = new Vector3f();
+    private final Vector3d cubePoint = new Vector3d();
+    /** Map et transform de son cube vus au tick precedent (client : les poignees suivent le cube). */
+    private SpaceMapModule cubeMap;
+    private final HoloTransform lastCube = new HoloTransform();
 
+    /** Poignee de l'etoile selectionnee, {@code null} si elle n'existe pas. */
+    private SpaceMapHandle handle;
     /** Derniere position ecrite dans la poignee (repere du marker) ; valable si {@link #handleWritten}. */
     private final Vector3f lastHandle = new Vector3f();
     private boolean handleWritten;
-    private final Vector3f point = new Vector3f();
+    /** Contexte de la derniere ecriture : systeme, cadrage galactique et transform du cube. */
+    private int handleSystem;
+    private double handleFrameX;
+    private double handleFrameY;
+    private double handleFrameZ;
+    private double handleFrameHalf;
+    private final HoloTransform handleCube = new HoloTransform();
 
-    private SpaceMapCube cube;
-    private SpaceConfiguratorWindow window;
-    /** Poignee de l'etoile selectionnee, {@code null} si elle n'existe pas. */
-    private SpaceMapHandle handle;
-
-    /** Poignee d'orbite du corps selectionne (mode systeme), {@code null} si elle n'existe pas. */
+    /** Poignee d'orbite du corps selectionne, {@code null} si elle n'existe pas. */
     private SpaceOrbitHandle orbitHandle;
     /** Derniere valeur ecrite dans la poignee d'orbite ; valable si {@link #orbitWritten}. */
     private final HoloTransform lastOrbit = new HoloTransform();
     private boolean orbitWritten;
+    /** Contexte de la derniere ecriture : ids, transform du cube, unites du cube (blocs) par UA. */
+    private int orbitSystem;
+    private int orbitBody;
+    private final HoloTransform orbitCube = new HoloTransform();
+    private double orbitUnit = 1.0;
     /** Placement voulu de la poignee d'orbite, et transform de travail de la lecture. */
     private final HoloTransform wantedOrbit = new HoloTransform();
     private final HoloTransform orbitScratch = new HoloTransform();
     private final Quaternionf orbitRotation = new Quaternionf();
-    /** Positions affichees des corps (unites du cube), tableau reutilise. */
+    /** Positions affichees des corps au temps fige (unites du cube), tableau reutilise. */
     private final Vector3d[] bodyPoints = SpaceOrbits.newPositionArray();
-    /** Systeme et zoom dont l'echelle a ete calculee ({@link #ensureScale}). */
-    private SpaceSystem scaledSystem;
-    private int scaledZoom;
-    /** Indice du corps zoome dans le systeme edite, {@code -1} = systeme entier. */
-    private int zoomIndex = -1;
-    /** Demi-etendue de la vue (systeme entier ou zoom), UA. */
-    private double viewHalf = 1.0;
+    /** Indice du parent du corps de la poignee d'orbite (resolu par {@link #orbitTarget}), {@code -1} sinon. */
+    private int orbitParent = -1;
 
-    // ---------------------------------------------------------------- client (animation)
+    // ---------------------------------------------------------------- client : rafraichissement de la fenetre
 
-    /** « Animer » : le temps d'affichage avance localement (jamais envoye). */
-    private boolean animating;
-    /** Ticks client ecoules depuis le debut de l'animation. */
-    private long animationTicks;
-
-    // ---------------------------------------------------------------- client
+    private SpaceMapModule shownMap;
+    private int shownRevision = -1;
+    private boolean shownSystemView;
+    private int shownSelectedSystem = -1;
+    private int shownSelectedBody = -1;
+    private int shownCurrent = -1;
+    private SpaceSystem shownData;
+    private boolean shownEnvironment;
+    private boolean shownOrbitHandle;
 
     /** Pont vers le client, installe au setup client. */
     public interface Backend
     {
         /** Vrai si le joueur local est operateur (niveau {@value SpaceConfiguratorModule#OP_LEVEL}). */
         boolean localOp();
+
+        /**
+         * T45 : lance l'import d'une texture pour le corps {@code bodyId} du systeme {@code systemId} (choix du fichier,
+         * preparation, envoi, puis {@link SpaceConfiguratorModule#applyImportedTexture}) ; faux si un import est deja
+         * en cours ou impossible.
+         */
+        default boolean importTexture(SpaceConfiguratorModule module, int systemId, int bodyId) { return false; }
+
+        /**
+         * T45 : etat de l'import du joueur local : {@link #IMPORT_IDLE}, {@link #IMPORT_PREPARING} ou avancement de
+         * l'envoi (0 a 100).
+         */
+        default int importProgress() { return IMPORT_IDLE; }
     }
 
     /** Branche le client (setup client). */
@@ -365,127 +389,114 @@ public final class SpaceConfiguratorModule extends HoloModule
     /** Vrai si le joueur local est operateur ; faux sans backend (serveur dedie). */
     static boolean localOp() { return backend != null && backend.localOp(); }
 
+    /** Etat de l'import d'une texture du joueur local ({@link Backend#importProgress}) ; inactif sans backend. */
+    static int importProgress() { return backend != null ? backend.importProgress() : IMPORT_IDLE; }
+
+    /**
+     * Placement par defaut de la fenetre (T42, aussi son RESET) : meme plan que la fenetre de la Space Map placee
+     * devant la base du cube par defaut ({@link SpaceMapCube#DEFAULT_HEIGHT}, {@link SpaceMapCube#DEFAULT_SCALE}), a
+     * sa droite vue de face ({@code +X}) a {@value #WINDOW_GAP} bloc d'elle, bord bas au niveau du bas du cube.
+     * Constant (le cube reel peut avoir bouge : les operateurs placent ensuite la fenetre au {@code world_editor}).
+     */
+    public static HoloTransform defaultWindowTransform()
+    {
+        float cubeHalf = SpaceMapCube.DEFAULT_SCALE * SpaceMapCube.HALF_SIZE;
+        float x = SpaceMapWindow.WIDTH * SpaceMapWindow.PIXEL_SCALE * 0.5f + WINDOW_GAP
+                + SpaceConfiguratorWindow.WIDTH * SpaceConfiguratorWindow.PIXEL_SCALE * 0.5f;
+        float y = SpaceMapCube.DEFAULT_HEIGHT - cubeHalf + SpaceConfiguratorWindow.HALF_HEIGHT;
+        float z = cubeHalf + SpaceMapModule.WINDOW_GAP;
+        return HoloTransform.translation(x, y, z);
+    }
+
     // ---------------------------------------------------------------- cycle de vie
 
     /**
-     * Cree le cube, la fenetre (devant la base du cube par defaut : placement initial et transform de RESET) et, si
-     * l'etat le demande, la poignee (deux cotes, memes cles) ; affiche l'etat. Le framework restaure ensuite les
-     * placements sauvegardes / recus.
+     * Cree la fenetre (placement par defaut : {@link #defaultWindowTransform}) ; cote client, les poignees si la Map
+     * deja chargee les demande (le serveur les cree a son premier tick). Le framework restaure ensuite les placements
+     * sauvegardes / recus.
      */
     @Override
     public void onLoad()
     {
-        cube = addObject(new SpaceMapCube("cube"));
-        HoloTransform initial = new HoloTransform();
-        windowPlacement(cube.transform(), initial);
-        window = addObject(new SpaceConfiguratorWindow("window", this, initial));
-        updateHandle();
+        window = addObject(new SpaceConfiguratorWindow("window", this, defaultWindowTransform()));
+        if (host().clientSide()) {
+            map = SpaceMapModule.of(this);
+            updateHandles(true);
+        }
         refresh();
     }
 
     @Override
     public void onUnload()
     {
-        lastEnvironment = null;
+        if (host().clientSide() && map != null) map.hideOrbit(0);
+        map = null;
+        cubeMap = null;
         lastSettings = null;
+        settingsRead = false;
+        frozenSystem = null;
+        frozenKnown = false;
         handle = null;
         handleWritten = false;
         orbitHandle = null;
         orbitWritten = false;
-        animating = false;
+        shownMap = null;
+        shownData = null;
     }
 
     @Override
     public void save(CompoundTag tag)
     {
-        tag.putString("mode", mode.name());
-        tag.putInt("system", selectedSystem);
-        tag.putInt("body", selectedBody);
-        tag.putInt("zoom", zoomBody);
-        tag.putInt("origin", origin);
-        tag.putDouble("tedit", editTime);
-        tag.putBoolean("detached", true);
-        CompoundTag frame = new CompoundTag();
-        frame.putDouble("x", frameX);
-        frame.putDouble("y", frameY);
-        frame.putDouble("z", frameZ);
-        frame.putDouble("h", frameHalf);
-        tag.put("frame", frame);
+        tag.putBoolean("mapped", true);
     }
 
-    /** Lecture tolerante : mode inconnu = galaxie, cadrage invalide = recadrage a la premiere copie. */
+    /** Lecture tolerante : les cles d'avant T42 sont ignorees (L22) ; sans {@code mapped}, fenetre a replacer. */
     @Override
     public void load(CompoundTag tag)
     {
-        mode = Mode.SYSTEM.name().equals(tag.getString("mode")) ? Mode.SYSTEM : Mode.GALAXY;
-        selectedSystem = Math.max(0, tag.getInt("system"));
-        selectedBody = Math.max(0, tag.getInt("body"));
-        zoomBody = Math.max(0, tag.getInt("zoom"));
-        origin = Math.max(0, tag.getInt("origin"));
-        editTime = tag.getDouble("tedit");
-        if (!Double.isFinite(editTime)) editTime = 0.0;
-        // Sauvegarde d'avant T24 : fenetre replacee une fois au premier tick serveur.
-        windowDetached = tag.getBoolean("detached");
-        if (selectedSystem == 0) mode = Mode.GALAXY;
-        if (mode != Mode.SYSTEM) zoomBody = 0;
-        CompoundTag frame = tag.getCompound("frame");
-        frameX = frame.getDouble("x");
-        frameY = frame.getDouble("y");
-        frameZ = frame.getDouble("z");
-        frameHalf = frame.contains("h", Tag.TAG_DOUBLE) ? frame.getDouble("h") : 0.0;
-        if (!validFrame(frameX, frameY, frameZ, frameHalf)) {
-            frameX = frameY = frameZ = 0.0;
-            frameHalf = 0.0;
-        }
-    }
-
-    private static boolean validFrame(double x, double y, double z, double half)
-    {
-        return Double.isFinite(x) && Double.isFinite(y) && Double.isFinite(z) && Double.isFinite(half)
-                && half >= MIN_HALF_EXTENT;
+        legacyWindow = !tag.contains("mapped");
     }
 
     // ---------------------------------------------------------------- serveur
 
     /**
-     * Copie de l'Environment si sa revision ou ses reglages ont change, sondage du cube, placement unique de la fenetre
-     * d'une ancienne sauvegarde, sondage des poignees, poignees creees / retirees / replacees, acces des operateurs.
+     * Reglages de l'Environment, Map du marker (copie rafraichie), fenetre d'une ancienne sauvegarde, sondage des
+     * poignees, temps fige, poignees creees / retirees / replacees, acces des operateurs.
      */
     @Override
     public void serverTick(ServerLevel level)
     {
         SpaceEnvironmentModule env = SpaceEnvironmentModule.of(level);
-        updateCopy(env);
-        pollCube();
-        detachWindow();
+        updateSettings(env);
+        map = SpaceMapModule.of(this);
+        if (map != null) map.refreshFrom(env);
+        resetLegacyWindow();
         pollHandle(env);
         pollOrbit(env);
-        updateHandle();
+        freezeTime(env);
+        updateHandles(false);
         updateAccess(level.getServer());
     }
 
     /**
-     * Recopie depuis {@code env} si c'est un autre Environment ou si sa revision a change ; relit l'axe avant si
-     * l'instance de ses reglages a change. Sinon rien.
+     * Relit l'axe avant, la vitesse de distorsion et l'echelle de temps si l'Environment ou l'instance de ses reglages
+     * a change ; envoi seulement si une valeur copiee change.
      */
-    private void updateCopy(SpaceEnvironmentModule env)
+    private void updateSettings(SpaceEnvironmentModule env)
     {
-        boolean changed = !copied || env != lastEnvironment
-                || env != null && env.galaxyRevision() != copiedRevision;
-        lastEnvironment = env;
-        if (changed) {
-            copied = true;
-            copy(env);
-            markDirty();
-        }
         SpaceMotionSettings settings = env != null ? env.settings() : null;
-        if (settings == lastSettings) return;
+        boolean present = env != null;
+        if (settingsRead && settings == lastSettings && present == environment) return;
+        settingsRead = true;
         lastSettings = settings;
         int choice = settings != null ? forwardChoice(settings) : -1;
         double warp = settings != null ? settings.warpSpeed() : SpaceMotionSettings.DEFAULT_WARP_SPEED;
-        if (choice != forward || warp != warpSpeed) {
+        double scale = settings != null ? settings.timeScale() : SpaceMotionSettings.DEFAULT_TIME_SCALE;
+        if (present != environment || choice != forward || warp != warpSpeed || scale != timeScale) {
+            environment = present;
             forward = choice;
             warpSpeed = warp;
+            timeScale = scale;
             markDirty();
         }
     }
@@ -503,67 +514,44 @@ public final class SpaceConfiguratorModule extends HoloModule
         return -1;
     }
 
-    /**
-     * Copie des en-tetes de tous les systemes, du systeme courant et du systeme edite (mode systeme). Selection
-     * invalide (systeme retire) : plus de selection, retour au mode galaxie. Sans Environment, la selection et le mode
-     * sont gardes (il peut revenir, ou ne pas etre encore charge).
-     */
-    private void copy(SpaceEnvironmentModule env)
+    /** Sauvegarde d'avant T42 : fenetre remise une fois a son placement par defaut, marque ecrite ensuite. */
+    private void resetLegacyWindow()
     {
-        if (env == null) {
-            environment = false;
-            copiedRevision = 0;
-            currentSystemId = 0;
-            headers = List.of();
-            editedSystem = null;
-            forward = -1;
-            warpSpeed = SpaceMotionSettings.DEFAULT_WARP_SPEED;
-            lastSettings = null;
+        if (!legacyWindow) return;
+        legacyWindow = false;
+        window.transform().set(defaultWindowTransform());
+        markDirty();
+    }
+
+    /**
+     * Temps fige de la poignee d'orbite : repris ({@code days()} de l'Environment, envoye) quand le contexte change
+     * (systeme montre ou sa copie, corps selectionne, centre, demi-etendue de la vue) et qu'un corps a orbite est
+     * selectionne dans la vue systeme ; jamais par tick sinon.
+     */
+    private void freezeTime(SpaceEnvironmentModule env)
+    {
+        SpaceSystem system = map != null ? map.shownSystem() : null;
+        int body = system != null ? map.selectedBody() : 0;
+        int center = system != null ? map.centerIndex() : -1;
+        double half = system != null ? map.viewHalf() : 0.0;
+        int revision = map != null ? map.copiedRevision() : 0;
+        if (frozenKnown && system == frozenSystem && body == frozenBody && center == frozenCenter
+                && half == frozenHalf && revision == frozenRevision) {
             return;
         }
-        environment = true;
-        copiedRevision = env.galaxyRevision();
-        currentSystemId = env.currentSystemId();
-        List<SpaceSystem> systems = env.galaxy();
-        List<SystemHeader> list = new ArrayList<>(systems.size());
-        for (SpaceSystem system : systems) list.add(system.header());
-        headers = List.copyOf(list);
-        if (selectedSystem != 0 && env.system(selectedSystem) == null) selectedSystem = 0;
-        // Origine retiree : retour au defaut (Sol, sinon le premier).
-        if (origin != 0 && env.system(origin) == null) origin = 0;
-        if (selectedSystem == 0) mode = Mode.GALAXY;
-        editedSystem = mode == Mode.SYSTEM ? env.system(selectedSystem) : null;
-        if (editedSystem == null || editedSystem.body(selectedBody) == null) selectedBody = 0;
-        if (editedSystem == null || editedSystem.body(zoomBody) == null) zoomBody = 0;
-        if (frameHalf <= 0.0) reframe();
-    }
-
-    /**
-     * Sondage du cube : a chaque changement de son transform (edition d'un joueur, RESET), echelle uniformisee
-     * (moyenne des trois axes, C11). Le transform modifie est envoye par le framework au tick suivant. La fenetre ne
-     * suit plus le cube (T24).
-     */
-    private void pollCube()
-    {
-        HoloTransform t = cube.transform();
-        if (cubeKnown && sameTransform(t, lastCube)) return;
-        float mean = meanScale(t);
-        if (!uniform(t, mean)) t.setScale(mean);
-        lastCube.set(t);
-        cubeKnown = true;
-    }
-
-    /**
-     * Ancienne sauvegarde (d'avant T24) : la fenetre est replacee une fois devant la base du cube charge (apres
-     * {@link #pollCube}, echelle uniformisee), puis le module n'y touche plus ; la marque {@code detached} est ecrite a
-     * la prochaine sauvegarde.
-     */
-    private void detachWindow()
-    {
-        if (windowDetached) return;
-        windowDetached = true;
-        windowPlacement(cube.transform(), window.transform());
-        markDirty();
+        frozenKnown = true;
+        frozenSystem = system;
+        frozenBody = body;
+        frozenCenter = center;
+        frozenHalf = half;
+        frozenRevision = revision;
+        SpaceBody selected = system != null && body != 0 ? system.body(body) : null;
+        if (env == null || selected == null || selected.orbit() == null) return;
+        double now = env.days();
+        if (now != editTime) {
+            editTime = now;
+            markDirty();
+        }
     }
 
     /** Acces de la fenetre : operateurs connectes ; reaffecte seulement si l'ensemble change. */
@@ -579,8 +567,8 @@ public final class SpaceConfiguratorModule extends HoloModule
     }
 
     /**
-     * Operateurs seulement (verifie en premier, refus silencieux), source = la fenetre ; puis contenu valide contre
-     * l'Environment de la dimension du joueur.
+     * Operateurs seulement (verifie en premier, refus silencieux), source = la fenetre, Space Map du marker et
+     * Environment requis ; puis contenu valide contre l'Environment de la dimension du joueur.
      */
     @Override
     public void handleAction(ServerPlayer player, HoloObject source, FriendlyByteBuf buf)
@@ -589,170 +577,112 @@ public final class SpaceConfiguratorModule extends HoloModule
         if (source == null || source != window) return;
         int action = buf.readByte();
         SpaceEnvironmentModule env = SpaceEnvironmentModule.of(player.serverLevel());
-        updateCopy(env);
+        updateSettings(env);
+        map = SpaceMapModule.of(this);
+        if (map == null) {
+            player.displayClientMessage(NO_MAP, true);
+            return;
+        }
+        if (env == null) {
+            player.displayClientMessage(NO_ENVIRONMENT, true);
+            return;
+        }
+        map.refreshFrom(env);
         switch (action) {
-            case ACTION_SELECT_SYSTEM -> selectSystem(player, env, buf.readVarInt());
-            case ACTION_MODE -> {
-                int ordinal = buf.readByte();
-                if (ordinal >= 0 && ordinal < Mode.values().length) setMode(player, env, Mode.values()[ordinal]);
+            case ACTION_ADD -> {
+                SpaceEditResult result = env.addSystem("", map.frameX(), map.frameY(), map.frameZ());
+                if (report(player, result)) {
+                    map.refreshFrom(env);
+                    map.focusSystem(result.id());
+                }
             }
-            case ACTION_REFRAME -> {
-                reframe();
-                markDirty();
-            }
-            case ACTION_ADD -> addSystem(player, env);
-            case ACTION_REMOVE -> {
-                int id = buf.readVarInt();
-                if (env != null) report(player, env.removeSystem(id));
-                else player.displayClientMessage(NO_ENVIRONMENT, true);
-            }
+            case ACTION_REMOVE -> report(player, env.removeSystem(buf.readVarInt()));
             case ACTION_RENAME -> {
                 int id = buf.readVarInt();
-                String name = buf.readUtf(MAX_NAME_READ);
-                if (env != null) report(player, env.renameSystem(id, name));
-                else player.displayClientMessage(NO_ENVIRONMENT, true);
+                report(player, env.renameSystem(id, buf.readUtf(MAX_NAME_READ)));
             }
-            case ACTION_SET_CURRENT -> {
-                int id = buf.readVarInt();
-                if (env != null) report(player, env.setCurrentSystem(id));
-                else player.displayClientMessage(NO_ENVIRONMENT, true);
-            }
+            case ACTION_SET_CURRENT -> report(player, env.setCurrentSystem(buf.readVarInt()));
             case ACTION_FORWARD -> {
                 int index = buf.readByte();
-                if (index < 0 || index >= FORWARD_YAW.length) return;
-                if (env != null) report(player, env.setForward(FORWARD_YAW[index], FORWARD_PITCH[index]));
-                else player.displayClientMessage(NO_ENVIRONMENT, true);
+                if (index >= 0 && index < FORWARD_YAW.length) {
+                    report(player, env.setForward(FORWARD_YAW[index], FORWARD_PITCH[index]));
+                }
             }
-            case ACTION_SELECT_BODY -> selectBody(player, buf.readVarInt());
             case ACTION_ADD_BODY -> {
+                int systemId = buf.readVarInt();
                 int ordinal = buf.readByte();
                 int parent = buf.readVarInt();
                 SpaceBodyKind[] kinds = SpaceBodyKind.values();
-                if (ordinal >= 0 && ordinal < kinds.length) addBody(player, env, kinds[ordinal], parent);
+                if (ordinal >= 0 && ordinal < kinds.length) addBody(player, env, systemId, kinds[ordinal], parent);
             }
             case ACTION_REMOVE_BODY -> {
+                int systemId = buf.readVarInt();
                 int id = buf.readVarInt();
-                SpaceSystem system = systemForEdit(player, env);
-                if (system != null) report(player, env.removeBody(system.id(), id));
+                if (system(player, env, systemId) != null) report(player, env.removeBody(systemId, id));
             }
             case ACTION_UPDATE_BODY -> updateBody(player, env, buf);
-            case ACTION_WARP_SPEED -> {
-                double value = buf.readDouble();
-                if (env != null) report(player, env.setWarpSpeed(value));
-                else player.displayClientMessage(NO_ENVIRONMENT, true);
+            case ACTION_WARP_SPEED -> report(player, env.setWarpSpeed(buf.readDouble()));
+            case ACTION_TIME_SCALE -> report(player, env.setTimeScale(buf.readDouble()));
+            case ACTION_FRAME_ORBIT -> {
+                int systemId = buf.readVarInt();
+                int id = buf.readVarInt();
+                if (system(player, env, systemId) != null && !map.frameOrbit(systemId, id)) {
+                    player.displayClientMessage(NO_ORBIT, true);
+                }
             }
-            case ACTION_ZOOM -> zoom(player, buf.readVarInt());
-            case ACTION_ORIGIN -> setOrigin(player, env, buf.readVarInt());
+            case ACTION_RESET_BODY -> {
+                int systemId = buf.readVarInt();
+                int id = buf.readVarInt();
+                resetBody(player, env, systemId, id);
+            }
+            case ACTION_TELEPORT -> {
+                int systemId = buf.readVarInt();
+                int id = buf.readVarInt();
+                if (system(player, env, systemId) != null) report(player, env.teleportTo(systemId, id));
+            }
             default -> {
             }
         }
-        // Effet visible des le prochain envoi : copie, axe avant et poignee a jour.
-        updateCopy(env);
-        updateHandle();
+        // Effet visible des le prochain envoi : copie de la Map, reglages, temps fige et poignees a jour.
+        map.refreshFrom(env);
+        updateSettings(env);
+        freezeTime(env);
+        updateHandles(false);
     }
 
-    /** Origine des coordonnees : systeme {@code id} de l'Environment ({@code 0} = defaut). */
-    private void setOrigin(ServerPlayer player, SpaceEnvironmentModule env, int id)
+    /** Systeme {@code id} de l'Environment ; {@code null} (avec un message) s'il est inconnu. */
+    private static SpaceSystem system(ServerPlayer player, SpaceEnvironmentModule env, int id)
     {
-        if (id < 0 || id == origin) return;
-        if (id != 0 && (env == null || env.system(id) == null)) {
-            player.displayClientMessage(env == null ? NO_ENVIRONMENT : UNKNOWN_SYSTEM, true);
-            return;
-        }
-        origin = id;
-        markDirty();
-    }
-
-    /** « Ajouter » : systeme au nom par defaut, au centre du cadrage, puis selectionne. */
-    private void addSystem(ServerPlayer player, SpaceEnvironmentModule env)
-    {
-        if (env == null) {
-            player.displayClientMessage(NO_ENVIRONMENT, true);
-            return;
-        }
-        SpaceEditResult result = env.addSystem("", frameX, frameY, frameZ);
-        if (!report(player, result)) return;
-        updateCopy(env);
-        selectedSystem = result.id();
-        selectedBody = 0;
-        zoomBody = 0;
-        editedSystem = mode == Mode.SYSTEM ? env.system(selectedSystem) : null;
-        markDirty();
-    }
-
-    // ---------------------------------------------------------------- actions du mode systeme (serveur)
-
-    /**
-     * Systeme edite pour une action du mode systeme : celui de l'Environment (pas la copie), en mode systeme
-     * seulement ; {@code null} (avec un message) sinon.
-     */
-    private SpaceSystem systemForEdit(ServerPlayer player, SpaceEnvironmentModule env)
-    {
-        if (env == null) {
-            player.displayClientMessage(NO_ENVIRONMENT, true);
-            return null;
-        }
-        SpaceSystem system = mode == Mode.SYSTEM && selectedSystem != 0 ? env.system(selectedSystem) : null;
-        if (system == null) player.displayClientMessage(NOT_SYSTEM_MODE, true);
+        SpaceSystem system = id > 0 ? env.system(id) : null;
+        if (system == null) player.displayClientMessage(UNKNOWN_SYSTEM, true);
         return system;
     }
 
-    private void selectBody(ServerPlayer player, int id)
-    {
-        if (id < 0 || id == selectedBody) return;
-        if (mode != Mode.SYSTEM || editedSystem == null) {
-            player.displayClientMessage(NOT_SYSTEM_MODE, true);
-            return;
-        }
-        if (id != 0 && editedSystem.body(id) == null) {
-            player.displayClientMessage(UNKNOWN_BODY, true);
-            return;
-        }
-        selectedBody = id;
-        markDirty();
-    }
-
-    /**
-     * Zoom sur le corps {@code id} du systeme edite ({@code 0} = systeme entier ; T25, D17). La poignee d'orbite est
-     * replacee (ou retiree) a l'echelle de la nouvelle vue par {@code updateHandle} a la fin de l'action.
-     */
-    private void zoom(ServerPlayer player, int id)
-    {
-        if (id < 0 || id == zoomBody) return;
-        if (mode != Mode.SYSTEM || editedSystem == null) {
-            player.displayClientMessage(NOT_SYSTEM_MODE, true);
-            return;
-        }
-        if (id != 0 && editedSystem.body(id) == null) {
-            player.displayClientMessage(UNKNOWN_BODY, true);
-            return;
-        }
-        zoomBody = id;
-        markDirty();
-    }
-
     /** « +Etoile », « +Planete », « +Lune », « +Mineur » : corps aux valeurs par defaut du type, puis selectionne. */
-    private void addBody(ServerPlayer player, SpaceEnvironmentModule env, SpaceBodyKind kind, int parent)
+    private void addBody(ServerPlayer player, SpaceEnvironmentModule env, int systemId, SpaceBodyKind kind,
+                         int parent)
     {
-        SpaceSystem system = systemForEdit(player, env);
-        if (system == null) return;
+        if (system(player, env, systemId) == null) return;
         if (parent <= 0) {
             player.displayClientMessage(PARENT_REQUIRED, true);
             return;
         }
-        SpaceEditResult result = env.addBody(system.id(), kind, parent);
+        SpaceEditResult result = env.addBody(systemId, kind, parent);
         if (!report(player, result)) return;
-        updateCopy(env);
-        selectedBody = result.id();
-        markDirty();
+        map.refreshFrom(env);
+        map.selectInView(systemId, result.id());
     }
 
     /**
-     * Modification d'un champ d'un corps du systeme edite ({@link #ACTION_UPDATE_BODY}) : valeur lue, verifiee
-     * (finie, champ applicable au corps), corps modifie par le modele (bornes appliquees) puis {@code updateBody}.
+     * Modification d'un champ d'un corps ({@link #ACTION_UPDATE_BODY}) : valeur lue, verifiee (finie, champ
+     * applicable au corps ; masse strictement positive, T39 ; texture bien formee et, si integree, connue, T44), corps
+     * modifie par le modele a partir de sa valeur courante cote serveur, seul ce champ change (bornes appliquees : masse
+     * dans {@code [1e10, 1e33]} kg, rotation propre par {@code SpaceRotation}) puis {@code updateBody} (revision
+     * incrementee ; rien si le corps ne change pas).
      */
     private void updateBody(ServerPlayer player, SpaceEnvironmentModule env, FriendlyByteBuf buf)
     {
+        int systemId = buf.readVarInt();
         int id = buf.readVarInt();
         int field = buf.readByte();
         String text = null;
@@ -760,32 +690,60 @@ public final class SpaceConfiguratorModule extends HoloModule
         double number = Double.NaN;
         switch (field) {
             case FIELD_NAME -> text = buf.readUtf(MAX_NAME_READ);
+            case FIELD_TEXTURE -> text = buf.readUtf(MAX_TEXTURE_READ);
             case FIELD_COLOR -> color = buf.readInt();
-            case FIELD_RADIUS, FIELD_LUMINOSITY, FIELD_PERIOD, FIELD_PHASE -> number = buf.readDouble();
+            case FIELD_RADIUS, FIELD_LUMINOSITY, FIELD_PERIOD, FIELD_PHASE, FIELD_MASS, FIELD_ROTATION_PERIOD,
+                 FIELD_OBLIQUITY, FIELD_NODE, FIELD_ROTATION_PHASE -> number = buf.readDouble();
             default -> {
                 return;
             }
         }
-        SpaceSystem system = systemForEdit(player, env);
+        SpaceSystem system = system(player, env, systemId);
         if (system == null) return;
         SpaceBody body = system.body(id);
         if (body == null) {
             player.displayClientMessage(UNKNOWN_BODY, true);
             return;
         }
-        if (text == null && field != FIELD_COLOR && !Double.isFinite(number)) {
+        boolean invalid = text == null && field != FIELD_COLOR && !Double.isFinite(number);
+        if (invalid || field == FIELD_MASS && !(number > 0.0)) {
             player.displayClientMessage(NON_FINITE, true);
             return;
         }
+        SpaceTextureRef texture = null;
+        if (field == FIELD_TEXTURE) {
+            texture = SpaceTextureRef.parse(text);
+            if (texture == null) {
+                player.displayClientMessage(BAD_TEXTURE, true);
+                return;
+            }
+            if (texture.source() == SpaceTextureRef.Source.BUILTIN && !SpaceBodyTextures.exists(texture.id())) {
+                player.displayClientMessage(UNKNOWN_TEXTURE, true);
+                return;
+            }
+            // T45 : une texture importee doit avoir ete stockee pour la dimension (canal des textures Space).
+            if (texture.source() == SpaceTextureRef.Source.CUSTOM
+                    && !SpaceTextureStore.exists(player.serverLevel(), texture.id())) {
+                player.displayClientMessage(MISSING_TEXTURE, true);
+                return;
+            }
+        }
+        SpaceRotation rotation = body.rotation();
         SpaceBody updated;
         try {
             updated = switch (field) {
                 case FIELD_NAME -> body.withName(text);
+                case FIELD_TEXTURE -> body.withTexture(texture);
+                case FIELD_ROTATION_PERIOD -> body.withRotation(rotation.withPeriod(number));
+                case FIELD_OBLIQUITY -> body.withRotation(rotation.withPole(number, rotation.node()));
+                case FIELD_NODE -> body.withRotation(rotation.withPole(rotation.obliquity(), number));
+                case FIELD_ROTATION_PHASE -> body.withRotation(rotation.withPhase(number));
                 case FIELD_RADIUS -> body.withRadius(number);
                 case FIELD_COLOR -> body.withColor(color);
                 case FIELD_LUMINOSITY -> body.kind() == SpaceBodyKind.STAR ? body.withLuminosity((float) number)
                         : null;
                 case FIELD_PERIOD -> body.orbit() != null ? body.withOrbit(body.orbit().withPeriod(number)) : null;
+                case FIELD_MASS -> body.withMass(number);
                 default -> body.orbit() != null ? body.withOrbit(body.orbit().withPhase(number)) : null;
             };
         } catch (IllegalArgumentException e) {
@@ -797,7 +755,48 @@ public final class SpaceConfiguratorModule extends HoloModule
             return;
         }
         if (updated.equals(body)) return;
-        report(player, env.updateBody(system.id(), updated));
+        report(player, env.updateBody(systemId, updated));
+    }
+
+    /**
+     * « RESET » (D34) : le corps reprend <b>toutes</b> ses valeurs par defaut (nom, rayon, couleur, luminosite, masse,
+     * orbite, rotation propre, texture) par {@code updateBody} (revision incrementee, valeurs validees par le modele).
+     * Defaut = corps de memes ids de systeme et de corps dans la galaxie par defaut, s'il a le meme type et le meme
+     * parent (sinon c'est un autre astre : galaxie d'un ancien lot, ou ids reutilises par une autre galaxie) ; a
+     * defaut, valeurs d'un astre neuf de son type comme a sa creation ({@code addBody} : nom « Type id », rayon et
+     * couleur du type, luminosite 1, masse estimee, rotation du type, texture auto), l'<b>orbite actuelle gardee</b>
+     * (celle de la creation dependait des orbites d'alors). Rien si le corps est deja a ses valeurs par defaut.
+     */
+    private void resetBody(ServerPlayer player, SpaceEnvironmentModule env, int systemId, int id)
+    {
+        SpaceSystem system = system(player, env, systemId);
+        if (system == null) return;
+        SpaceBody body = system.body(id);
+        if (body == null) {
+            player.displayClientMessage(UNKNOWN_BODY, true);
+            return;
+        }
+        if (defaultGalaxy == null) defaultGalaxy = SpaceGalaxy.createDefault();
+        SpaceSystem defaults = defaultGalaxy.system(systemId);
+        SpaceBody reference = defaults != null ? defaults.body(id) : null;
+        SpaceBody updated;
+        try {
+            if (reference != null && reference.kind() == body.kind() && reference.parentId() == body.parentId()) {
+                updated = reference;
+            } else {
+                SpaceBodyKind kind = body.kind();
+                updated = new SpaceBody(id, kind, kind.defaultName() + " " + id, body.parentId(), kind.defaultRadius(),
+                        kind.defaultColor(), 1.0f, body.orbit());
+            }
+        } catch (IllegalArgumentException e) {
+            player.displayClientMessage(NON_FINITE, true);
+            return;
+        }
+        if (updated.equals(body)) {
+            player.displayClientMessage(ALREADY_DEFAULT, true);
+            return;
+        }
+        report(player, env.updateBody(systemId, updated));
     }
 
     /** Affiche le motif d'un refus au joueur ; vrai si l'operation a reussi. */
@@ -808,200 +807,134 @@ public final class SpaceConfiguratorModule extends HoloModule
         return false;
     }
 
-    private void selectSystem(ServerPlayer player, SpaceEnvironmentModule env, int id)
-    {
-        if (id < 0 || id == selectedSystem) return;
-        if (id != 0 && (env == null || env.system(id) == null)) {
-            player.displayClientMessage(env == null ? NO_ENVIRONMENT : UNKNOWN_SYSTEM, true);
-            return;
-        }
-        selectedSystem = id;
-        selectedBody = 0;
-        zoomBody = 0;
-        if (id == 0) mode = Mode.GALAXY;
-        editedSystem = mode == Mode.SYSTEM ? env.system(id) : null;
-        markDirty();
-    }
-
-    private void setMode(ServerPlayer player, SpaceEnvironmentModule env, Mode requested)
-    {
-        if (requested == mode) return;
-        if (requested == Mode.SYSTEM) {
-            if (env == null) {
-                player.displayClientMessage(NO_ENVIRONMENT, true);
-                return;
-            }
-            SpaceSystem system = selectedSystem == 0 ? null : env.system(selectedSystem);
-            if (system == null) {
-                player.displayClientMessage(NO_SELECTION, true);
-                return;
-            }
-            editedSystem = system;
-            // t_edit : temps simule courant de l'Environment, fige pendant toute l'edition.
-            editTime = env.days();
-        } else {
-            editedSystem = null;
-        }
-        mode = requested;
-        selectedBody = 0;
-        zoomBody = 0;
-        markDirty();
-    }
+    // ---------------------------------------------------------------- client
 
     /**
-     * « Recadrer » ({@code docs/space/04-mathematiques.md} par. 7) : centre = centre de la boite englobante des
-     * systemes copies, demi-etendue = {@code nice(1,1 x demi-etendue max)}, au moins {@value #MIN_HALF_EXTENT} al.
-     */
-    private void reframe()
-    {
-        if (headers.isEmpty()) {
-            frameX = frameY = frameZ = 0.0;
-            frameHalf = MIN_HALF_EXTENT;
-            return;
-        }
-        double minX = Double.POSITIVE_INFINITY;
-        double minY = Double.POSITIVE_INFINITY;
-        double minZ = Double.POSITIVE_INFINITY;
-        double maxX = Double.NEGATIVE_INFINITY;
-        double maxY = Double.NEGATIVE_INFINITY;
-        double maxZ = Double.NEGATIVE_INFINITY;
-        for (SystemHeader header : headers) {
-            minX = Math.min(minX, header.x());
-            minY = Math.min(minY, header.y());
-            minZ = Math.min(minZ, header.z());
-            maxX = Math.max(maxX, header.x());
-            maxY = Math.max(maxY, header.y());
-            maxZ = Math.max(maxZ, header.z());
-        }
-        frameX = 0.5 * (minX + maxX);
-        frameY = 0.5 * (minY + maxY);
-        frameZ = 0.5 * (minZ + maxZ);
-        double half = 0.5 * Math.max(maxX - minX, Math.max(maxY - minY, maxZ - minZ));
-        frameHalf = Math.max(MIN_HALF_EXTENT, nice(REFRAME_MARGIN * half));
-    }
-
-    /**
-     * Plus petite valeur de la forme {@code 1, 2 ou 5 x 10^k} superieure ou egale a {@code value} (graduations,
-     * cadrage) ; {@code 1} pour une valeur nulle, negative ou non finie.
-     */
-    public static double nice(double value)
-    {
-        if (!(value > 0.0) || !Double.isFinite(value)) return 1.0;
-        double magnitude = Math.pow(10.0, Math.floor(Math.log10(value)));
-        double n = value / magnitude;
-        double step = n <= 1.0 + 1e-9 ? 1.0 : n <= 2.0 + 1e-9 ? 2.0 : n <= 5.0 + 1e-9 ? 5.0 : 10.0;
-        return step * magnitude;
-    }
-
-    // ---------------------------------------------------------------- placement initial de la fenetre (deux cotes)
-
-    /**
-     * Placement de la fenetre devant la base du cube {@code t}, ecrit dans {@code dest} (translation et rotation ;
-     * echelle inchangee) : tournee comme le cube en lacet seulement (sa face {@code +Z} regarde dans la direction avant
-     * du cube {@code f = (-sin yaw, 0, cos yaw)}), a {@value #WINDOW_GAP} bloc de l'enveloppe du cube dans cette
-     * direction, bord bas au niveau du point le plus bas du cube. Les demi-etendues de l'enveloppe tiennent compte de
-     * la rotation complete du cube (somme des projections de ses trois demi-axes) et de son echelle moyenne. Utilise
-     * seulement pour le placement initial (cube par defaut) et une ancienne sauvegarde (T24).
-     */
-    private void windowPlacement(HoloTransform t, HoloTransform dest)
-    {
-        HoloEditMath.rotation(rotation, t);
-        float scale = meanScale(t) * SpaceMapCube.HALF_SIZE;
-        float yaw = t.yaw() * Mth.DEG_TO_RAD;
-        float fx = -Mth.sin(yaw);
-        float fz = Mth.cos(yaw);
-        float vertical = 0f;
-        float front = 0f;
-        for (int i = 0; i < 3; i++) {
-            axis.set(i == 0 ? 1f : 0f, i == 1 ? 1f : 0f, i == 2 ? 1f : 0f);
-            rotation.transform(axis);
-            vertical += Math.abs(axis.y);
-            front += Math.abs(axis.x * fx + axis.z * fz);
-        }
-        vertical *= scale;
-        front *= scale;
-        float distance = front + WINDOW_GAP;
-        dest.setTranslation(t.x() + fx * distance, t.y() - vertical + SpaceConfiguratorWindow.HALF_HEIGHT,
-                t.z() + fz * distance);
-        dest.setRotation(t.yaw(), 0f, 0f);
-    }
-
-    /**
-     * Client : temps de l'animation ; poignees replacees sur le cube localement, y compris pendant une manipulation
-     * (rien n'est envoye). La fenetre ne suit pas le cube (T24).
+     * Client : Map du marker relue, poignees creees / retirees selon son etat (placees a leur creation et quand son
+     * cube bouge), orbite du corps edite masquee dans la Map chez un operateur, fenetre rafraichie si ce qu'elle
+     * montre a change. Sans allocation (hors creation d'une poignee et rafraichissement de la fenetre).
      */
     @Override
     public void clientTick()
     {
-        if (animating) animationTicks++;
-        if (cube == null) return;
-        HoloTransform t = cube.transform();
-        if (cubeKnown && sameTransform(t, lastCube)) return;
-        placeHandle();
-        placeOrbit();
-        lastCube.set(t);
-        cubeKnown = true;
+        map = SpaceMapModule.of(this);
+        updateHandles(cubeMoved());
+        if (map != null) map.hideOrbit(orbitHandle != null && localOp() ? map.selectedBody() : 0);
+        refreshOnChange();
     }
 
-    // ---------------------------------------------------------------- poignee (deux cotes)
+    /** Client : vrai si la Map ou le transform de son cube ont change depuis le tick precedent. */
+    private boolean cubeMoved()
+    {
+        SpaceMapCube cube = map != null ? map.cube() : null;
+        if (cube == null) {
+            cubeMap = null;
+            return false;
+        }
+        HoloTransform t = cube.transform();
+        if (map == cubeMap && sameTransform(t, lastCube)) return false;
+        cubeMap = map;
+        lastCube.set(t);
+        return true;
+    }
 
-    /** Vrai si l'etat demande la poignee : mode galaxie et systeme selectionne present dans la copie. */
-    private boolean handleWanted() { return mode == Mode.GALAXY && selectedHeader() != null; }
+    /** Client : fenetre rafraichie quand la Map, sa selection, sa copie, sa vue ou la poignee d'orbite changent. */
+    private void refreshOnChange()
+    {
+        SpaceMapModule m = map;
+        int revision = m != null ? m.copiedRevision() : -1;
+        boolean systemView = m != null && m.systemView();
+        int selectedSystem = m != null ? m.selectedSystem() : -1;
+        int selectedBody = m != null ? m.selectedBody() : -1;
+        int current = m != null ? m.currentSystemId() : -1;
+        SpaceSystem data = m != null ? m.displayedSystemData() : null;
+        boolean env = m != null && m.environmentPresent();
+        boolean orbit = orbitHandle != null;
+        if (m == shownMap && revision == shownRevision && systemView == shownSystemView
+                && selectedSystem == shownSelectedSystem && selectedBody == shownSelectedBody
+                && current == shownCurrent && data == shownData && env == shownEnvironment
+                && orbit == shownOrbitHandle) {
+            return;
+        }
+        shownMap = m;
+        shownRevision = revision;
+        shownSystemView = systemView;
+        shownSelectedSystem = selectedSystem;
+        shownSelectedBody = selectedBody;
+        shownCurrent = current;
+        shownData = data;
+        shownEnvironment = env;
+        shownOrbitHandle = orbit;
+        refresh();
+    }
+
+    // ---------------------------------------------------------------- poignees (deux cotes)
 
     /**
-     * Cree ou retire les poignees selon l'etat (seulement si absentes / presentes : {@code addObject} leve sur une cle
-     * deja utilisee), puis les replace si leur placement voulu a change.
+     * Cree ou retire les poignees selon l'etat de la Map (seulement si absentes / presentes), puis les place : serveur
+     * toujours (ecriture seulement si le placement voulu change), client a leur creation ou si {@code place}.
      */
-    private void updateHandle()
+    private void updateHandles(boolean place)
     {
-        if (cube == null) return;
-        updateOrbitHandle();
-        boolean wanted = handleWanted();
-        if (wanted && handle == null) {
+        boolean server = !host().clientSide();
+        SystemHeader header = handleTarget();
+        if (header != null && handle == null) {
             handle = object(SpaceMapHandle.KEY) instanceof SpaceMapHandle existing ? existing
                     : addObject(new SpaceMapHandle());
             handleWritten = false;
-        } else if (!wanted && handle != null) {
+        } else if (header == null && handle != null) {
             removeObject(SpaceMapHandle.KEY);
             handle = null;
             handleWritten = false;
         }
-        placeHandle();
+        if (handle != null && (server || place || !handleWritten)) placeHandle(header, server);
+
+        SpaceBody body = orbitTarget();
+        if (body != null && orbitHandle == null) {
+            orbitHandle = object(SpaceOrbitHandle.KEY) instanceof SpaceOrbitHandle existing ? existing
+                    : addObject(new SpaceOrbitHandle());
+            orbitWritten = false;
+        } else if (body == null && orbitHandle != null) {
+            removeObject(SpaceOrbitHandle.KEY);
+            orbitHandle = null;
+            orbitWritten = false;
+        }
+        if (orbitHandle != null && (server || place || !orbitWritten)) placeOrbit(body, server);
+    }
+
+    /** Systeme dont l'etoile porte la poignee : selection de la Map sur sa carte galactique ; {@code null} sinon. */
+    private SystemHeader handleTarget()
+    {
+        if (map == null || map.cube() == null || map.systemView() || !(map.frameHalf() > 0.0)) return null;
+        return map.selectedHeader();
     }
 
     /**
-     * Ecrit dans la poignee la position de l'etoile selectionnee (bornee au cube) si elle differe de la derniere
-     * ecrite, et la retient. Repere du marker : {@code P = t + R . (sigma (.) q)} (doc 04 par. 7).
+     * Ecrit dans la poignee la position de l'etoile de {@code header} (bornee au cube de la Map) si elle differe de la
+     * derniere ecrite (toujours cote client : appele seulement quand il faut placer), et retient le contexte.
      */
-    private void placeHandle()
+    private void placeHandle(SystemHeader header, boolean server)
     {
-        if (handle == null || !handlePoint(point)) return;
-        if (handleWritten && near(point, lastHandle)) return;
+        map.galaxyPoint(header, cubePoint);
+        float h = SpaceMapCube.HALF_SIZE;
+        map.cubeToMarker(clamp(cubePoint.x, h), clamp(cubePoint.y, h), clamp(cubePoint.z, h), point);
+        if (server && handleWritten && near(point, lastHandle)) return;
         handle.transform().setTranslation(point.x, point.y, point.z);
         lastHandle.set(point);
         handleWritten = true;
-    }
-
-    /** Position voulue de la poignee (repere du marker) ; faux sans systeme selectionne dans la copie. */
-    private boolean handlePoint(Vector3f dest)
-    {
-        SystemHeader header = selectedHeader();
-        if (header == null) return false;
-        double half = frameHalf > 0.0 ? frameHalf : MIN_HALF_EXTENT;
-        HoloTransform t = cube.transform();
-        float h = SpaceMapCube.HALF_SIZE;
-        dest.set(clampUnit((header.x() - frameX) / half) * h * t.scaleX(),
-                clampUnit((header.y() - frameY) / half) * h * t.scaleY(),
-                clampUnit((header.z() - frameZ) / half) * h * t.scaleZ());
-        HoloEditMath.rotation(rotation, t).transform(dest);
-        dest.add(t.x(), t.y(), t.z());
-        return true;
+        handleSystem = header.id();
+        handleFrameX = map.frameX();
+        handleFrameY = map.frameY();
+        handleFrameZ = map.frameZ();
+        handleFrameHalf = map.frameHalf();
+        handleCube.set(map.cube().transform());
     }
 
     /**
      * Serveur : la poignee a ete deplacee par un joueur (ecart a la derniere position ecrite) : position convertie en
-     * unites du cube {@code q = (R^-1 . (P - t)) / sigma}, bornee a {@code [-1, 1]^3}, puis {@code g = c + q . H} et
-     * {@code moveSystem}. La poignee est ensuite reecrite a la position du systeme (bornee).
+     * unites du cube avec le transform et le cadrage de cette ecriture, {@code q = (R^-1 . (P - t)) / sigma}, bornee a
+     * {@code [-1, 1]^3}, puis {@code g = c + q . H} et {@code moveSystem} du systeme de cette ecriture. La poignee est
+     * ensuite reecrite a la position du systeme (bornee).
      */
     private void pollHandle(SpaceEnvironmentModule env)
     {
@@ -1010,91 +943,71 @@ public final class SpaceConfiguratorModule extends HoloModule
         point.set(p.x(), p.y(), p.z());
         if (near(point, lastHandle)) return;
         handleWritten = false;
-        SystemHeader header = selectedHeader();
-        if (env == null || header == null) return;
-        HoloTransform t = cube.transform();
+        if (env == null) return;
+        HoloTransform t = handleCube;
         point.sub(t.x(), t.y(), t.z());
         HoloEditMath.rotation(rotation, t).conjugate().transform(point);
         float h = SpaceMapCube.HALF_SIZE;
-        double half = frameHalf > 0.0 ? frameHalf : MIN_HALF_EXTENT;
-        double qx = clampUnit(point.x / (h * Math.max(1e-6f, t.scaleX())));
-        double qy = clampUnit(point.y / (h * Math.max(1e-6f, t.scaleY())));
-        double qz = clampUnit(point.z / (h * Math.max(1e-6f, t.scaleZ())));
-        env.moveSystem(header.id(), frameX + qx * half, frameY + qy * half, frameZ + qz * half);
-        updateCopy(env);
+        double qx = clamp(point.x / (h * Math.max(1e-6f, t.scaleX())), 1.0);
+        double qy = clamp(point.y / (h * Math.max(1e-6f, t.scaleY())), 1.0);
+        double qz = clamp(point.z / (h * Math.max(1e-6f, t.scaleZ())), 1.0);
+        double half = handleFrameHalf;
+        env.moveSystem(handleSystem, handleFrameX + qx * half, handleFrameY + qy * half, handleFrameZ + qz * half);
+        if (map != null) map.refreshFrom(env);
     }
 
-    // ---------------------------------------------------------------- poignee d'orbite (deux cotes)
-
     /**
-     * Corps selectionne s'il a une orbite et que la vue du mode systeme la montre a l'echelle (sans zoom, ou parent
-     * dans le voisinage du corps zoome : {@link SpaceSystemScale#orbitInView}) et assez grande pour une poignee
-     * ({@link #MIN_HANDLE_AXIS}) ; {@code null} sinon.
+     * Corps edite par la poignee d'orbite : corps selectionne de la vue systeme de la Map, a orbite, dont l'orbite est
+     * affichee a l'echelle de la vue (demi-petit axe {@code >= MIN_HANDLE_AXIS}, apoapside {@code <= MAX_HANDLE_REACH}
+     * unites du cube) et dont le parent, au temps fige, est a moins de {@link #PARENT_LIMIT} unites du centre ;
+     * {@code null} sinon. Remplit {@link #bodyPoints} (temps fige) et {@link #orbitParent}. Sans allocation.
      */
-    private SpaceBody orbitBody()
+    private SpaceBody orbitTarget()
     {
-        if (mode != Mode.SYSTEM || editedSystem == null || selectedBody == 0) return null;
-        SpaceBody body = editedSystem.body(selectedBody);
+        orbitParent = -1;
+        SpaceSystem system = map != null && map.cube() != null ? map.shownSystem() : null;
+        SpaceBody body = system != null && map.selectedBody() != 0 ? system.body(map.selectedBody()) : null;
         if (body == null || body.orbit() == null || body.isRoot()) return null;
-        ensureScale();
-        if (body.orbit().semiMinorAxis() / viewHalf * SpaceMapCube.HALF_SIZE < MIN_HANDLE_AXIS) return null;
-        return SpaceSystemScale.orbitInView(editedSystem, zoomIndex, editedSystem.indexOf(body.id())) ? body : null;
-    }
-
-    /** Cree ou retire la poignee d'orbite selon l'etat, puis la replace si son placement voulu a change. */
-    private void updateOrbitHandle()
-    {
-        boolean wanted = orbitBody() != null;
-        if (wanted && orbitHandle == null) {
-            orbitHandle = object(SpaceOrbitHandle.KEY) instanceof SpaceOrbitHandle existing ? existing
-                    : addObject(new SpaceOrbitHandle());
-            orbitWritten = false;
-        } else if (!wanted && orbitHandle != null) {
-            removeObject(SpaceOrbitHandle.KEY);
-            orbitHandle = null;
-            orbitWritten = false;
-        }
-        placeOrbit();
-    }
-
-    /** Ecrit dans la poignee d'orbite son placement voulu s'il differe du dernier ecrit, et le retient. */
-    private void placeOrbit()
-    {
-        if (orbitHandle == null || !orbitTransform(wantedOrbit)) return;
-        if (orbitWritten && sameTransform(wantedOrbit, lastOrbit)) return;
-        orbitHandle.transform().set(wantedOrbit);
-        lastOrbit.set(wantedOrbit);
-        orbitWritten = true;
+        int parent = system.parentIndex(system.indexOf(body.id()));
+        if (parent < 0) return null;
+        double k = SpaceMapCube.HALF_SIZE / map.viewHalf();
+        SpaceOrbit orbit = body.orbit();
+        if (orbit.semiMinorAxis() * k < MIN_HANDLE_AXIS || orbit.apoapsis() * k > MAX_HANDLE_REACH) return null;
+        map.bodyPoints(editTime, bodyPoints);
+        Vector3d q = bodyPoints[parent];
+        double limit = PARENT_LIMIT * SpaceMapCube.HALF_SIZE;
+        if (!(Math.abs(q.x) <= limit && Math.abs(q.y) <= limit && Math.abs(q.z) <= limit)) return null;
+        orbitParent = parent;
+        return body;
     }
 
     /**
-     * Placement voulu de la poignee d'orbite ({@code docs/space/04-mathematiques.md} par. 7) : translation = parent
-     * affiche a {@code t_edit} dans la vue courante ({@code P = t + R . (sigma (.) q)}), rotation =
-     * {@code R_cube . R_orbite}, echelle {@code (a_aff . sigma, a_aff . sigma, b_aff . sigma)} ({@code a_aff = a / H},
-     * {@code H} de la vue). Faux sans corps a orbite selectionne (ou hors du voisinage du zoom).
+     * Ecrit dans la poignee d'orbite son placement voulu ({@code docs/space/04-mathematiques.md} par. 7) :
+     * translation = parent affiche au temps fige dans la vue de la Map, rotation = {@code R_cube . R_orbite}, echelle
+     * {@code (a_aff . sigma, a_aff . sigma, b_aff . sigma)} ({@code a_aff = a / H}). Serveur : seulement s'il differe
+     * du dernier ecrit. Retient le contexte (ids, cube, unite) pour la relecture.
      */
-    private boolean orbitTransform(HoloTransform dest)
+    private void placeOrbit(SpaceBody body, boolean server)
     {
-        SpaceBody body = orbitBody();
-        if (body == null || cube == null) return false;
-        ensureScale();
-        SpaceSystem system = editedSystem;
-        int parent = system.parentIndex(system.indexOf(body.id()));
-        if (parent < 0) return false;
-        SpaceSystemScale.positions(system, editTime, viewHalf, zoomIndex, bodyPoints);
-        Vector3d q = bodyPoints[parent];
-        HoloTransform t = cube.transform();
-        point.set((float) q.x * t.scaleX(), (float) q.y * t.scaleY(), (float) q.z * t.scaleZ());
-        HoloEditMath.rotation(rotation, t).transform(point);
-        dest.setTranslation(t.x() + point.x, t.y() + point.y, t.z() + point.z);
+        HoloTransform t = map.cube().transform();
+        Vector3d q = bodyPoints[orbitParent];
+        map.cubeToMarker(q.x, q.y, q.z, point);
+        wantedOrbit.setTranslation(point.x, point.y, point.z);
         SpaceOrbit orbit = body.orbit();
         orbitRotation.rotationYXZ(-(float) orbit.yaw() * Mth.DEG_TO_RAD, (float) orbit.pitch() * Mth.DEG_TO_RAD,
                 (float) orbit.roll() * Mth.DEG_TO_RAD);
-        setRotationYXZ(dest, rotation.mul(orbitRotation));
-        double unit = SpaceMapCube.HALF_SIZE / viewHalf * meanScale(t);
+        setRotationYXZ(wantedOrbit, HoloEditMath.rotation(rotation, t).mul(orbitRotation));
+        double unit = SpaceMapCube.HALF_SIZE / map.viewHalf() * meanScale(t);
         float scaleA = orbitScale(orbit.semiMajorAxis() * unit);
-        dest.setScale(scaleA, scaleA, orbitScale(orbit.semiMinorAxis() * unit));
-        return true;
+        wantedOrbit.setScale(scaleA, scaleA, orbitScale(orbit.semiMinorAxis() * unit));
+        if (server && orbitWritten && sameTransform(wantedOrbit, lastOrbit)) return;
+        orbitHandle.transform().set(wantedOrbit);
+        lastOrbit.set(wantedOrbit);
+        orbitWritten = true;
+        orbitSystem = map.shownSystem().id();
+        orbitBody = body.id();
+        orbitCube.set(t);
+        orbitUnit = unit;
     }
 
     private static float orbitScale(double value)
@@ -1104,8 +1017,9 @@ public final class SpaceConfiguratorModule extends HoloModule
 
     /**
      * Serveur : la poignee d'orbite a ete editee par un joueur (rotation ou echelle {@code X} / {@code Z} differente de
-     * la derniere ecrite) : orbite recalculee (doc 04 par. 7, seulement les composantes changees) puis
-     * {@code updateBody}. Tout autre ecart (echelle {@code Y}, translation) force seulement une reecriture.
+     * la derniere ecrite) : orbite du corps de cette ecriture recalculee (doc 04 par. 7, seulement les composantes
+     * changees, avec le cube et l'unite de cette ecriture) puis {@code updateBody}. Tout autre ecart (echelle
+     * {@code Y}, translation) force seulement une reecriture.
      */
     private void pollOrbit(SpaceEnvironmentModule env)
     {
@@ -1118,21 +1032,20 @@ public final class SpaceConfiguratorModule extends HoloModule
             return;
         }
         orbitWritten = false;
-        SpaceBody body = orbitBody();
-        if (env == null || body == null) return;
-        ensureScale();
+        SpaceSystem system = env != null ? env.system(orbitSystem) : null;
+        SpaceBody body = system != null ? system.body(orbitBody) : null;
+        if (body == null || body.orbit() == null) return;
         SpaceOrbit orbit = body.orbit();
         if (rotated) {
             // R_o = R_cube^-1 . R_poignee
             HoloEditMath.rotation(orbitRotation, h);
-            HoloEditMath.rotation(rotation, cube.transform()).conjugate().mul(orbitRotation);
+            HoloEditMath.rotation(rotation, orbitCube).conjugate().mul(orbitRotation);
             setRotationYXZ(orbitScratch, rotation);
             orbit = orbit.withOrientation(orbitScratch.yaw(), orbitScratch.pitch(), orbitScratch.roll());
         }
         if (shaped) {
-            double unit = SpaceMapCube.HALF_SIZE / viewHalf * meanScale(cube.transform());
-            double a = h.scaleX() / unit;
-            double b = h.scaleZ() / unit;
+            double a = h.scaleX() / orbitUnit;
+            double b = h.scaleZ() / orbitUnit;
             double e = 0.0;
             double ratio = b / a;
             double before = (double) lastOrbit.scaleZ() / lastOrbit.scaleX();
@@ -1150,11 +1063,11 @@ public final class SpaceConfiguratorModule extends HoloModule
             if (Double.isFinite(period)) orbit = orbit.withPeriod(period);
         }
         try {
-            env.updateBody(editedSystem.id(), body.withOrbit(orbit));
+            env.updateBody(orbitSystem, body.withOrbit(orbit));
         } catch (IllegalArgumentException ignored) {
             return;
         }
-        updateCopy(env);
+        if (map != null) map.refreshFrom(env);
     }
 
     /**
@@ -1201,27 +1114,9 @@ public final class SpaceConfiguratorModule extends HoloModule
         return Math.abs(a - b) <= ORBIT_SCALE_EPSILON * Math.max(Math.abs(a), Math.abs(b));
     }
 
-    /**
-     * Echelle de la vue du systeme edite (indice du corps zoome, demi-etendue), recalculee seulement quand la copie
-     * ou le zoom change.
-     */
-    private void ensureScale()
+    private static float clamp(double value, double limit)
     {
-        if (editedSystem == scaledSystem && zoomBody == scaledZoom) return;
-        scaledSystem = editedSystem;
-        scaledZoom = zoomBody;
-        if (editedSystem == null) {
-            zoomIndex = -1;
-            viewHalf = 1.0;
-            return;
-        }
-        zoomIndex = zoomBody == 0 ? -1 : editedSystem.indexOf(zoomBody);
-        viewHalf = SpaceSystemScale.viewHalf(editedSystem, zoomIndex);
-    }
-
-    private static float clampUnit(double value)
-    {
-        return (float) Math.max(-1.0, Math.min(1.0, value));
+        return (float) Math.max(-limit, Math.min(limit, value));
     }
 
     private static boolean near(Vector3f a, Vector3f b)
@@ -1231,13 +1126,6 @@ public final class SpaceConfiguratorModule extends HoloModule
     }
 
     private static float meanScale(HoloTransform t) { return (t.scaleX() + t.scaleY() + t.scaleZ()) / 3f; }
-
-    private static boolean uniform(HoloTransform t, float mean)
-    {
-        float tolerance = UNIFORM_EPSILON * mean;
-        return Math.abs(t.scaleX() - mean) <= tolerance && Math.abs(t.scaleY() - mean) <= tolerance
-                && Math.abs(t.scaleZ() - mean) <= tolerance;
-    }
 
     /** Egalite exacte des neuf composantes. */
     private static boolean sameTransform(HoloTransform a, HoloTransform b)
@@ -1249,16 +1137,7 @@ public final class SpaceConfiguratorModule extends HoloModule
 
     // ---------------------------------------------------------------- demandes du client
 
-    /** Client : selectionne un systeme ({@code 0} = aucun). */
-    void requestSelectSystem(int id) { sendTyped(ACTION_SELECT_SYSTEM, buf -> buf.writeVarInt(id)); }
-
-    /** Client : change de mode (le serveur refuse le mode systeme sans selection). */
-    void requestMode(Mode requested) { sendTyped(ACTION_MODE, buf -> buf.writeByte(requested.ordinal())); }
-
-    /** Client : « Recadrer ». */
-    void requestReframe() { sendTyped(ACTION_REFRAME, null); }
-
-    /** Client : « Ajouter » (au centre du cadrage, selectionne ensuite). */
+    /** Client : « Ajouter » (au centre de la carte galactique de la Map, selectionne ensuite). */
     void requestAdd() { sendTyped(ACTION_ADD, null); }
 
     /** Client : « Retirer » le systeme {@code id}. */
@@ -1280,65 +1159,110 @@ public final class SpaceConfiguratorModule extends HoloModule
     /** Client : « Avant du monde » = choix {@code index} de {@link #FORWARD_YAW}. */
     void requestForward(int index) { sendTyped(ACTION_FORWARD, buf -> buf.writeByte(index)); }
 
-    /** Client : selectionne un corps du systeme edite ({@code 0} = aucun). */
-    void requestSelectBody(int id) { sendTyped(ACTION_SELECT_BODY, buf -> buf.writeVarInt(id)); }
-
-    /** Client : ajoute un corps de type {@code kind} autour de {@code parentId} (selectionne ensuite). */
-    void requestAddBody(SpaceBodyKind kind, int parentId)
+    /** Client : ajoute un corps de type {@code kind} autour de {@code parentId} dans le systeme {@code systemId}. */
+    void requestAddBody(int systemId, SpaceBodyKind kind, int parentId)
     {
         sendTyped(ACTION_ADD_BODY, buf -> {
+            buf.writeVarInt(systemId);
             buf.writeByte(kind.ordinal());
             buf.writeVarInt(parentId);
         });
     }
 
-    /** Client : retire le corps {@code id} et ses descendants. */
-    void requestRemoveBody(int id) { sendTyped(ACTION_REMOVE_BODY, buf -> buf.writeVarInt(id)); }
+    /** Client : retire le corps {@code id} (et ses descendants) du systeme {@code systemId}. */
+    void requestRemoveBody(int systemId, int id)
+    {
+        sendTyped(ACTION_REMOVE_BODY, buf -> {
+            buf.writeVarInt(systemId);
+            buf.writeVarInt(id);
+        });
+    }
 
     /** Client : renomme le corps {@code id}. */
-    void requestBodyName(int id, String name)
+    void requestBodyName(int systemId, int id, String name)
     {
         String clean = SpaceLimits.sanitizeName(name);
-        sendUpdate(id, FIELD_NAME, buf -> buf.writeUtf(clean, MAX_NAME_READ));
+        sendUpdate(systemId, id, FIELD_NAME, buf -> buf.writeUtf(clean, MAX_NAME_READ));
     }
 
     /** Client : couleur du corps {@code id}. */
-    void requestBodyColor(int id, int color) { sendUpdate(id, FIELD_COLOR, buf -> buf.writeInt(color)); }
+    void requestBodyColor(int systemId, int id, int color)
+    {
+        sendUpdate(systemId, id, FIELD_COLOR, buf -> buf.writeInt(color));
+    }
 
     /**
      * Client : champ numerique ({@link #FIELD_RADIUS}, {@link #FIELD_LUMINOSITY}, {@link #FIELD_PERIOD},
-     * {@link #FIELD_PHASE}).
+     * {@link #FIELD_PHASE}, {@link #FIELD_MASS} ; rotation propre, T44 : {@link #FIELD_ROTATION_PERIOD},
+     * {@link #FIELD_OBLIQUITY}, {@link #FIELD_NODE}, {@link #FIELD_ROTATION_PHASE}).
      */
-    void requestBodyNumber(int id, int field, double value) { sendUpdate(id, field, buf -> buf.writeDouble(value)); }
+    void requestBodyNumber(int systemId, int id, int field, double value)
+    {
+        sendUpdate(systemId, id, field, buf -> buf.writeDouble(value));
+    }
+
+    /** Client : texture du corps {@code id} ({@code auto}, {@code builtin:<id>} ou {@code custom:<sha1>} ; T44). */
+    void requestBodyTexture(int systemId, int id, String texture)
+    {
+        sendUpdate(systemId, id, FIELD_TEXTURE, buf -> buf.writeUtf(texture, MAX_TEXTURE_READ));
+    }
+
+    /** Client : « Importer » (T45) : import d'une texture pour le corps {@code id}, par le backend. */
+    void requestImport(int systemId, int id)
+    {
+        if (backend != null && host().clientSide()) backend.importTexture(this, systemId, id);
+    }
+
+    /**
+     * Client (T45) : applique au corps {@code id} la texture importee {@code sha1} deja stockee par le serveur
+     * (action 7, champ texture {@code custom:<sha1>}).
+     */
+    public void applyImportedTexture(int systemId, int id, String sha1)
+    {
+        requestBodyTexture(systemId, id, SpaceTextureRef.custom(sha1).serialized());
+    }
+
+    /** Client : « RESET » du corps {@code id} (D34). */
+    void requestResetBody(int systemId, int id)
+    {
+        sendTyped(ACTION_RESET_BODY, buf -> {
+            buf.writeVarInt(systemId);
+            buf.writeVarInt(id);
+        });
+    }
+
+    /** Client : « Se teleporter » pres du corps {@code id} (D34). */
+    void requestTeleport(int systemId, int id)
+    {
+        sendTyped(ACTION_TELEPORT, buf -> {
+            buf.writeVarInt(systemId);
+            buf.writeVarInt(id);
+        });
+    }
 
     /** Client : vitesse de distorsion du saut, al/s (bornee par l'Environment). */
     void requestWarpSpeed(double value) { sendTyped(ACTION_WARP_SPEED, buf -> buf.writeDouble(value)); }
 
-    /** Client : zoom sur le corps {@code id} du systeme edite ({@code 0} = systeme entier). */
-    void requestZoom(int id) { sendTyped(ACTION_ZOOM, buf -> buf.writeVarInt(id)); }
+    /** Client : echelle de temps des astres, secondes simulees par tick (bornee par l'Environment). */
+    void requestTimeScale(double value) { sendTyped(ACTION_TIME_SCALE, buf -> buf.writeDouble(value)); }
 
-    /** Client : « Definir comme origine » le systeme {@code id} ({@code 0} = defaut). */
-    void requestOrigin(int id) { sendTyped(ACTION_ORIGIN, buf -> buf.writeVarInt(id)); }
+    /** Client : « Orbite » : la Map cadre sa vue sur l'orbite du corps {@code id}. */
+    void requestFrameOrbit(int systemId, int id)
+    {
+        sendTyped(ACTION_FRAME_ORBIT, buf -> {
+            buf.writeVarInt(systemId);
+            buf.writeVarInt(id);
+        });
+    }
 
-    private void sendUpdate(int id, int field, Consumer<FriendlyByteBuf> value)
+    private void sendUpdate(int systemId, int id, int field, Consumer<FriendlyByteBuf> value)
     {
         sendTyped(ACTION_UPDATE_BODY, buf -> {
+            buf.writeVarInt(systemId);
             buf.writeVarInt(id);
             buf.writeByte(field);
             value.accept(buf);
         });
-    }
-
-    /**
-     * Client : « Animer » (mode systeme seulement). Le temps d'affichage repart de {@code t_edit} a chaque
-     * basculement : a l'arret, le cube revient a l'etat edite (celui de la poignee d'orbite).
-     */
-    void setAnimating(boolean on)
-    {
-        animating = on && mode == Mode.SYSTEM;
-        animationTicks = 0L;
-        // Coordonnees de la ligne d'information (temps affiche) remises a jour au basculement.
-        refresh();
     }
 
     private void sendTyped(int action, Consumer<FriendlyByteBuf> content)
@@ -1355,104 +1279,51 @@ public final class SpaceConfiguratorModule extends HoloModule
     @Override
     public void writeSync(FriendlyByteBuf buf, boolean forOwner)
     {
-        buf.writeByte(mode.ordinal());
-        buf.writeVarInt(selectedSystem);
-        buf.writeVarInt(selectedBody);
-        buf.writeVarInt(zoomBody);
-        buf.writeVarInt(origin);
         buf.writeDouble(editTime);
-        buf.writeDouble(frameX);
-        buf.writeDouble(frameY);
-        buf.writeDouble(frameZ);
-        buf.writeDouble(frameHalf);
         buf.writeBoolean(environment);
         if (!environment) return;
-        buf.writeInt(copiedRevision);
-        buf.writeVarInt(currentSystemId);
         buf.writeByte(forward);
         buf.writeDouble(warpSpeed);
-        SystemHeader.writeList(buf, headers);
-        buf.writeBoolean(editedSystem != null);
-        if (editedSystem != null) editedSystem.write(buf);
+        buf.writeDouble(timeScale);
     }
 
-    /** Lecture stricte (en-tetes et systeme : leve sur une valeur invalide) ; mode inconnu = galaxie. */
+    /** Lecture tolerante : valeurs invalides = defaut. */
     @Override
     public void readSync(FriendlyByteBuf buf)
     {
-        int ordinal = buf.readByte();
-        Mode newMode = ordinal >= 0 && ordinal < Mode.values().length ? Mode.values()[ordinal] : Mode.GALAXY;
-        int newSystem = Math.max(0, buf.readVarInt());
-        int newBody = Math.max(0, buf.readVarInt());
-        int newZoom = Math.max(0, buf.readVarInt());
-        int newOrigin = Math.max(0, buf.readVarInt());
-        double newEditTime = buf.readDouble();
-        double x = buf.readDouble();
-        double y = buf.readDouble();
-        double z = buf.readDouble();
-        double half = buf.readDouble();
-        boolean newEnvironment = buf.readBoolean();
-        int revision = 0;
-        int current = 0;
+        double time = buf.readDouble();
+        boolean present = buf.readBoolean();
         int newForward = -1;
         double newWarp = SpaceMotionSettings.DEFAULT_WARP_SPEED;
-        List<SystemHeader> newHeaders = List.of();
-        SpaceSystem edited = null;
-        if (newEnvironment) {
-            revision = buf.readInt();
-            current = buf.readVarInt();
+        double newScale = SpaceMotionSettings.DEFAULT_TIME_SCALE;
+        if (present) {
             newForward = buf.readByte();
             if (newForward < -1 || newForward >= FORWARD_YAW.length) newForward = -1;
             double warp = buf.readDouble();
             if (Double.isFinite(warp)) newWarp = SpaceLimits.sanitizeWarpSpeed(warp);
-            newHeaders = SystemHeader.readList(buf);
-            if (buf.readBoolean()) edited = SpaceSystem.read(buf);
+            double scale = buf.readDouble();
+            if (Double.isFinite(scale)) newScale = Math.max(0.0, Math.min(scale, SpaceMotionSettings.MAX_TIME_SCALE));
         }
-        mode = newMode;
-        selectedSystem = newSystem;
-        selectedBody = newBody;
-        zoomBody = newZoom;
-        origin = newOrigin;
-        editTime = Double.isFinite(newEditTime) ? newEditTime : 0.0;
-        if (validFrame(x, y, z, half)) {
-            frameX = x;
-            frameY = y;
-            frameZ = z;
-            frameHalf = half;
-        } else {
-            frameX = frameY = frameZ = 0.0;
-            frameHalf = MIN_HALF_EXTENT;
-        }
-        environment = newEnvironment;
-        copiedRevision = revision;
-        currentSystemId = current;
+        editTime = Double.isFinite(time) ? time : 0.0;
+        environment = present;
         forward = newForward;
         warpSpeed = newWarp;
-        headers = newHeaders;
-        editedSystem = edited;
+        timeScale = newScale;
     }
 
-    /**
-     * Client : poignees creees / retirees / replacees selon l'etat recu, fenetre mise a jour, animation arretee hors
-     * du mode systeme.
-     */
+    /** Client : fenetre mise a jour (reglages recus). */
     @Override
-    public void onSync()
-    {
-        if (mode != Mode.SYSTEM) setAnimating(false);
-        updateHandle();
-        refresh();
-    }
+    public void onSync() { refresh(); }
 
     private void refresh()
     {
         if (window != null) window.showState();
     }
 
-    // ---------------------------------------------------------------- lecture (renderers, T10 a T12)
+    // ---------------------------------------------------------------- lecture (fenetre, renderers)
 
-    /** Cube (deux cotes). */
-    public SpaceMapCube cube() { return cube; }
+    /** Space Map du meme marker lue au dernier tick (deux cotes), {@code null} sans Map (C78). */
+    public SpaceMapModule map() { return map; }
 
     /** Fenetre (deux cotes). */
     public SpaceConfiguratorWindow window() { return window; }
@@ -1463,66 +1334,8 @@ public final class SpaceConfiguratorModule extends HoloModule
     /** Poignee d'orbite du corps selectionne (deux cotes), {@code null} si elle n'existe pas. */
     public SpaceOrbitHandle orbitHandle() { return orbitHandle; }
 
-    /** Temps simule fige du mode systeme {@code t_edit}, jours. */
+    /** Temps fige de la poignee d'orbite {@code t_edit}, jours. */
     public double editTime() { return editTime; }
-
-    /** Vrai si « Animer » est actif (client). */
-    public boolean animating() { return animating; }
-
-    /**
-     * Temps d'affichage du mode systeme, en jours (client) : {@code t_edit}, plus le temps ecoule depuis le debut de
-     * l'animation a l'echelle de temps de l'Environment (defaut si absent ou nulle). Meme valeur pour tous les appels
-     * d'une frame. Sans allocation.
-     */
-    public double displayDays(float partialTick)
-    {
-        if (!animating) return editTime;
-        SpaceEnvironmentModule env = SpaceEnvironmentModule.client();
-        double scale = env != null ? env.settings().timeScale() : 0.0;
-        if (!(scale > 0.0)) scale = SpaceMotionSettings.DEFAULT_TIME_SCALE;
-        return editTime + (animationTicks + partialTick) * scale / SpaceUnits.SECONDS_PER_DAY;
-    }
-
-    /**
-     * Demi-etendue de la vue du mode systeme, UA ({@link SpaceSystemScale}) : {@code H_sys} du systeme entier, ou
-     * {@code H_zoom} du corps zoome ; {@code 1} sans systeme.
-     */
-    public double viewHalf()
-    {
-        ensureScale();
-        return viewHalf;
-    }
-
-    /** Indice du corps zoome dans le systeme edite (copie), {@code -1} = systeme entier ou pas de systeme. */
-    public int zoomIndex()
-    {
-        ensureScale();
-        return zoomIndex;
-    }
-
-    /** Id du corps zoome (mode systeme, T25), {@code 0} = systeme entier. */
-    public int zoomBody() { return zoomBody; }
-
-    /** Corps zoome dans le systeme edite (copie), {@code null} sans zoom. Sans allocation. */
-    public SpaceBody zoomBodyData()
-    {
-        return editedSystem == null || zoomBody == 0 ? null : editedSystem.body(zoomBody);
-    }
-
-    /** Corps selectionne dans le systeme edite (copie), {@code null} si aucun. Sans allocation. */
-    public SpaceBody selectedBodyData()
-    {
-        return editedSystem == null || selectedBody == 0 ? null : editedSystem.body(selectedBody);
-    }
-
-    /** Id de l'origine des coordonnees choisie (T26), {@code 0} = defaut ; voir {@link #originHeader()}. */
-    public int origin() { return origin; }
-
-    /**
-     * Systeme origine effectif des coordonnees galactiques (copie) : le choisi, sinon {@code Sol}, sinon le premier
-     * ({@link SpaceCoordinates#origin}) ; {@code null} sans systeme. Sans allocation.
-     */
-    public SystemHeader originHeader() { return SpaceCoordinates.origin(headers, origin); }
 
     /** Choix courant de l'axe avant du monde (indice de {@link #FORWARD_YAW}), {@code -1} = autre ou inconnu. */
     public int forwardChoice() { return forward; }
@@ -1530,61 +1343,23 @@ public final class SpaceConfiguratorModule extends HoloModule
     /** Vitesse de distorsion du saut de l'Environment (copie), al/s ; defaut sans Environment. */
     public double warpSpeed() { return warpSpeed; }
 
+    /** Echelle de temps des astres de l'Environment (copie), secondes simulees par tick ; defaut sans Environment. */
+    public double timeScale() { return timeScale; }
+
+    /** Vrai si la dimension du marker a un Space Environment (copie des reglages). */
+    public boolean environmentPresent() { return environment; }
+
     /**
-     * Vrai si le systeme selectionne est hors du cadrage (la poignee est alors bornee au bord du cube). Sans
-     * allocation.
+     * Vrai si le systeme selectionne dans la Map est hors de son cadrage galactique (la poignee est alors bornee au
+     * bord du cube). Sans allocation.
      */
     public boolean selectedOutsideFrame()
     {
-        SystemHeader header = selectedHeader();
-        if (header == null) return false;
-        double half = frameHalf > 0.0 ? frameHalf : MIN_HALF_EXTENT;
-        double limit = 1.0 + HANDLE_EPSILON;
-        return Math.abs(header.x() - frameX) > limit * half || Math.abs(header.y() - frameY) > limit * half
-                || Math.abs(header.z() - frameZ) > limit * half;
-    }
-
-    public Mode mode() { return mode; }
-
-    /** Id du systeme selectionne, {@code 0} = aucun. */
-    public int selectedSystem() { return selectedSystem; }
-
-    /** Id du corps selectionne (mode systeme), {@code 0} = aucun. */
-    public int selectedBody() { return selectedBody; }
-
-    /** Centre du cadrage galactique, al. */
-    public double frameX() { return frameX; }
-
-    public double frameY() { return frameY; }
-
-    public double frameZ() { return frameZ; }
-
-    /** Demi-etendue du cadrage galactique, al ({@code q = (g - c) / H}) ; {@code 0} avant la premiere copie. */
-    public double frameHalf() { return frameHalf; }
-
-    /** Vrai si la dimension du marker a un Space Environment (copie). */
-    public boolean environmentPresent() { return environment; }
-
-    /** Revision de la galaxie de l'Environment deja copiee. */
-    public int copiedRevision() { return copiedRevision; }
-
-    /** Id du systeme courant de l'Environment (copie), {@code 0} sans Environment. */
-    public int currentSystemId() { return currentSystemId; }
-
-    /** En-tetes de tous les systemes (copie), dans l'ordre de la galaxie ; liste non modifiable. */
-    public List<SystemHeader> headers() { return headers; }
-
-    /** Systeme edite (copie complete), en mode systeme seulement ; {@code null} sinon. */
-    public SpaceSystem editedSystem() { return editedSystem; }
-
-    /** En-tete du systeme selectionne, {@code null} si aucun ou absent de la copie. Sans allocation. */
-    public SystemHeader selectedHeader()
-    {
-        if (selectedSystem == 0) return null;
-        for (int i = 0; i < headers.size(); i++) {
-            SystemHeader header = headers.get(i);
-            if (header.id() == selectedSystem) return header;
-        }
-        return null;
+        SystemHeader header = map != null ? map.selectedHeader() : null;
+        double half = map != null ? map.frameHalf() : 0.0;
+        if (header == null || !(half > 0.0)) return false;
+        double limit = (1.0 + HANDLE_EPSILON) * half;
+        return Math.abs(header.x() - map.frameX()) > limit || Math.abs(header.y() - map.frameY()) > limit
+                || Math.abs(header.z() - map.frameZ()) > limit;
     }
 }

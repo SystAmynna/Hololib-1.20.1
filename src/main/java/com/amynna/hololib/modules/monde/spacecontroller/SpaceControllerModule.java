@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.monde.spacecontroller;
 
+import com.amynna.hololib.holo.capture.HoloCaptures;
 import com.amynna.hololib.holo.memory.HoloScope;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloObject;
@@ -50,12 +51,17 @@ import java.util.UUID;
  * 0 BEGIN                 -> claimPilot(joueur, marker) ; refus (reserve aux ops, Space Pilot absent, poste
  *                            occupe) = message dans la barre d'action
  * 1 INPUT + 7 a 12 octets -> pilotInput(joueur, SpacePilotInput.read) si le pilote passe par ce poste (7 octets,
- *                            + varint de la cible si le drapeau du saut est leve, T21)
+ *                            + varint de la cible si le drapeau du saut est leve, T21 ; boost dans l'octet de
+ *                            drapeaux, T32)
  * 2 END                   -> releasePilot(joueur) si le pilote passe par ce poste
  * 3 OPS_ONLY + boolean    -> acces au pilotage reserve aux ops (vrai) ou ouvert a tous (faux), operateurs seulement
  * </pre>
  * Sans Environment dans la dimension, les actions de pilotage sont ignorees. Si le module est retire alors que le
- * pilote passe par lui, le pilotage est rendu.
+ * pilote passe par lui, le pilotage est rendu (serveur) et la capture du pad terminee (client, T41).
+ * <p>
+ * <b>Fenetre masquee pendant le pilotage</b> (T41, D31) : la fenetre de ce poste est masquee pour tous tant que
+ * {@link #pilot()} est non nul et {@link #pilotHere()} vrai ({@link SpaceControllerWindow#shown()}) ; rien de plus
+ * dans l'etat synchronise.
  * <p>
  * <b>Saut</b> (T22) : l'etat du saut n'est pas dans l'etat synchronise de ce module ; chaque client le lit dans le
  * miroir de l'Environment de sa dimension ({@link #clientTick}, au temps d'affichage) et la fenetre remplace la ligne
@@ -70,7 +76,8 @@ public final class SpaceControllerModule extends HoloModule
     public static final int ACTION_BEGIN = 0;
     /**
      * Type d'action : entree du pilote ({@link SpacePilotInput}, 7 octets : gaz, roulis, lacet, tangage, drapeaux
-     * (frein, saut), visee en lacet et en tangage ; + id de la cible du saut en varint si son drapeau est leve).
+     * (frein, saut, boost), visee en lacet et en tangage ; + id de la cible du saut en varint si son drapeau est
+     * leve).
      */
     public static final int ACTION_INPUT = 1;
     /** Type d'action : fin du pilotage. */
@@ -153,6 +160,14 @@ public final class SpaceControllerModule extends HoloModule
          * affichee ({@code pose(partialTick)}).
          */
         float partialTick();
+
+        /**
+         * Sneak et Sprint en mode bascule (T32, D24) : si l'une de ces options est active et que son mapping est
+         * enfonce, remet a zero les mappings a bascule. Une capture neutralise un mapping par {@code setDown(false)},
+         * qu'un mapping a bascule ignore (chaque appui l'inverse) : sans cela, le personnage s'accroupirait (ou
+         * sprinterait) pendant le pilotage. Sans effet en mode maintenu, ou rien ne fuit.
+         */
+        void releaseToggleKeys();
     }
 
     /** Branche le client (setup client). */
@@ -166,6 +181,12 @@ public final class SpaceControllerModule extends HoloModule
 
     /** Fraction de tick de la derniere frame dessinee ; {@code 0} sans backend (serveur dedie). */
     static float partialTick() { return backend != null ? backend.partialTick() : 0f; }
+
+    /** Remet a zero Sneak et Sprint en mode bascule ({@link Backend#releaseToggleKeys()}) ; rien sans backend. */
+    static void releaseToggleKeys()
+    {
+        if (backend != null) backend.releaseToggleKeys();
+    }
 
     // ---------------------------------------------------------------- cycle de vie
 
@@ -186,11 +207,20 @@ public final class SpaceControllerModule extends HoloModule
     @Override
     public void load(CompoundTag tag) { opsOnly = tag.getBoolean("opsOnly"); }
 
-    /** Serveur : rend le pilotage s'il passe par ce poste (module retire, marker decharge). */
+    /**
+     * Serveur : rend le pilotage s'il passe par ce poste (module retire, marker decharge). Client (T41) : termine la
+     * capture du pad s'il pilote (module retire, marker retire ou decharge, chunk plus suivi, changement de dimension,
+     * deconnexion : le framework decharge alors le module) ; la capture n'etant plus liee a la fenetre, le framework ne
+     * le fait plus. La fin envoie encore l'entree nulle et {@code END} (ignores par le serveur si le poste a disparu).
+     */
     @Override
     public void onUnload()
     {
-        if (host().clientSide() || lastEnvironment == null) return;
+        if (host().clientSide()) {
+            if (window != null) HoloCaptures.end(window.pad());
+            return;
+        }
+        if (lastEnvironment == null) return;
         String marker = markerId();
         UUID current = lastEnvironment.pilot();
         if (marker != null && current != null && marker.equals(lastEnvironment.pilotMarker())) {

@@ -5,8 +5,8 @@ import com.amynna.hololib.modules.dimension.space.math.SpaceUnits;
 import java.util.Locale;
 
 /**
- * Formats d'affichage communs des modules Space (fenetre du Space Controller, HUD de navigation de Space Pilot) :
- * vitesse, distance, duree (T22), nombre a trois chiffres significatifs « a la francaise » (virgule decimale,
+ * Formats d'affichage communs des modules Space (fenetre du Space Controller, HUD de navigation de Space Pilot,
+ * distance au regard de Space Knowledge) : vitesse (unite choisie ou imposee, T34), distance, distance galactique (T33), duree (T22), nombre a trois chiffres significatifs « a la francaise » (virgule decimale,
  * milliers separes par une espace). Extrait de {@code SpaceControllerWindow} en T20 pour que les deux affichages
  * restent identiques.
  * <p>
@@ -26,10 +26,23 @@ public final class SpaceFormat
      * Vitesse signee (km par tick) en km/s, ou en UA/s au-dela de 0,01 UA/s en valeur absolue ; une vitesse negative
      * (marche arriere) garde son signe ({@code -12,3 km/s}).
      */
-    public static String speed(double kmPerTick)
+    public static String speed(double kmPerTick) { return speed(kmPerTick, speedInAu(kmPerTick)); }
+
+    /**
+     * Vrai si {@link #speed(double)} afficherait cette vitesse (km par tick) en UA/s : au-dela de 0,01 UA/s en valeur
+     * absolue. Pour afficher deux vitesses dans la meme unite (vitesse de croisiere, T34), choisir l'unite sur la plus
+     * grande. Sans allocation.
+     */
+    public static boolean speedInAu(double kmPerTick)
+    {
+        return Math.abs(kmPerTick * SpaceUnits.TICKS_PER_SECOND) >= SPEED_AU_THRESHOLD;
+    }
+
+    /** Vitesse signee (km par tick) en UA/s si {@code au}, sinon en km/s (unite imposee, T34). */
+    public static String speed(double kmPerTick, boolean au)
     {
         double kms = kmPerTick * SpaceUnits.TICKS_PER_SECOND;
-        if (Math.abs(kms) >= SPEED_AU_THRESHOLD) return number(SpaceUnits.kmToAu(kms)) + " UA/s";
+        if (au) return number(SpaceUnits.kmToAu(kms)) + " UA/s";
         return number(kms) + " km/s";
     }
 
@@ -39,6 +52,16 @@ public final class SpaceFormat
         if (!Double.isFinite(km)) return "-";
         if (Math.abs(km) >= DISTANCE_AU_THRESHOLD) return number(SpaceUnits.kmToAu(km)) + " UA";
         return number(km) + " km";
+    }
+
+    /**
+     * Distance galactique (annees-lumiere) : {@code "4,24 al"} ; {@code "-"} si elle n'est pas finie. Distance d'une
+     * etoile de fond sous son nom (Space Knowledge, T33).
+     */
+    public static String lightYears(double ly)
+    {
+        if (!Double.isFinite(ly)) return "-";
+        return number(ly) + " al";
     }
 
     /**

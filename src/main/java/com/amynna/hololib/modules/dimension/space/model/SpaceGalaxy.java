@@ -143,9 +143,10 @@ public final class SpaceGalaxy
     // ---------------------------------------------------------------- operations : corps
 
     /**
-     * Ajoute un corps a la fin du systeme (donc apres son parent), avec les valeurs par defaut de son type : nom
-     * "Type id", rayon, couleur, luminosite 1, et pour un corps sur orbite une orbite circulaire hors des orbites
-     * existantes autour du meme parent (et a au moins 3 rayons du parent), periode de Kepler, phase repartie.
+     * Ajoute un corps a la fin du systeme (donc apres son parent), avec les valeurs par defaut de son type : nom "Type
+     * id", rayon, couleur, luminosite 1, masse estimee ({@link SpaceBody#estimatedMass}, T39), et pour un corps sur
+     * orbite une orbite circulaire hors des orbites existantes autour du meme parent (et a au moins 3 rayons du
+     * parent), periode de Kepler, phase repartie.
      *
      * @param parentId {@code 0} = sans parent (seulement une etoile)
      * @return {@link SpaceEditResult#created} avec l'id du corps, ou un refus (systeme ou parent inconnu, type de
@@ -178,11 +179,12 @@ public final class SpaceGalaxy
     }
 
     /**
-     * Remplace les champs editables du corps de meme id ({@code body.id()}) : nom, rayon, couleur, luminosite,
-     * orbite. {@code kind} et {@code parentId} de {@code body} sont ignores (immuables : ceux du corps existant sont
-     * gardes). Refuse un nom vide, et une orbite absente pour un corps qui a un parent ; l'orbite recue pour un corps
-     * sans parent est ignoree. Les valeurs sont deja bornees par le constructeur de {@link SpaceBody} (qui leve sur
-     * une valeur non finie : le decodage d'une action invalide echoue avant d'arriver ici).
+     * Remplace les champs editables du corps de meme id ({@code body.id()}) : nom, rayon, couleur, luminosite, masse
+     * (T39), orbite, rotation propre et texture (T28). {@code kind} et {@code parentId} de {@code body} sont ignores
+     * (immuables : ceux du corps existant sont gardes). Refuse un nom vide, et une orbite absente pour un corps qui a
+     * un parent ; l'orbite recue pour un corps sans parent est ignoree. Les valeurs sont deja bornees par le
+     * constructeur de {@link SpaceBody} (qui leve sur une valeur non finie : le decodage d'une action invalide echoue
+     * avant d'arriver ici).
      */
     public SpaceEditResult updateBody(int systemId, SpaceBody body)
     {
@@ -196,8 +198,72 @@ public final class SpaceGalaxy
         SpaceOrbit orbit = current.isRoot() ? null : body.orbit();
         if (!current.isRoot() && orbit == null) return SpaceEditResult.refused("Orbite manquante");
         SpaceBody updated = new SpaceBody(current.id(), current.kind(), body.name(), current.parentId(), body.radius(),
-                body.color(), body.luminosity(), orbit);
+                body.color(), body.luminosity(), body.mass(), orbit, body.rotation(), body.texture());
         systems.set(index, system.withReplacedBody(updated));
+        return SpaceEditResult.ok();
+    }
+
+    /**
+     * Change la masse d'un corps (T39), en kg : refuse une valeur non finie ou non positive, borne les autres
+     * ({@link SpaceLimits#sanitizeMass}).
+     */
+    public SpaceEditResult setBodyMass(int systemId, int bodyId, double mass)
+    {
+        if (!SpaceLimits.finite(mass)) return SpaceEditResult.refused("Valeur non finie");
+        if (!(mass > 0.0)) return SpaceEditResult.refused("Masse nulle ou negative");
+        int index = indexOf(systemId);
+        if (index < 0) return unknownSystem(systemId);
+        SpaceSystem system = systems.get(index);
+        SpaceBody body = system.body(bodyId);
+        if (body == null) return unknownBody(bodyId);
+        systems.set(index, system.withReplacedBody(body.withMass(mass)));
+        return SpaceEditResult.ok();
+    }
+
+    /**
+     * Change la rotation propre d'un corps (T28) : periode siderale signee en heures ({@code 0} = synchrone),
+     * obliquite, longitude du noeud et phase en degres ({@link SpaceRotation}). Refuse une valeur non finie ; les
+     * autres sont bornees ({@link SpaceLimits}).
+     */
+    public SpaceEditResult setBodyRotation(int systemId, int bodyId, double period, double obliquity, double node,
+                                           double phase)
+    {
+        if (!SpaceLimits.finite(period, obliquity, node, phase)) return SpaceEditResult.refused("Valeur non finie");
+        return setBodyRotation(systemId, bodyId, new SpaceRotation(period, obliquity, node, phase));
+    }
+
+    /** Change la rotation propre d'un corps (T28) ; {@code null} = rotation par defaut de son type. */
+    public SpaceEditResult setBodyRotation(int systemId, int bodyId, SpaceRotation rotation)
+    {
+        int index = indexOf(systemId);
+        if (index < 0) return unknownSystem(systemId);
+        SpaceSystem system = systems.get(index);
+        SpaceBody body = system.body(bodyId);
+        if (body == null) return unknownBody(bodyId);
+        systems.set(index, system.withReplacedBody(body.withRotation(rotation)));
+        return SpaceEditResult.ok();
+    }
+
+    /**
+     * Change la texture d'un corps (T28) depuis sa forme texte ({@code auto}, {@code builtin:<id>},
+     * {@code custom:<sha1>}) ; refuse un texte mal forme.
+     */
+    public SpaceEditResult setBodyTexture(int systemId, int bodyId, String texture)
+    {
+        SpaceTextureRef parsed = SpaceTextureRef.parse(texture);
+        if (parsed == null) return SpaceEditResult.refused("Texture invalide");
+        return setBodyTexture(systemId, bodyId, parsed);
+    }
+
+    /** Change la texture d'un corps (T28) ; {@code null} = {@link SpaceTextureRef#AUTO}. */
+    public SpaceEditResult setBodyTexture(int systemId, int bodyId, SpaceTextureRef texture)
+    {
+        int index = indexOf(systemId);
+        if (index < 0) return unknownSystem(systemId);
+        SpaceSystem system = systems.get(index);
+        SpaceBody body = system.body(bodyId);
+        if (body == null) return unknownBody(bodyId);
+        systems.set(index, system.withReplacedBody(body.withTexture(texture)));
         return SpaceEditResult.ok();
     }
 
@@ -300,6 +366,14 @@ public final class SpaceGalaxy
      * <b>estimes</b> (relation masse-rayon de l'archive NASA, a partir de la masse minimale). Noms sans accents (C15).
      * Ids des corps dans l'ordre de l'annexe (l'etoile principale en premier, id 1), ids des systemes de 1 a 12.
      * <p>
+     * Rotation propre (T28, decision C71) : valeurs de l'annexe, section "Rotation propre" (NASA Planetary Fact
+     * Sheets, IAU WGCCRE pour les poles ; periodes stellaires publiees ou estimees ; exoplanetes proches synchrones,
+     * valeurs estimees ou inventees signalees). Phase 0 partout. Texture {@code auto} partout (C69).
+     * <p>
+     * Masse (T39, D29) : masse reelle de chaque corps, depuis la table {@link SpaceKnownMasses} (seule source, aussi
+     * lue pour les galaxies sauvegardees avant T39) ; exoplanetes : masse minimale {@code M sin i}, sauf Epsilon
+     * Eridani b (masse vraie).
+     * <p>
      * Une galaxie deja sauvegardee n'est jamais remplacee (C51) : seule une nouvelle installation sans archive
      * (T14) utilise ce contenu.
      */
@@ -385,6 +459,8 @@ public final class SpaceGalaxy
         // Triton : retrograde (inclinaison 156,885 sur l'equateur de Neptune).
         s.moon("Triton", neptune, 1_353.4, 0xFFE0C8C0, 0.0023714, 0.000016, -174.80, 5.8769, 70.0);
         s.moon("Charon", pluton, 606.0, 0xFF9A9090, 0.00013096, 0.0002, 119.68, 6.3872, 0.0);
+        // Rotation propre (T28) : valeurs reelles de la table partagee avec la lecture NBT (SpaceSolRotations).
+        s.knownSolRotations();
         return s;
     }
 
@@ -404,6 +480,13 @@ public final class SpaceGalaxy
         // Planetes : nom, parent, rayon (km), couleur, a (UA), e, yaw, pitch, periode (j), phase (arbitraire).
         s.planet("Proxima b", proxima, 6_500.0, 0xFF9C7A5A, 0.04848, 0.0, 0.0, 0.0, 11.18465, 40.0);
         s.planet("Proxima d", proxima, 4_410.0, 0xFF8A7060, 0.02881, 0.0, 0.0, 0.0, 5.12338, 200.0);
+        // Rotation propre (T28) : nom, periode siderale (h, < 0 retrograde), obliquite, noeud (degres).
+        // Poles inconnus (0) ; planetes synchrones supposees (tres proches de Proxima).
+        s.spin("Alpha du Centaure A", 679.2, 0.0, 0.0);
+        s.spin("Alpha du Centaure B", 880.8, 0.0, 0.0);
+        s.spin("Proxima du Centaure", 1_982.4, 0.0, 0.0);
+        s.sync("Proxima b", 0.0, 0.0);
+        s.sync("Proxima d", 0.0, 0.0);
         return s;
     }
 
@@ -420,6 +503,11 @@ public final class SpaceGalaxy
         s.planet("Barnard b", star, 4_590.0, 0xFF9A7A62, 0.0229, 0.03, 0.0, 0.0, 3.1542, 90.0);
         s.planet("Barnard c", star, 4_730.0, 0xFF86705E, 0.0274, 0.08, 0.0, 0.0, 4.1244, 180.0);
         s.planet("Barnard e", star, 4_060.0, 0xFF7E6C60, 0.0381, 0.04, 0.0, 0.0, 6.7392, 270.0);
+        // Rotation propre (T28) : nom, periode siderale (h, < 0 retrograde), obliquite, noeud (degres).
+        s.spin("Barnard", 3_480.0, 0.0, 0.0);
+        for (String planet : new String[] {"Barnard d", "Barnard b", "Barnard c", "Barnard e"}) {
+            s.sync(planet, 0.0, 0.0);
+        }
         return s;
     }
 
@@ -428,6 +516,8 @@ public final class SpaceGalaxy
     {
         DefaultSystem s = new DefaultSystem("Wolf 359");
         s.star("Wolf 359", 100_200.0, 0xFFFF7448, 0.0011f);
+        // Rotation propre (T28) : nom, periode siderale (h, < 0 retrograde), obliquite, noeud (degres).
+        s.spin("Wolf 359", 64.896, 0.0, 0.0);
         return s;
     }
 
@@ -441,6 +531,11 @@ public final class SpaceGalaxy
         int star = s.star("Lalande 21185", 272_700.0, 0xFFFF9C66, 0.021f);
         s.planet("Lalande 21185 b", star, 9_240.0, 0xFFA08A70, 0.07879, 0.063, 0.0, 0.0, 12.9394, 60.0);
         s.planet("Lalande 21185 c", star, 23_950.0, 0xFF7FA6C8, 2.94, 0.132, 0.0, 0.0, 2_946.0, 230.0);
+        // Rotation propre (T28) : nom, periode siderale (h, < 0 retrograde), obliquite, noeud (degres).
+        // c : estimee (mini-Neptune loin de l'etoile, periode de type Neptune).
+        s.spin("Lalande 21185", 1_279.92, 0.0, 0.0);
+        s.sync("Lalande 21185 b", 0.0, 0.0);
+        s.spin("Lalande 21185 c", 16.0, 0.0, 0.0);
         return s;
     }
 
@@ -451,6 +546,10 @@ public final class SpaceGalaxy
         int a = s.star("Sirius A", 1_190_000.0, 0xFFCAD8FF, 25.4f);
         // Sirius B : naine blanche.
         s.companion("Sirius B", a, 5_634.0, 0xFFE8EEFF, 0.056f, 19.8, 0.5914, 136.3, 18_309.0, 120.0);
+        // Rotation propre (T28) : nom, periode siderale (h, < 0 retrograde), obliquite, noeud (degres).
+        // A : estimee depuis v sin i = 16,3 km/s (axe suppose perpendiculaire) ; B : inventee (naine blanche).
+        s.spin("Sirius A", 127.4, 0.0, 0.0);
+        s.spin("Sirius B", 24.0, 0.0, 0.0);
         return s;
     }
 
@@ -463,6 +562,10 @@ public final class SpaceGalaxy
         DefaultSystem s = new DefaultSystem("Epsilon Eridani");
         int star = s.star("Epsilon Eridani", 511_300.0, 0xFFFFC27A, 0.34f);
         s.planet("Epsilon Eridani b", star, 87_900.0, 0xFFC8A47A, 3.53, 0.06, 0.0, 40.0, 2_680.0, 300.0);
+        // Rotation propre (T28) : nom, periode siderale (h, < 0 retrograde), obliquite, noeud (degres).
+        // b : estimee (geante gazeuse, periode de type Jupiter).
+        s.spin("Epsilon Eridani", 278.4, 0.0, 0.0);
+        s.spin("Epsilon Eridani b", 10.0, 0.0, 0.0);
         return s;
     }
 
@@ -472,6 +575,9 @@ public final class SpaceGalaxy
         DefaultSystem s = new DefaultSystem("61 Cygni");
         int a = s.star("61 Cygni A", 462_600.0, 0xFFFFB46A, 0.153f);
         s.companion("61 Cygni B", a, 413_900.0, 0xFFFFA860, 0.085f, 86.8, 0.442, 53.0, 258_260.0, 45.0);
+        // Rotation propre (T28) : nom, periode siderale (h, < 0 retrograde), obliquite, noeud (degres).
+        s.spin("61 Cygni A", 852.96, 0.0, 0.0);
+        s.spin("61 Cygni B", 829.2, 0.0, 0.0);
         return s;
     }
 
@@ -485,6 +591,10 @@ public final class SpaceGalaxy
         int a = s.star("Procyon A", 1_424_800.0, 0xFFFFF4E8, 6.93f);
         // Procyon B : naine blanche.
         s.companion("Procyon B", a, 8_585.0, 0xFFF0F0FF, 0.00049f, 15.14, 0.3979, 31.1, 14_917.0, 210.0);
+        // Rotation propre (T28) : nom, periode siderale (h, < 0 retrograde), obliquite, noeud (degres).
+        // B : inventee (naine blanche).
+        s.spin("Procyon A", 552.0, 0.0, 0.0);
+        s.spin("Procyon B", 24.0, 0.0, 0.0);
         return s;
     }
 
@@ -499,6 +609,12 @@ public final class SpaceGalaxy
         s.planet("Tau Ceti g", star, 7_520.0, 0xFFB08A6A, 0.133, 0.06, 0.0, 0.0, 20.00, 15.0);
         s.planet("Tau Ceti h", star, 7_580.0, 0xFF9C8C78, 0.243, 0.23, 0.0, 0.0, 49.41, 130.0);
         s.planet("Tau Ceti f", star, 11_530.0, 0xFF8AA0B8, 1.334, 0.16, 0.0, 0.0, 636.13, 250.0);
+        // Rotation propre (T28) : nom, periode siderale (h, < 0 retrograde), obliquite, noeud (degres).
+        // g, h synchrones supposees (proches de l'etoile) ; f : estimee.
+        s.spin("Tau Ceti", 1_104.0, 0.0, 0.0);
+        s.sync("Tau Ceti g", 0.0, 0.0);
+        s.sync("Tau Ceti h", 0.0, 0.0);
+        s.spin("Tau Ceti f", 24.0, 0.0, 0.0);
         return s;
     }
 
@@ -507,6 +623,8 @@ public final class SpaceGalaxy
     {
         DefaultSystem s = new DefaultSystem("Altair");
         s.star("Altair", 1_260_000.0, 0xFFF0F4FF, 10.6f);
+        // Rotation propre (T28) : nom, periode siderale (h, < 0 retrograde), obliquite, noeud (degres).
+        s.spin("Altair", 7.77, 0.0, 0.0);
         return s;
     }
 
@@ -515,6 +633,8 @@ public final class SpaceGalaxy
     {
         DefaultSystem s = new DefaultSystem("Vega");
         s.star("Vega", 1_640_000.0, 0xFFD6E2FF, 40.1f);
+        // Rotation propre (T28) : nom, periode siderale (h, < 0 retrograde), obliquite, noeud (degres).
+        s.spin("Vega", 16.3, 0.0, 0.0);
         return s;
     }
 
@@ -522,7 +642,8 @@ public final class SpaceGalaxy
      * Systeme par defaut en construction : un appel par corps, dans l'ordre de l'annexe ; chaque appel rend l'id du
      * corps cree (1, 2, 3... dans l'ordre des appels), a passer comme parent aux corps suivants. Les angles sont en
      * degres, les rayons en km, les demi-grands axes en UA, les periodes en jours. Les planetes n'utilisent pas la
-     * luminosite (1).
+     * luminosite (1). Puis la rotation propre de chaque corps ({@link #spin}, {@link #sync}, T28), periodes en
+     * heures ; un corps sans appel garde la rotation par defaut de son type.
      */
     private static final class DefaultSystem
     {
@@ -572,6 +693,42 @@ public final class SpaceGalaxy
                     new SpaceOrbit(a, e, 0.0, pitch, 0.0, period, phase));
         }
 
+        /**
+         * Rotation propre du corps nomme {@code name} (deja ajoute) : periode siderale (h, {@code < 0} retrograde),
+         * obliquite et noeud du pole (degres), phase 0. Leve si le nom est inconnu (erreur de recopie).
+         */
+        void spin(String name, double period, double obliquity, double node)
+        {
+            rotate(name, new SpaceRotation(period, obliquity, node, 0.0));
+        }
+
+        /** Rotation synchrone du corps nomme {@code name} (meme face vers son parent), pole donne, phase 0. */
+        void sync(String name, double obliquity, double node)
+        {
+            rotate(name, SpaceRotation.synchronous(obliquity, node, 0.0));
+        }
+
+        /** Rotation reelle de chaque corps, depuis {@link SpaceSolRotations} ; leve si un corps n'y est pas. */
+        void knownSolRotations()
+        {
+            for (SpaceBody body : List.copyOf(bodies)) {
+                SpaceRotation rotation = SpaceSolRotations.byName(body.name());
+                if (rotation == null) throw new IllegalStateException("Rotation de Sol inconnue : " + body.name());
+                rotate(body.name(), rotation);
+            }
+        }
+
+        private void rotate(String name, SpaceRotation rotation)
+        {
+            for (int i = 0; i < bodies.size(); i++) {
+                if (bodies.get(i).name().equals(name)) {
+                    bodies.set(i, bodies.get(i).withRotation(rotation));
+                    return;
+                }
+            }
+            throw new IllegalStateException("Corps inconnu dans le systeme par defaut : " + name);
+        }
+
         private int add(SpaceBodyKind kind, String name, int parent, double radius, int color, float luminosity,
                         SpaceOrbit orbit)
         {
@@ -580,10 +737,19 @@ public final class SpaceGalaxy
             return id;
         }
 
-        /** Systeme d'id {@code id} a la position galactique donnee (al) ; prochain id de corps = corps + 1. */
+        /**
+         * Systeme d'id {@code id} a la position galactique donnee (al) ; prochain id de corps = corps + 1. Masse reelle
+         * de chaque corps depuis {@link SpaceKnownMasses} (T39) ; leve si un corps n'y est pas (erreur de recopie).
+         */
         SpaceSystem build(int id, double x, double y, double z)
         {
-            return new SpaceSystem(id, name, x, y, z, bodies, bodies.size() + 1);
+            List<SpaceBody> weighed = new ArrayList<>(bodies.size());
+            for (SpaceBody body : bodies) {
+                double mass = SpaceKnownMasses.byName(body.name());
+                if (Double.isNaN(mass)) throw new IllegalStateException("Masse inconnue : " + body.name());
+                weighed.add(body.withMass(mass));
+            }
+            return new SpaceSystem(id, name, x, y, z, weighed, bodies.size() + 1);
         }
     }
 

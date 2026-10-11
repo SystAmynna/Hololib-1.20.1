@@ -35,9 +35,6 @@ public final class SpacePilotClient
     /** Module Space Pilot de la memoire active du joueur local, ou {@code null} (absent, hors partie). */
     public static SpacePilotModule module() { return module; }
 
-    /** Vrai si le joueur local a Space Pilot et que son interrupteur general (Quick Action) est actif. */
-    public static boolean enabled() { return module != null && module.enabled(); }
-
     @SubscribeEvent
     public static void onClientTick(TickEvent.ClientTickEvent event)
     {

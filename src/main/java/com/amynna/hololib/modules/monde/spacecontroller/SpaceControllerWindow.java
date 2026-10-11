@@ -31,6 +31,11 @@ import java.util.function.Consumer;
  * seul un operateur peut le changer, verifie par le serveur), zone {@link SpacePilotPad}. Les textes sont reconstruits
  * a chaque synchronisation ({@link #showState}), jamais par frame ; formats communs {@link SpaceFormat} (aussi utilises
  * par le HUD de navigation de Space Pilot).
+ * <p>
+ * <b>Masquee pendant le pilotage</b> (T41, D31) : {@link #shown()} est faux pour tous les joueurs tant que le pilote
+ * passe par ce poste (etat synchronise du module) ; les fenetres des autres postes restent affichees (« Pilote par
+ * X », clic refuse). La capture du pilote n'est pas liee a la fenetre ({@link SpacePilotPad}) : le masquage ne la
+ * coupe pas. En session d'edition, la fenetre reste revelee par le framework.
  */
 public final class SpaceControllerWindow extends HoloWindow implements HoloEditTranslation, HoloEditRotation,
         HoloEditScale
@@ -99,6 +104,18 @@ public final class SpaceControllerWindow extends HoloWindow implements HoloEditT
     public boolean ownRequired() { return false; }
 
     public SpacePilotPad pad() { return pad; }
+
+    /**
+     * Client : faux quand le pilote courant passe par ce poste (D31, {@code pilot != null && pilotHere}, etat du module
+     * synchronise chez tous), pour le pilote comme pour les autres joueurs ; vrai sinon (poste libre, ou pilote depuis
+     * un autre poste).
+     */
+    @Override
+    public boolean shown()
+    {
+        return !(module() instanceof SpaceControllerModule controller && controller.pilot() != null
+                && controller.pilotHere());
+    }
 
     /**
      * Met a jour les textes et la zone de pilotage (deux cotes, a la creation et a chaque synchronisation).

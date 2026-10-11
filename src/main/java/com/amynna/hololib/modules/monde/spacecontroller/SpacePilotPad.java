@@ -4,10 +4,12 @@ import com.amynna.hololib.holo.capture.HoloCapture;
 import com.amynna.hololib.holo.capture.HoloCaptures;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.interact.HoloInteraction;
+import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloWidget;
 import com.amynna.hololib.holo.widget.control.HoloDirections;
 import com.amynna.hololib.holo.widget.control.HoloPointerInput;
+import com.amynna.hololib.holo.window.HoloWindow;
 import com.amynna.hololib.modules.camera.spacepilot.SpaceJoystickAim;
 import com.amynna.hololib.modules.camera.spacepilot.SpaceJoystickForward;
 import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
@@ -26,8 +28,18 @@ import java.util.UUID;
 
 /**
  * Zone « Cliquer pour piloter » de la fenetre du Space Controller ({@link HoloPointerInput} : survol, capture au clic
- * gauche ou droit, liee a la fenetre ; Echap ou Entree la terminent). Au debut de la capture, demande le pilotage
- * ({@link Link#begin()}) ; a la fin, envoie une entree nulle puis rend le pilotage ({@link Link#end()}).
+ * gauche ou droit ; Echap ou Entree la terminent). Au debut de la capture, demande le pilotage ({@link Link#begin()}) ;
+ * a la fin, envoie une entree nulle puis rend le pilotage ({@link Link#end()}).
+ * <p>
+ * <b>Capture independante de la fenetre</b> (T41, D31) : la fenetre du poste utilise est masquee pendant le pilotage
+ * ({@link SpaceControllerWindow#shown()}). Une capture liee a l'objet ({@code ctx.capture}, celle du trait) serait
+ * terminee par le framework des que la fenetre n'est plus routee : le pad la demarre donc lui-meme par
+ * {@link HoloCaptures#begin} (sans lien avec la fenetre) et la termine lui-meme dans tous les cas ou la capture liee
+ * le faisait : Echap / Entree (trait), autre pilote, Environment absent, pilotage reserve aux ops
+ * ({@link #syncState}), delai {@value #CLAIM_TIMEOUT} ticks, module Space Pilot retire, acces de la fenetre perdu
+ * ({@link #tick()}), module decharge ou marker retire, changement de dimension, deconnexion
+ * ({@code SpaceControllerModule.onUnload}, cote client). Son {@link #tick()} continue quand la fenetre est masquee
+ * (objets tickes par leur module, pas par le rendu).
  * <p>
  * <b>Pilotage</b> (conception : {@code docs/space/04-mathematiques.md} par. 5 et 6, {@code 05-synchronisation.md}
  * par. 2 et 3) :
@@ -38,6 +50,10 @@ import java.util.UUID;
  *     Avancer / Reculer = gaz (vitesse signee : Reculer fait partir le monde en arriere), Gauche / Droite = roulis,
  *     Saut maintenu = frein vers l'arret, prioritaire sur les gaz (le pad envoie le drapeau et les gaz tels quels,
  *     le calcul est dans {@code SpaceMotion.step}) ;</li>
+ *     <li>boost (T32, D24, C74) : le mapping Sprint ({@link #BOOST}, la touche choisie par le joueur) est pris aussi ;
+ *     maintenu, il leve le drapeau {@code boost} de l'entree (envoye au changement) : avec Avancer / Reculer, la
+ *     vitesse change bien plus vite, avec Saut le frein est bien plus fort, seul il ne fait rien ; le personnage ne
+ *     sprinte pas ;</li>
  *     <li>saut interstellaire (T22, {@code docs/space/04-mathematiques.md} par. 8, C39 a C41) : le mapping Accroupi
  *     ({@link #JUMP}, la touche choisie par le joueur) est pris aussi ; a l'appui, la cible est l'etoile de fond la
  *     plus proche du centre de l'ecran a moins de {@value SpaceJump#TARGET_CONE} degres
@@ -47,6 +63,11 @@ import java.util.UUID;
  *     voyage. Pendant un saut (touche tenue avec une cible, ou charge / voyage affiches), les taux du joystick sont
  *     envoyes nuls (la camera reste bornee au cone, la visee continue). Echap pendant le voyage rend la main sans
  *     l'arreter (C40) ;</li>
+ *     <li>Sneak et Sprint n'agissent jamais sur le personnage (T32) : en mode maintenu, la capture neutralise le
+ *     mapping aussitot apres chaque appui et au debut de chaque tick (avant les entrees du joueur) ; en mode
+ *     <b>bascule</b>, cette neutralisation est sans effet ({@code ToggleKeyMapping} ignore {@code setDown(false)}),
+ *     donc le pad remet les mappings a bascule au repos au debut du pilotage, a chaque appui pris et a chaque tick
+ *     ({@link SpaceControllerModule#releaseToggleKeys()}, backend client) ;</li>
  *     <li>joystick au regard : la camera est bornee a un cone de {@value #CONE_ANGLE} degres autour de l'axe avant du
  *     monde (reglage de l'Environment, fixe dans le monde) ; l'ecart au centre, au-dela de la zone morte
  *     {@link #DEAD_ZONE} (C48 : rayon angulaire du cercle avant moins celui du cercle de visee, 2,0 degres), donne
@@ -119,6 +140,11 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
      * Pris par la capture, il ne va ni au jeu (le joueur ne s'accroupit pas) ni au double appui qui ferme le focus.
      */
     public static final HoloControl JUMP = HoloControl.mapping("key.sneak");
+    /**
+     * Controle du boost (T32) : le mapping Sprint (Ctrl gauche par defaut, la touche choisie par le joueur). Pris par
+     * la capture, il ne va ni au jeu (le joueur ne sprinte pas) ni a la sortie du focus.
+     */
+    public static final HoloControl BOOST = HoloControl.mapping("key.sprint");
 
     private static final int ACCENT = 0x40C0FF;
     private static final Component IDLE_TEXT = Component.literal("Cliquer pour piloter");
@@ -160,6 +186,8 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     private boolean braking;
     /** Touche du saut (Accroupi) enfoncee (appui pris par la capture). */
     private boolean jumpHeld;
+    /** Touche du boost (Sprint) enfoncee (appui pris par la capture, T32). */
+    private boolean boosting;
     /** Cible du saut choisie a l'appui et tenue avec la touche ({@code 0} : aucune). */
     private int jumpTarget;
     /** Vrai pendant un saut (touche tenue avec une cible, ou charge / voyage affiches) : taux du joystick nuls. */
@@ -245,7 +273,8 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
 
     /**
      * Pas de capture si un autre joueur pilote deja, ni pour un non-op en mode « ops », ni sans module Space Pilot dans
-     * la memoire active du joueur local (D11 : message dans la barre d'action).
+     * la memoire active du joueur local (D11 : message dans la barre d'action). Sinon capture explicite
+     * ({@link HoloCaptures#begin}), pas la capture liee du trait (T41).
      */
     @Override
     public void onClick(HoloInteraction ctx, HoloControl button)
@@ -256,7 +285,8 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
             ctx.player().displayClientMessage(SpaceControllerModule.SPACE_PILOT_REQUIRED, true);
             return;
         }
-        HoloPointerInput.super.onClick(ctx, button);
+        // Capture non liee a la fenetre (T41) : elle survit au masquage de la fenetre du poste utilise.
+        HoloCaptures.begin(this);
     }
 
     @Override
@@ -359,10 +389,19 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
 
     // ---------------------------------------------------------------- tick (client)
 
+    /**
+     * Pendant la capture : rend la main si le module Space Pilot a quitte la memoire active du joueur local (D11) ou si
+     * l'acces de la fenetre ne l'autorise plus (T41 : la capture n'est plus liee a la fenetre), ou si l'etat ne le
+     * designe toujours pas comme pilote apres {@value #CLAIM_TIMEOUT} ticks ; sinon envoi de l'entree et battement.
+     */
     @Override
     public void tick()
     {
         if (!piloting) return;
+        if (!SpaceControllerModule.localSpacePilot() || !accessAllowed()) {
+            HoloCaptures.end(this);
+            return;
+        }
         if (!confirmed()) {
             if (++unconfirmed > CLAIM_TIMEOUT) {
                 HoloCaptures.end(this);
@@ -371,8 +410,17 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
         } else {
             unconfirmed = 0;
         }
+        SpaceControllerModule.releaseToggleKeys();
         pilotTick();
         if (++sinceSend >= HEARTBEAT_INTERVAL) sendInput(currentInput());
+    }
+
+    /** Vrai si l'acces de la fenetre ({@code HoloAccess}) autorise le joueur local (pendant la capture). */
+    private boolean accessAllowed()
+    {
+        HoloWindow window = window();
+        HoloModule module = window != null ? window.module() : null;
+        return module == null || self == null || window.access().allows(self, module.owner());
     }
 
     /** Envoie une entree au serveur ({@code INPUT}) et remet a zero le compteur du battement. */
@@ -389,33 +437,38 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
 
     /**
      * Controles du pilote : les quatre mappings de deplacement (gaz, roulis), le mapping Saut (frein), le mapping
-     * Accroupi (saut interstellaire, T22) et les clics bruts (pris sans effet : pas d'attaque ni d'utilisation d'objet
-     * pendant le pilotage, la camera visant le monde).
+     * Accroupi (saut interstellaire, T22), le mapping Sprint (boost, T32) et les clics bruts (pris sans effet : pas
+     * d'attaque ni d'utilisation d'objet pendant le pilotage, la camera visant le monde).
      */
     protected boolean capturesPilotControl(HoloControl control)
     {
         return HoloDirections.isDirection(control) || control.equals(BRAKE) || control.equals(JUMP)
-                || control.equals(HoloControl.LEFT_CLICK) || control.equals(HoloControl.RIGHT_CLICK)
-                || control.equals(HoloControl.MIDDLE_CLICK);
+                || control.equals(BOOST) || control.equals(HoloControl.LEFT_CLICK)
+                || control.equals(HoloControl.RIGHT_CLICK) || control.equals(HoloControl.MIDDLE_CLICK);
     }
 
     /**
-     * Appui d'une touche de deplacement, du frein ou du saut (cible cherchee a l'appui, {@link #findJumpTarget}) ; les
-     * clics sont ignores.
+     * Appui d'une touche de deplacement, du frein, du saut (cible cherchee a l'appui, {@link #findJumpTarget}) ou du
+     * boost ; les clics sont ignores. Saut et boost : mappings a bascule remis au repos aussitot (l'appui vient d'etre
+     * compte par vanilla, avant le prochain tick du joueur).
      */
     protected void onPilotPress(HoloCapture ctx, HoloControl control)
     {
         if (control.equals(BRAKE)) {
             braking = true;
         } else if (control.equals(JUMP)) {
+            SpaceControllerModule.releaseToggleKeys();
             jumpHeld = true;
             jumpTarget = findJumpTarget(ctx);
-        } else {
+        } else if (control.equals(BOOST)) {
+            SpaceControllerModule.releaseToggleKeys();
+            boosting = true;
+        } else if (HoloDirections.isDirection(control)) {
             directions.set(control, true);
         }
     }
 
-    /** Relachement d'une touche de deplacement, du frein ou du saut (le drapeau du saut tombe). */
+    /** Relachement d'une touche de deplacement, du frein, du saut (le drapeau du saut tombe) ou du boost. */
     protected void onPilotRelease(HoloCapture ctx, HoloControl control)
     {
         if (control.equals(BRAKE)) {
@@ -423,7 +476,9 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
         } else if (control.equals(JUMP)) {
             jumpHeld = false;
             jumpTarget = 0;
-        } else {
+        } else if (control.equals(BOOST)) {
+            boosting = false;
+        } else if (HoloDirections.isDirection(control)) {
             directions.set(control, false);
         }
     }
@@ -457,13 +512,16 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     }
 
     /**
-     * Debut du pilotage : touches et ecart remis a zero, retour du regard sur l'axe avant au premier mouvement de
-     * souris ({@code setLook} n'agit qu'une fois la capture de la souris prise par le framework).
+     * Debut du pilotage : touches et ecart remis a zero, Sneak / Sprint a bascule remis au repos (un personnage
+     * accroupi en mode bascule se releve), retour du regard sur l'axe avant au premier mouvement de souris
+     * ({@code setLook} n'agit qu'une fois la capture de la souris prise par le framework).
      */
     protected void onPilotStart(HoloCapture ctx)
     {
+        SpaceControllerModule.releaseToggleKeys();
         directions.clear();
         braking = false;
+        boosting = false;
         jumpHeld = false;
         jumpTarget = 0;
         jumpLocked = false;
@@ -482,6 +540,7 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     {
         directions.clear();
         braking = false;
+        boosting = false;
         jumpHeld = false;
         jumpTarget = 0;
         jumpLocked = false;
@@ -502,13 +561,13 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     protected SpacePilotInput currentInput() { return sent; }
 
     /**
-     * Entree quantifiee courante : gaz (Avancer +1, Reculer -1), roulis (Droite +1, Gauche -1) et frein (Saut)
-     * depuis les touches, taux depuis l'ecart du regard ({@code docs/space/04-mathematiques.md} par. 6) :
+     * Entree quantifiee courante : gaz (Avancer +1, Reculer -1), roulis (Droite +1, Gauche -1), frein (Saut) et boost
+     * (Sprint, T32) depuis les touches, taux depuis l'ecart du regard ({@code docs/space/04-mathematiques.md} par. 6) :
      * {@code k = clamp((m - D) / (A - D), 0, 1) / m}, {@code yawRate = dYaw k}, {@code pitchRate = -dPitch k} (regarder
      * plus haut = pitch Minecraft negatif = nez qui monte) ; visee = ecart lui-meme ({@code aimYaw = dYaw},
      * {@code aimPitch = -dPitch}, positif au-dessus), avec la tolerance d'un pas ({@link #aim}) ; drapeau et cible du
      * saut tant que la touche est tenue avec une cible. Pendant un saut ({@link #jumpLocked()}), taux nuls ; gaz,
-     * roulis et frein restent transmis tels quels (le pas les ignore pendant la charge, C40).
+     * roulis, frein et boost restent transmis tels quels (le pas les ignore pendant la charge, C40).
      */
     private SpacePilotInput computeInput()
     {
@@ -523,8 +582,8 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
         double k = !jumpLocked && magnitude > 0.0 ? deflection(magnitude) / magnitude : 0.0;
         byte aimYaw = aim(deviationYaw, sent.aimYaw(), sent.aimYawDegrees());
         byte aimPitch = aim(-deviationPitch, sent.aimPitch(), sent.aimPitchDegrees());
-        return SpacePilotInput.of(throttle, roll, deviationYaw * k, -deviationPitch * k, braking, aimYaw, aimPitch,
-                jumpTarget);
+        return SpacePilotInput.of(throttle, roll, deviationYaw * k, -deviationPitch * k, braking, boosting, aimYaw,
+                aimPitch, jumpTarget);
     }
 
     /**

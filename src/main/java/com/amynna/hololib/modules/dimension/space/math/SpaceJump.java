@@ -48,8 +48,11 @@ public final class SpaceJump
     public static final int CHARGE_TICKS = 60;
     /** Duree de l'alignement sur la cible, en pas depuis le debut de la charge (2 s, C39). */
     public static final int ALIGN_TICKS = 40;
-    /** Duree minimale du voyage, en pas (1 s). */
-    public static final int MIN_TRAVEL_TICKS = 20;
+    /**
+     * Duree minimale du voyage, en pas (2 s, C73) : la distorsion affichee commence par 20 ticks de convergence des
+     * etoiles (purement visuelle), il en reste au moins autant pour le voyage lui-meme.
+     */
+    public static final int MIN_TRAVEL_TICKS = 40;
     /**
      * Arrivee : distance a l'etoile principale, en rayons de l'etoile (C42, C59) : proche de l'etoile cible, disque
      * d'environ 11 degres (Soleil : 0,047 UA, en deca de Mercure).
@@ -262,7 +265,7 @@ public final class SpaceJump
     // ---------------------------------------------------------------- fonctions pures
 
     /**
-     * Duree du voyage, en pas : {@code N = max(20, ceil(20 D / v_w))} ({@code D} en al, {@code v_w} en al/s), bornee a
+     * Duree du voyage, en pas : {@code N = max(40, ceil(20 D / v_w))} ({@code D} en al, {@code v_w} en al/s), bornee a
      * {@link Integer#MAX_VALUE} ; vitesse nulle ou non finie : la duree minimale.
      */
     public static int travelTicks(double distanceLy, double warpSpeed)

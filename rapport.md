@@ -793,60 +793,71 @@ d'inspection de la nouvelle mémoire s'appliquent aussitôt. Aucune commande ne 
 
 ### 8.12 Piloter le monde dans un système stellaire (modules Space)
 
-Conception complète : `docs/space/`. Les quatre modules sont décrits au [§9](#9-commandes).
+Conception complète : `docs/space/` (décisions D1–D34, choix C, limites L). Les six modules sont décrits au
+[§9](#9-commandes).
 
 **Installation** (op) :
 1. `/hololib_module add dimension here hololib:space_environment` → `HoloContainer.install` → `onLoad` (serveur) crée
    la galaxie par défaut (Sol avec ses 34 corps majeurs — 8 planètes, lunes majeures, objets mineurs `MINOR` — et les
-   11 systèmes voisins réels avec leurs compagnes et planètes confirmées), choisit Sol comme système courant ; la pose
-   par défaut est calculée au premier `serverTick` (sur la droite Soleil → Terre, à 1,02 fois l'orbite de la Terre,
-   l'avant du monde tourné vers le Soleil). Au même tick, l'Environment se branche sur son archive `SpaceArchive`
-   (`data/hololib_space.dat` de la dimension) : si la dimension a déjà eu un Environment, **tout son état revient**
-   (galaxie éditée, système courant, pose, réglages, saut). Le module n'a aucun objet mais `sharedWithObservers()` :
-   tous les joueurs de la dimension reçoivent son état. Chez eux, `readSync` lit le bloc chaud (pose, vitesse,
-   référentiel, entrée, pilote, réglages, saut) et, seulement quand il le faut (arrivée du joueur, changement), le
-   bloc froid (système courant, étoiles de fond) ; à la frame suivante, `SpaceSkyRenderer` (un `SkyRenderer`)
-   recouvre le ciel vanilla d'une sphère noire, dessine les autres systèmes en étoiles de fond et les corps à leur
-   taille apparente, et noircit le brouillard (`fogColor`).
+   11 systèmes voisins réels avec leurs compagnes et planètes confirmées ; masses, rotations propres et textures
+   réelles), choisit Sol comme système courant et tire la **graine du fond étoilé** ; la pose par défaut est calculée
+   au premier `serverTick` (dans la sphère d'influence de la Terre, au-delà d'elle sur la droite Soleil → Terre,
+   l'avant du monde tourné vers le Soleil ; référentiel = la Terre). Au même tick, l'Environment se branche sur son
+   archive `SpaceArchive` (`data/hololib_space.dat` de la dimension) : si la dimension a déjà eu un Environment, **tout
+   son état revient** (galaxie éditée, système courant, pose, réglages, saut, cible). Le module n'a aucun objet mais
+   `sharedWithObservers()` : tous les joueurs de la dimension reçoivent son état. Chez eux, `readSync` lit le bloc
+   chaud (pose, vitesse, référentiel, entrée, pilote, réglages et horloge, saut, cible, compteur de téléportations) et,
+   seulement quand il le faut (arrivée du joueur, changement), le bloc froid (système courant, étoiles de fond, graine) ;
+   à la frame suivante, `SpaceSkyRenderer` (un `SkyRenderer`) recouvre le ciel vanilla d'une sphère noire, dessine le
+   fond étoilé procédural (4 000 étoiles, Voie lactée comprise, le même pour tous), les autres systèmes en étoiles de
+   fond et les corps **texturés** à leur taille apparente, chacun tournant sur lui-même, et noircit le brouillard
+   (`fogColor`). Le temps de l'espace avance à 360 s simulées par tick (un jour = 12 s).
 2. `/hololib_marker create poste` puis `/hololib_module add world poste hololib:space_controller` : fenêtre de
    contrôle 1,6 bloc au-dessus du marker (vitesse, référentiel et altitude, interrupteur « Pilotage : tous / ops »,
    zone « Cliquer pour piloter »). L'état est recopié de l'Environment à chaque tick serveur et envoyé au plus 4 fois
    par seconde, seulement s'il change.
 3. Chaque pilote : `/hololib_module add player @s current hololib:space_pilot` (sa mémoire active ; une autre mémoire
    se nomme à la place de `current`). Sans ce module, le poste refuse le pilotage (« Module Space Pilot requis »).
-   Space Pilot ajoute une fenêtre « Space Pilot » à la liste de Config (orbites, repérage des corps, étoiles
-   extérieures, noms au regard et leur angle, HUD, lien vers le référentiel) et une action à la roue Quick Action
-   (tout couper / rallumer, sauf le joystick).
-4. `/hololib_marker create carte` puis `/hololib_module add world carte hololib:space_configurator` : cube de 3 blocs
-   et fenêtre placée devant sa base, deux objets indépendants visibles des seuls opérateurs (`shown()` via le backend
-   client ; les actions sont refusées par le serveur pour un non-op, vérifié en premier).
+   Space Pilot ajoute une fenêtre « Space Pilot » à la liste de Config (HUD, lien vers le référentiel, vitesse de
+   croisière). Facultatif : `/hololib_module add player @s current hololib:space_knowledge` (connaissance du ciel,
+   fenêtre de Config et action Quick Action).
+4. `/hololib_marker create carte` puis `/hololib_module add world carte hololib:space_map` : cube de la carte et
+   fenêtre de navigation placée devant sa base, visibles et utilisables par **tous** (vue partagée) ; les ops les
+   placent au `world_editor`. Pour l'édition, sur le **même** marker : `/hololib_module add world carte
+   hololib:space_configurator` : fenêtre d'édition à droite de celle de la Map, visible des seuls opérateurs
+   (`shown()` via le backend client ; les actions sont refusées par le serveur pour un non-op, vérifié en premier).
 
-**Ce que voit le joueur avec Space Pilot** (lui seul, jamais un joueur qui l'inspecte) : `SpacePilotSkyRenderer`,
-`SkyRenderer` enregistré après le ciel, entoure chaque corps d'un anneau (planètes bleues, étoiles jaunes, lunes
-grises ; une lune seulement près de son parent, un objet mineur seulement près de lui), dessine les orbites (coupées
-dans l'anneau de leur corps, en pointillés à travers les autres), entoure les étoiles de fond d'un double cercle
-blanc, écrit le nom de l'objet regardé et trace un lien pointillé entre l'axe avant et le corps de référence. Le HUD
-de navigation (`SpacePilotHud`, coin haut gauche, déplaçable avec l'Own HUD Editor) donne vitesse, référentiel et
-distance, rafraîchis 4 fois par seconde depuis le miroir de l'Environment.
+**Ce que voit le joueur avec Space Knowledge** (lui seul, jamais un joueur qui l'inspecte) :
+`SpaceKnowledgeSkyRenderer`, `SkyRenderer` enregistré après le ciel, entoure chaque corps d'un anneau (planètes bleues,
+étoiles jaunes, lunes grises ; une lune seulement quand son orbite se sépare de sa planète à l'écran, un objet mineur
+seulement près de lui), dessine les orbites (coupées dans l'anneau de leur corps, en pointillés à travers les autres),
+entoure les étoiles de fond d'un double cercle blanc, écrit le nom de l'objet regardé et, dessous, sa distance (à la
+surface ; en années-lumière pour une étoile). L'action Quick Action coupe ou rallume toute la surcouche.
 
 **Pilotage** :
-1. Clic sur la zone → `SpacePilotPad` (trait `HoloPointerInput`) vérifie le Space Pilot local, ouvre une capture liée
-   à la fenêtre et envoie `BEGIN` ; le serveur vérifie le mode « ops », la présence de `SpacePilotModule` dans la
-   mémoire active du joueur (D11), puis appelle `SpaceEnvironmentModule.claimPilot` (un seul pilote ; refus =
-   message). La caméra est ramenée sur l'axe avant du monde en 0,4 s ; les cercles du joystick (objets `Local` de
-   Space Pilot) n'apparaissent que chez ce pilote.
+1. Clic sur la zone → `SpacePilotPad` vérifie le Space Pilot local, ouvre une **capture explicite** (non liée à la
+   fenêtre : elle survit à son masquage) et envoie `BEGIN` ; le serveur vérifie le mode « ops », la présence de
+   `SpacePilotModule` dans la mémoire active du joueur (D11), puis appelle `SpaceEnvironmentModule.claimPilot` (un seul
+   pilote ; refus = message). La fenêtre de ce poste disparaît pour tous les joueurs tant qu'il pilote (les autres
+   postes affichent « Pilote par X »). La caméra est ramenée sur l'axe avant du monde en 0,4 s ; les cercles du
+   joystick, le lien vers le référentiel et le HUD de navigation (Space Pilot) n'apparaissent que chez ce pilote.
 2. Chaque frame, `onMouseMove` borne le regard à un cône de 30° autour de l'axe avant ; tant que le cercle de visée
    reste dans le cercle avant (zone morte ≈ 2°), rien ne tourne ; au-delà, l'écart donne les taux de lacet et de
    tangage. Avancer / Reculer (touches des options) = gaz, vitesse signée ; Gauche / Droite = roulis ; Saut maintenu
-   = frein. Le pad envoie `INPUT` (7 octets) quand l'entrée quantifiée change (au plus tous les 2 ticks, battement
-   toutes les 20) et l'applique aussitôt à la prédiction locale.
-3. Serveur : `SpaceMotion.step` chaque tick (vitesse relative au corps de référence choisi par proximité × regard,
-   freinage d'approche, plancher à 1 % du rayon) ; état envoyé au plus tous les 4 ticks à la nouvelle entrée, toutes
-   les 20 ticks en mouvement, une fois à l'arrêt. Les autres clients rejouent le même calcul (déterministe,
-   `StrictMath`) depuis l'état reçu, sur leur propre horloge d'affichage : le ciel bouge sans à-coup pour tous.
+   = frein ; Sprint maintenu = accélération et freinage bien plus rapides. Le pad envoie `INPUT` (7 octets) quand
+   l'entrée quantifiée change (au plus tous les 2 ticks, battement toutes les 20) et l'applique aussitôt à la
+   prédiction locale. Le HUD donne vitesse, référentiel, distance et la **vitesse de croisière** : pour l'astre visé
+   (le plus au centre de l'écran), la vitesse à ne pas dépasser pour s'arrêter devant lui, avec une flèche ↑ / ↓
+   verte si l'on en est proche, rouge sinon, et un petit anneau bleu pâle « viser ici » quand l'astre bouge.
+3. Serveur : `SpaceMotion.step` chaque tick (vitesse relative au corps de référence, celui dont la **sphère
+   d'influence** contient le vaisseau ; freinage d'approche, plancher à 1 % du rayon) ; état envoyé au plus tous les
+   4 ticks à la nouvelle entrée, toutes les 20 ticks en mouvement, une fois à l'arrêt. Les autres clients rejouent le
+   même calcul (déterministe, `StrictMath`) depuis l'état reçu, sur leur propre horloge d'affichage : le ciel bouge
+   sans à-coup pour tous. Chaque client en déduit aussi les **sons** du vaisseau (moteurs, coque qui travaille en
+   rotation), entendus par toute la dimension (volume « Ambiance »).
 4. Échap → fin de la capture → `INPUT` nul puis `END` → `releasePilot` ; le monde garde sa vitesse (freiner avant de
-   rendre la main pour s'arrêter). Un pilote muet 10 s, déconnecté, changé de dimension ou dont le poste disparaît
-   est libéré automatiquement.
+   rendre la main pour s'arrêter). Un pilote muet 10 s, déconnecté, changé de dimension, privé de Space Pilot ou dont
+   le poste disparaît est libéré automatiquement.
 
 **Saut interstellaire** (pendant le pilotage) :
 1. Le pilote place une étoile de fond près du réticule ; une aide à la visée l'entoure d'un double anneau jaune pâle
@@ -855,42 +866,57 @@ distance, rafraîchis 4 fois par seconde depuis le miroir de l'Environment.
    de la cible) tant que la touche est tenue ; sans cible, rien.
 2. Serveur et clients font le même pas (`SpaceMotion.step` avec `SpaceJump`) : **charge** de 60 ticks — l'avant du
    monde s'aligne sur l'étoile en 40 ticks, frein forcé, gaz / roulis / joystick ignorés, roue de charge autour de
-   l'étoile chez le pilote ; relâcher avant la fin annule (l'orientation atteinte reste). La fenêtre du poste affiche
-   « Saut vers X », le HUD « Saut -> X ».
-3. **Voyage** : pose figée, durée `max(20, ceil(20 · D / v_w))` ticks (`D` en al, `v_w` = vitesse de distorsion,
+   l'étoile chez le pilote, bourdonnement de charge pour tous ; relâcher avant la fin annule (l'orientation atteinte
+   reste). La fenêtre du poste affiche « Saut vers X », le HUD « Saut -> X ».
+3. **Voyage** : pose figée, durée `max(40, ceil(20 · D / v_w))` ticks (`D` en al, `v_w` = vitesse de distorsion,
    0,5 al/s par défaut : Alpha du Centaure en ≈ 9 s), non annulable. Tous les joueurs de la dimension voient la
-   distorsion (`SpaceWarpEffect`, provisoire : ciel et brouillard blancs, traînées vers l'étoile) ; la surcouche de
-   Space Pilot est coupée. Fenêtre « Distorsion : n s », HUD « Distorsion -> X : n s ».
+   **distorsion** (`warp/`) : les étoiles convergent vers la cible en 1 s, flash, puis dégradé arc-en-ciel, source
+   lumineuse à halos et flares, particules blanches ; sons de moteur, souffle, grondement. Surcouches coupées.
+   Fenêtre « Distorsion : n s », HUD « Distorsion -> X : n s ».
 4. **Arrivée**, décidée par le serveur seul : système courant = cible (révision : le bloc froid du nouveau système part
    dans le même paquet), monde à 10 rayons de l'étoile principale sur l'axe du voyage, face à elle, `V = 0`,
-   référentiel = l'étoile. La distorsion s'efface en 10 ticks sur le nouveau ciel.
+   référentiel = l'étoile. Flash d'arrivée, puis le blanc s'estompe sur le nouveau ciel.
 
-**Édition** (op, avec `hololib:world_editor` dans sa mémoire de joueur) :
-1. Fenêtre du Configurator, mode galaxie : clic sur un système = sélection (poignée `SpaceMapHandle` posée sur son
-   étoile, croix 3D jusqu'aux faces du cube avec ses coordonnées), « Ajouter », « Retirer » (deux clics), renommer
-   (champ), « Monde ici » (système courant, en vert sur la carte et dans la liste), « Recadrer », « Definir comme
-   origine » (origine des coordonnées, « @ » dans la liste, Sol par défaut), « Avant du monde », « Distorsion
-   (al/s) ». Chaque bouton envoie une action ; le serveur vérifie l'op, appelle l'API de l'Environment, qui valide,
-   incrémente la révision et se synchronise ; le Configurator recopie la galaxie quand la révision change.
-2. Éditeur (G) : le cube se déplace, tourne et se met à l'échelle (échelle ramenée à l'uniforme) ; la poignée se
-   déplace à la translation. Pas de callback d'édition : le module **sonde** chaque tick serveur le transform de ses
-   objets, compare à la dernière valeur qu'il a écrite et en déduit `moveSystem`. La fenêtre a son propre transform
-   (translation, rotation) et un bouton œil : à `OFF`, seul le cube reste hors session d'édition.
-3. « Éditer » : mode système, temps figé, **tout à l'échelle** (tailles des corps exagérées), vaisseau en vert
-   (disque + segment de l'axe avant) si le système est le courant ; liste des corps, « +Etoile / +Planete / +Lune /
-   +Mineur », champs (rayon, luminosité, période), palette, phase, « Zoom » / « Dezoom » sur le corps sélectionné
-   (pour éditer les lunes d'une planète), « Animer », « Retour ». Le corps sélectionné reçoit une poignée d'orbite
-   (`SpaceOrbitHandle`) : Rotation = plan de l'orbite, Échelle = taille et excentricité (la période suit `a`) ; ses
-   coordonnées (UA depuis l'étoile principale) sont sur la ligne d'information et aux bouts de la croix.
+**Carte et cible** (tout joueur, Space Map) :
+1. Fenêtre de navigation : arborescence « Galaxie > systèmes > corps » (parenté gravitationnelle) ; clic = sélection
+   et recentrage de la carte, « Zoom - / + » (ou molette sur le cube ou la fenêtre), « Systeme » / « Galaxie »,
+   « Vue d'ensemble », « Origine @ ». La vue est partagée : tous les joueurs voient la même carte (astres texturés et
+   tournants, temps réel de l'espace, système courant et vaisseau en vert, croix 3D et coordonnées de la sélection).
+2. La ligne sélectionnée porte au bout « CIBLER » : l'astre devient la **cible du vaisseau** (une par dimension,
+   sauvegardée) et le bouton devient « DECIBLER » (vert). Changer la sélection de cette Map retire la cible. Tout
+   pilote voit un anneau vert autour de l'astre (sur l'étoile de son système s'il est ailleurs, ce qui aide à viser
+   le saut) et une flèche verte au bord du cercle avant, tournée vers lui.
+
+**Édition** (op, Space Configurator sur le marker de la Map ; `hololib:world_editor` pour déplacer les objets) :
+1. Carte galactique : le système sélectionné dans la Map reçoit une poignée (`SpaceMapHandle`, translation) ; fenêtre :
+   « Ajouter » (au centre de la carte), « Retirer » (deux clics), renommer, « Monde ici » (système courant), « Avant du
+   monde », « Temps (s/tick) » (0 = astres figés), « Distorsion (al/s) ». Chaque bouton envoie une action ; le serveur
+   vérifie l'op, la source, la Map et l'Environment, appelle l'API de l'Environment, qui valide, incrémente la révision
+   et se synchronise ; la Map recopie la galaxie quand la révision change.
+2. Vue système : corps sélectionné dans la Map, « +Etoile / +Planete / +Lune / +Mineur », « Se teleporter » (le
+   vaisseau apparaît en orbite de l'astre, à l'arrêt, astre en référentiel, même dans un autre système ; les clients
+   sautent sans lissage), onglets « Corps » (rayon, luminosité, masse, période, couleur, phase, « Retirer »,
+   « Orbite » : la Map cadre l'orbite et la poignée `SpaceOrbitHandle` apparaît — Rotation = plan, Échelle = taille et
+   excentricité, la période suit `a`), « Rotation » (période en heures, signée, obliquité, nœud, phase), « Texture »
+   (Auto + 53 textures intégrées, aperçu, « Importer ») ; « RESET » (deux clics) remet l'astre à ses valeurs par
+   défaut.
+3. **Importer** : sélecteur de fichier natif (PNG / JPEG, sur un fil à part) ; l'image est étirée en 2:1 (64 à
+   1024 px), réencodée en PNG et envoyée au serveur sur le canal dédié `hololib:space_textures` (morceaux de 30 000 o) ;
+   le serveur la valide hors de son fil, la stocke dans `data/hololib_space_textures/<sha1>.png` de la dimension
+   (quota 64, textures orphelines supprimées au quota), puis l'action 7 l'applique à l'astre. Chaque client qui doit
+   la dessiner la demande une fois au serveur.
 4. Toute modification du système courant apparaît aussitôt dans le ciel de tous les joueurs de la dimension ; tout
-   est sauvegardé (galaxie et pose dans la mémoire de dimension et l'archive, cube, cadrage, sélection, zoom et
-   origine dans celle du marker).
+   est sauvegardé (galaxie, pose et cible dans la mémoire de dimension et l'archive ; cube, fenêtres et vue dans celle
+   du marker).
 
 **Persistance** : quitter et revenir (solo, serveur, LAN) rend la même position dans l'espace (système, pose,
-référentiel, vitesse, voyage en cours) : `SpaceArchive` recopie l'état vivant à chaque sauvegarde du niveau, même quand
-le monde immobile n'a rien envoyé. `/hololib_module remove dimension here hololib:space_environment` puis `add` : tout
-revient. Pour repartir de la galaxie par défaut : retirer le module, quitter le monde (l'archive est écrite),
-supprimer `data/hololib_space.dat` de la dimension, puis relancer et réinstaller.
+référentiel, vitesse, voyage en cours, cible) : `SpaceArchive` recopie l'état vivant à chaque sauvegarde du niveau,
+même quand le monde immobile n'a rien envoyé. `/hololib_module remove dimension here hololib:space_environment` puis
+`add` : tout revient. Pour repartir de la galaxie par défaut : retirer le module, quitter le monde (l'archive est
+écrite), supprimer `data/hololib_space.dat` de la dimension, puis relancer et réinstaller. Un monde du lot 2 se
+relit : temps converti sans saut des astres, masses, rotations et textures déduites des noms ; un marker de
+Configurator du lot 2 perd sa vue (y ajouter `space_map`), les réglages d'affichage d'un `space_pilot` du lot 2 ne
+passent pas dans `space_knowledge` (L22).
 
 ---
 
@@ -935,24 +961,37 @@ Modules de démonstration (`demo/`) :
   Échap, ou un regard qui s'éloigne de la zone, valide ; le texte est sauvegardé et visible des joueurs qui
   inspectent.
 
-Modules Space (`modules/dimension/space`, `modules/monde/space*`, `modules/camera/spacepilot`, conception dans
+Modules Space (`modules/dimension/space`, `modules/monde/space*`, `modules/camera/space*`, conception dans
 `docs/space/`, scénario au [§8.12](#812-piloter-le-monde-dans-un-système-stellaire-modules-space)) :
 - `hololib:space_environment` (dimension) : le monde devient un vaisseau dans un système stellaire simulé. Porte la
-  galaxie de la dimension (systèmes, corps, orbites animées ; par défaut Sol complet et 11 voisines réelles), le
-  système courant, la pose du monde et le saut interstellaire ; seule autorité sur ces données, archivées dans
-  `data/hololib_space.dat` (un retrait puis une réinstallation rendent tout l'état). Remplace le ciel par la vue du
-  système (fond noir, étoiles de fond, astres éclairés) et dessine la distorsion des sauts ;
+  galaxie de la dimension (systèmes, corps, orbites animées, masses, rotations propres, textures ; par défaut Sol
+  complet et 11 voisines réelles), le système courant, la pose du monde, le saut interstellaire et la cible du
+  vaisseau ; seule autorité sur ces données, archivées dans `data/hololib_space.dat` (un retrait puis une
+  réinstallation rendent tout l'état). Remplace le ciel par la vue du système (fond noir, fond étoilé procédural,
+  étoiles de fond, astres texturés qui tournent sur eux-mêmes), dessine la distorsion des sauts et fait entendre les
+  sons du vaisseau à toute la dimension ;
 - `hololib:space_controller` (marker) : poste de pilotage ; un joueur à la fois (tous, ou ops seulement), muni de
-  Space Pilot, pilote le monde aux touches de déplacement, au frein (Saut), au regard (joystick virtuel) et saute vers
-  une étoile (Accroupi maintenu) ;
-- `hololib:space_pilot` (joueur) : affichage personnel du pilote, requis pour piloter :
-  `/hololib_module add player @s <memoire> hololib:space_pilot` (`current` = mémoire active). Surcouche du ciel
-  (anneaux, orbites, noms, lien vers le référentiel), joystick et roue de charge du saut, HUD de navigation ;
-  fenêtre de Config et action Quick Action. Jamais vu par un autre joueur, même en inspection ;
-- `hololib:space_configurator` (marker, opérateurs) : cube éditable qui montre la carte galactique (ajouter, déplacer,
-  renommer, retirer des systèmes, choisir celui du monde, origine des coordonnées, vitesse de distorsion) ou un
-  système à l'échelle (corps, orbites à la poignée, zoom sur un corps, vaisseau), et sa fenêtre, détachée (éditable et
-  masquable séparément).
+  Space Pilot, pilote le monde aux touches de déplacement, au frein (Saut), au boost (Sprint), au regard (joystick
+  virtuel) et saute vers une étoile (Accroupi maintenu) ; la fenêtre du poste utilisé disparaît pendant le pilotage ;
+- `hololib:space_pilot` (joueur) : aides du pilote, requis pour piloter :
+  `/hololib_module add player @s <memoire> hololib:space_pilot` (`current` = mémoire active). Joystick, cible, roue
+  de charge et aide à la visée du saut, lien vers le référentiel, cible du vaisseau, HUD de navigation avec vitesse
+  de croisière, tous seulement aux commandes ; fenêtre de Config. Jamais vu par un autre joueur, même en inspection ;
+- `hololib:space_knowledge` (joueur) : connaissance du ciel : anneaux, orbites, étoiles extérieures, nom et distance
+  de l'objet regardé ; fenêtre de Config et action Quick Action (tout couper / rallumer). Facultatif, jamais vu par
+  un autre joueur ;
+- `hololib:space_map` (marker, tous) : carte (cube) et fenêtre de navigation (arborescence des astres, recentrage,
+  zoom, origine des coordonnées, bouton CIBLER), vue partagée par tous les joueurs ;
+- `hololib:space_configurator` (marker, opérateurs) : fenêtre d'édition branchée sur la Space Map du même marker (à
+  installer avec elle) : systèmes (ajouter, déplacer à la poignée, renommer, retirer, système du monde, avant du monde,
+  échelle de temps, vitesse de distorsion) et astres (ajout, champs, orbite à la poignée, rotation propre, texture
+  intégrée ou importée depuis l'ordinateur, RESET, téléportation du vaisseau).
+
+Ressources et crédits des modules Space : textures des astres dans `assets/hololib/textures/space/` (Solar System
+Scope, CC BY 4.0 ; USGS Astrogeology, domaine public ; NASA / JPL-Caltech ; Screaming Brain Studios, CC0), sons dans
+`assets/hololib/sounds/space/` (Kenney, OpenGameArt — Black Lodge Games, bart, qubodup, gmason, SketchMan3 — tous CC0,
+et sons synthétisés pour le mod) ; détail fichier par fichier, sources et modifications dans le `CREDITS.md` de chaque
+dossier. Les textures importées par les opérateurs restent dans le dossier du monde (aucune n'est fournie avec le mod).
 
 Limites connues des modules Space : `docs/space/decisions.md` (section « Limites connues acceptées »), notamment
 nuages et pluie vanilla dessinés par-dessus le ciel spatial et éclairage du monde indépendant de l'étoile.

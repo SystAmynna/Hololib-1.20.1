@@ -7,11 +7,21 @@
  * par le Space Environment seul, jamais exposee en ecriture) ; tous ses elements sont des records <b>immuables</b>
  * ({@link com.amynna.hololib.modules.dimension.space.model.SpaceSystem},
  * {@link com.amynna.hololib.modules.dimension.space.model.SpaceBody},
- * {@link com.amynna.hololib.modules.dimension.space.model.SpaceOrbit}, vues reseau {@code SystemHeader} et
- * {@code BackgroundStar}). Une modification remplace un element par une copie ({@code withXxx}) ; seules les
+ * {@link com.amynna.hololib.modules.dimension.space.model.SpaceOrbit}, et depuis T28
+ * {@link com.amynna.hololib.modules.dimension.space.model.SpaceRotation} (rotation propre) et
+ * {@link com.amynna.hololib.modules.dimension.space.model.SpaceTextureRef} (reference de texture : {@code auto},
+ * {@code builtin:<id>}, {@code custom:<sha1>}) ; vues reseau {@code SystemHeader} et {@code BackgroundStar}). Une modification remplace un element par une copie ({@code withXxx}) ; seules les
  * operations de la galaxie (doc 03 par. 6) le font, en renvoyant un
  * {@link com.amynna.hololib.modules.dimension.space.model.SpaceEditResult}. Elles n'incrementent pas la revision :
  * c'est le role de l'Environment.
+ * <p>
+ * {@link com.amynna.hololib.modules.dimension.space.model.SpaceStarField} (T31) : fond etoile procedural, genere par
+ * chaque client depuis la graine de l'Environment (generateur maison, {@code StrictMath} : meme graine, memes etoiles),
+ * immuable ; jamais envoye ni sauvegarde (seule la graine l'est).
+ * <p>
+ * Masse des corps (T39, D29) : {@code SpaceBody.mass} (kg), seulement pour choisir le referentiel (spheres
+ * d'influence, {@code math/SpaceMotion}) ; masses reelles des 62 corps par defaut dans {@code SpaceKnownMasses} (table
+ * par nom, aussi lue pour un corps sauvegarde avant T39), sinon masse estimee ({@code SpaceBody.estimatedMass}).
  * <p>
  * Regles :
  * <ul>

@@ -5,10 +5,13 @@ package com.amynna.hololib.modules.dimension.space.math;
  * {@code 04-mathematiques.md} par. 3) : km (positions et rayons), UA (orbites), al (galaxie), jours simules (periodes),
  * km par tick (vitesse du monde).
  * <p>
- * Temps simule : {@code t = (gameTime + partialTick) * echelle / 86 400} jours, {@code echelle} = secondes simulees
- * par tick ({@link SpaceMotionSettings#timeScale()}). Calcule en {@code double} depuis le {@code long} du jeu (exact
- * jusqu'a 2^53 ticks) ; la position sur une orbite ne garde que la fraction de tour ({@link #orbitFraction}), si bien
- * que la precision ne se degrade pas avec la duree de la partie.
+ * Temps simule (T38, D28) : {@code t = t_e + (gameTime - T_e + partialTick) * echelle / 86 400} jours,
+ * {@code echelle} = secondes simulees par tick ({@link SpaceMotionSettings#timeScale()}), <b>epoque</b>
+ * {@code (T_e, t_e)} = tick de jeu et temps simule ou l'echelle a ete posee ({@link SpaceMotionSettings#epochTick()},
+ * {@link SpaceMotionSettings#epochDays()} ; {@code (0, 0)} = formule d'avant T38). Seul point d'entree :
+ * {@link SpaceMotionSettings#days} (jamais ce calcul directement). Ecart au tick d'epoque calcule en {@code long} puis
+ * en {@code double} (exact jusqu'a 2^53 ticks) ; la position sur une orbite ne garde que la fraction de tour
+ * ({@link #orbitFraction}), si bien que la precision ne se degrade pas avec la duree de la partie.
  */
 public final class SpaceUnits
 {
@@ -39,19 +42,22 @@ public final class SpaceUnits
 
     /**
      * Temps simule, en jours, au tick {@code gameTime} avance de {@code partialTick} (fraction de tick du rendu, 0
-     * pour un pas de simulation).
+     * pour un pas de simulation), depuis l'epoque {@code (epochTick, epochDays)} : continu en {@code epochTick}
+     * ({@code days(epochTick, 0, ...) == epochDays} exactement). Avec l'epoque {@code (0, 0)}, identique bit a bit a
+     * la formule d'avant T38. A appeler par {@link SpaceMotionSettings#days} seulement.
      *
      * @param secondsPerTick secondes simulees par tick ({@link SpaceMotionSettings#timeScale()})
      */
-    public static double days(long gameTime, float partialTick, double secondsPerTick)
+    public static double days(long gameTime, float partialTick, long epochTick, double epochDays,
+                              double secondsPerTick)
     {
-        return ((double) gameTime + partialTick) * secondsPerTick / SECONDS_PER_DAY;
+        return epochDays + ((double) (gameTime - epochTick) + partialTick) * secondsPerTick / SECONDS_PER_DAY;
     }
 
-    /** Temps simule, en jours, au debut du tick {@code gameTime} (pas de simulation). */
-    public static double days(long gameTime, double secondsPerTick)
+    /** Jours simules ecoules en {@code ticks} ticks de jeu a {@code secondsPerTick} secondes simulees par tick. */
+    public static double elapsedDays(double ticks, double secondsPerTick)
     {
-        return (double) gameTime * secondsPerTick / SECONDS_PER_DAY;
+        return ticks * secondsPerTick / SECONDS_PER_DAY;
     }
 
     /** Partie fractionnaire, dans {@code [0, 1[} (aussi pour une valeur negative). */

@@ -1,7 +1,8 @@
 package com.amynna.hololib.client.render.modules.camera.spacepilot;
 
 import com.amynna.hololib.client.modules.camera.spacepilot.SpacePilotClient;
-import com.amynna.hololib.client.render.modules.dimension.space.SpaceWarpEffect;
+import com.amynna.hololib.client.render.modules.dimension.space.SpaceOverlay;
+import com.amynna.hololib.client.render.modules.dimension.space.warp.SpaceWarpTimeline;
 import com.amynna.hololib.client.render.view.ViewRenderContext;
 import com.amynna.hololib.client.render.view.ViewRenderer;
 import com.amynna.hololib.modules.camera.spacepilot.SpacePilotModule;
@@ -15,10 +16,10 @@ import com.amynna.hololib.modules.monde.spacecontroller.SpacePilotPad;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Camera;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import org.joml.Matrix4f;
+import org.joml.Vector3d;
 import org.joml.Vector3dc;
 import org.joml.Vector3f;
 
@@ -36,35 +37,36 @@ import org.joml.Vector3f;
  *     de charge affichee) : double anneau de selection autour de l'etoile cible ;</li>
  *     <li><b>aide a la visee</b> (pilotage sans la touche du saut, ni saut en cours) : double anneau fin et pale autour
  *     de l'etoile qui serait choisie a l'appui ({@link SpaceJump#pickTarget}, meme regle que le pad, regard de la
- *     camera) ; coupee par l'interrupteur general de Space Pilot ({@code enabled}), comme la surcouche ;</li>
- *     <li>rien pendant le voyage ni pendant le fondu de sortie de la distorsion ({@code SpaceWarpEffect}, T23).</li>
+ *     camera) ; toujours affichee pendant le pilotage depuis T33 (Space Pilot n'a plus d'interrupteur general,
+ *     C75 ; avant : coupee par {@code enabled}, C62) ;</li>
+ *     <li><b>point d'interception de la vitesse de croisiere</b> (T39, C118, hors charge du saut) : petit anneau
+ *     bleu pale « viser ici » dans la direction conseillee par la croisiere
+ *     ({@link SpacePilotModule#cruiseIntercept}), quand elle s'ecarte visiblement du disque de la cible ; coupe avec la
+ *     vitesse de croisiere (interrupteur « Vitesse de croisiere » de Space Pilot) ;</li>
+ *     <li>rien pendant le voyage ni pendant le flash d'arrivee de la distorsion ({@code SpaceWarpTimeline}, T35).</li>
  * </ul>
- * Reperage et roue ne dependent pas de {@code enabled} (C44 : necessaires au pilotage).
+ * Rien ne depend de Space Knowledge.
  * <p>
  * <b>Famille vue</b> ({@link ViewRenderer}, projection {@code WORLD} : meme FOV et meme bobbing que le ciel) plutot que
  * ciel : le reperage et la roue passent devant le terrain et la coque, comme le joystick (la cible finit sur l'axe
  * avant, au centre du cercle avant). Directions calculees comme le ciel ({@code pose(partialTick)},
  * {@link SpaceSkyFrame#galacticDirection}) dans un repere oriente comme le monde
  * ({@link ViewRenderContext#applyCameraRotation}), posees sur une sphere de {@value #RADIUS} bloc autour de l'oeil
- * (devant les cercles du joystick, a 2 blocs). Tailles constantes a l'ecran (pixels de reference, comme la
- * surcouche : un pixel jusqu'a 1 080 pixels de haut, proportionnel au-dela). {@code RenderType} de la surcouche, sans
- * ecriture de profondeur ; aucun etat GL modifie a la main, aucune allocation par frame. Fil de rendu.
+ * (devant les cercles du joystick, a 2 blocs). Tailles constantes a l'ecran (pixels de reference,
+ * {@link SpaceOverlay#pixelTan}). {@code RenderType} des surcouches ({@link SpaceOverlay#quads()}), sans ecriture de
+ * profondeur ; aucun etat GL modifie a la main, aucune allocation par frame. Fil de rendu.
  */
 public final class SpaceJumpRenderer implements ViewRenderer
 {
     /** Rayon de la sphere de dessin, en blocs : devant les cercles du joystick (2 blocs). */
     static final float RADIUS = 1.5f;
-    /** Hauteur d'ecran jusqu'a laquelle un pixel de reference vaut un pixel (au-dela : proportionnel). */
-    private static final double REFERENCE_HEIGHT = 1080.0;
-    /** Echelle verticale de la projection a defaut ({@code 1 / tan(35 deg)}, FOV 70). */
-    private static final double DEFAULT_PROJECTION_SCALE = 1.0 / Math.tan(Math.toRadians(35.0));
 
     /** Couleur de selection des modules Space (RGB), comme la selection du Configurator. */
     private static final int SELECTION = 0xFFE040;
 
     /**
      * Double anneau de la cible : rayons interieur et exterieur (pixels de reference), memes que celui des etoiles de
-     * fond de la surcouche (il le recouvre), epaisseur ; rayon interieur minimal (radians) hors du carre de l'etoile.
+     * fond de la surcouche de Space Knowledge (il le recouvre), epaisseur ; rayon interieur minimal (radians) hors du carre de l'etoile.
      */
     private static final double TARGET_INNER_PX = 6.0;
     private static final double TARGET_OUTER_PX = 9.0;
@@ -87,6 +89,16 @@ public final class SpaceJumpRenderer implements ViewRenderer
     private static final float WHEEL_TRACK_ALPHA = 0.25f;
     private static final int WHEEL_SEGMENTS = 64;
 
+    /**
+     * Point d'interception de la croisiere (T39, C118) : couleur discrete (bleu pale, RGB), rayon de l'anneau et
+     * epaisseur (pixels de reference), opacite.
+     */
+    private static final int INTERCEPT_COLOR = 0x8FD8FF;
+    private static final double INTERCEPT_PX = 5.0;
+    private static final double INTERCEPT_THICKNESS_PX = 1.5;
+    private static final float INTERCEPT_ALPHA = 0.7f;
+    private static final int INTERCEPT_SEGMENTS = 16;
+
     private static final int LIGHT = LightTexture.FULL_BRIGHT;
     private static final float RED = (SELECTION >> 16 & 0xFF) / 255f;
     private static final float GREEN = (SELECTION >> 8 & 0xFF) / 255f;
@@ -96,7 +108,6 @@ public final class SpaceJumpRenderer implements ViewRenderer
 
     /** Trouve par {@link #shouldRender}, utilise par {@link #render} de la meme frame. */
     private SpaceEnvironmentModule environment;
-    private boolean aid;
 
     private final SpacePose pose = new SpacePose();
     private final SpaceSkyFrame frame = new SpaceSkyFrame();
@@ -106,6 +117,12 @@ public final class SpaceJumpRenderer implements ViewRenderer
     private final Vector3f bu = new Vector3f();
     private final Vector3f bv = new Vector3f();
     private final Vector3f transformed = new Vector3f();
+    /** Point d'interception de la croisiere, axes du systeme (lu dans le module du joueur local). */
+    private final Vector3d intercept = new Vector3d();
+    /** Couleur des anneaux en cours de dessin (selection par defaut). */
+    private float red = RED;
+    private float green = GREEN;
+    private float blue = BLUE;
     /** Tangente d'un pixel de reference au centre de l'ecran, pour la frame. */
     private double pixelTan;
 
@@ -115,7 +132,7 @@ public final class SpaceJumpRenderer implements ViewRenderer
 
     /**
      * Pilote local en capture avec un module Space Pilot, Environment synchronise avec un systeme courant, pas de
-     * voyage affiche ni de distorsion en fondu ({@link SpaceWarpEffect#strength}, T23).
+     * voyage affiche ni de distorsion ({@link SpaceWarpTimeline#active}, T35 : flash d'arrivee compris).
      */
     @Override
     public boolean shouldRender(ViewRenderContext ctx)
@@ -127,10 +144,9 @@ public final class SpaceJumpRenderer implements ViewRenderer
         SpaceEnvironmentModule env = SpaceEnvironmentModule.client();
         if (env == null || !env.synced() || env.currentSystem() == null) return false;
         if (env.jumpAt(ctx.partialTick()).phase() == SpaceJump.Phase.TRAVEL) return false;
-        // Fondu de sortie de la distorsion (T23) : rien tant que le ciel n'est pas revenu.
-        if (SpaceWarpEffect.strength(env, ctx.partialTick()) > 0f) return false;
+        // Flash d'arrivee de la distorsion (T35) : rien tant que le ciel n'est pas revenu.
+        if (SpaceWarpTimeline.active(env, ctx.partialTick())) return false;
         environment = env;
-        aid = module.enabled();
         return true;
     }
 
@@ -150,7 +166,7 @@ public final class SpaceJumpRenderer implements ViewRenderer
         look.set(camera.getLookVector());
         ctx.applyCameraRotation(stack);
         Matrix4f m = stack.last().pose();
-        VertexConsumer vc = buffers.getBuffer(SpacePilotSkyRenderer.OverlayType.OVERLAY_QUADS);
+        VertexConsumer vc = buffers.getBuffer(SpaceOverlay.quads());
 
         SpaceJump jump = env.jumpAt(partialTick);
         if (jump.phase() == SpaceJump.Phase.CHARGE) {
@@ -164,6 +180,13 @@ public final class SpaceJumpRenderer implements ViewRenderer
             }
             return;
         }
+        if (SpacePilotClient.module() != null && SpacePilotClient.module().cruiseIntercept(intercept)) {
+            frame.rotateToWorld(intercept.x, intercept.y, intercept.z, direction);
+            if (visible(direction)) {
+                basis(direction, camera);
+                drawIntercept(vc, m, direction);
+            }
+        }
         int target = pad.jumpTarget();
         float thickness;
         float alpha;
@@ -171,7 +194,7 @@ public final class SpaceJumpRenderer implements ViewRenderer
             thickness = (float) TARGET_THICKNESS_PX;
             alpha = TARGET_ALPHA;
         } else {
-            if (!aid || pad.jumpHeld() || pad.jumpLocked()) return;
+            if (pad.jumpHeld() || pad.jumpLocked()) return;
             target = SpaceJump.pickTarget(frame, current, env.backgroundStars(), look.x, look.y, look.z, direction);
             thickness = (float) AID_THICKNESS_PX;
             alpha = AID_ALPHA;
@@ -185,13 +208,7 @@ public final class SpaceJumpRenderer implements ViewRenderer
     // ---------------------------------------------------------------- frame
 
     /** Echelle de l'ecran de la frame : tangente d'un pixel de reference (projection de ce renderer, fenetre). */
-    private void screen(ViewRenderContext ctx)
-    {
-        double m11 = Math.abs(ctx.projection().m11());
-        if (!Double.isFinite(m11) || !(m11 > 0.0)) m11 = DEFAULT_PROJECTION_SCALE;
-        double height = Math.max(1, Minecraft.getInstance().getWindow().getHeight());
-        pixelTan = 2.0 * Math.max(1.0, height / REFERENCE_HEIGHT) / (m11 * height);
-    }
+    private void screen(ViewRenderContext ctx) { pixelTan = SpaceOverlay.pixelTan(ctx.projection().m11()); }
 
     /** Angle d'un nombre de pixels de reference compte depuis le centre de l'ecran. */
     private double pixels(double px) { return Math.atan(px * pixelTan); }
@@ -208,6 +225,7 @@ public final class SpaceJumpRenderer implements ViewRenderer
      */
     private double drawTarget(VertexConsumer vc, Matrix4f m, Vector3f w, double thicknessPx, float alpha)
     {
+        color(SELECTION);
         double inner = Math.max(TARGET_MIN_ANGLE, pixels(TARGET_INNER_PX));
         double outer = inner + pixels(TARGET_OUTER_PX - TARGET_INNER_PX);
         double half = pixels(0.5 * thicknessPx);
@@ -222,11 +240,28 @@ public final class SpaceJumpRenderer implements ViewRenderer
      */
     private void drawWheel(VertexConsumer vc, Matrix4f m, Vector3f w, double inside, double progress)
     {
+        color(SELECTION);
         double p = Math.max(0.0, Math.min(1.0, progress));
         double half = pixels(0.5 * WHEEL_THICKNESS_PX);
         double radius = Math.max(pixels(WHEEL_PX), inside + pixels(WHEEL_GAP_PX) + half);
         arc(vc, m, w, radius, half, 0.0, p, WHEEL_SEGMENTS, WHEEL_ALPHA);
         arc(vc, m, w, radius, half, p, 1.0, WHEEL_SEGMENTS, WHEEL_TRACK_ALPHA);
+    }
+
+    /** Point d'interception de la croisiere (T39, C118) : anneau fin bleu pale autour de {@code w}. */
+    private void drawIntercept(VertexConsumer vc, Matrix4f m, Vector3f w)
+    {
+        color(INTERCEPT_COLOR);
+        arc(vc, m, w, pixels(INTERCEPT_PX), pixels(0.5 * INTERCEPT_THICKNESS_PX), 0.0, 1.0, INTERCEPT_SEGMENTS,
+                INTERCEPT_ALPHA);
+    }
+
+    /** Couleur RGB des anneaux suivants. */
+    private void color(int rgb)
+    {
+        red = (rgb >> 16 & 0xFF) / 255f;
+        green = (rgb >> 8 & 0xFF) / 255f;
+        blue = (rgb & 0xFF) / 255f;
     }
 
     /**
@@ -271,7 +306,7 @@ public final class SpaceJumpRenderer implements ViewRenderer
         float y = c * w.y + v * bv.y + u * bu.y;
         float z = c * w.z + v * bv.z + u * bu.z;
         m.transformPosition(x, y, z, transformed);
-        vc.vertex(transformed.x, transformed.y, transformed.z).color(RED, GREEN, BLUE, a).uv2(LIGHT).endVertex();
+        vc.vertex(transformed.x, transformed.y, transformed.z).color(red, green, blue, a).uv2(LIGHT).endVertex();
     }
 
     /**

@@ -9,15 +9,16 @@ import com.amynna.hololib.holo.object.HoloVisibility;
 import com.amynna.hololib.modules.dimension.space.model.SpaceLimits;
 
 /**
- * Poignee d'orbite du mode systeme ({@code docs/space/decisions.md} C5) : <b>un seul</b> objet editable, l'orbite du
- * corps selectionne. Ancrage {@code World} depuis le marker (meme repere que le cube), {@code PUBLIC}, affichee
- * seulement chez un operateur ({@link #shown()}), editable par tout operateur equipe du {@code world_editor} avec les
- * outils Rotation et Echelle (pas de translation : elle est posee par le module).
+ * Poignee d'orbite ({@code docs/space/decisions.md} C5) : <b>un seul</b> objet editable, l'orbite du corps
+ * selectionne dans la vue systeme de la Space Map du meme marker (T42). Ancrage {@code World} depuis le marker (meme
+ * repere que le cube de la Map), {@code PUBLIC}, affichee seulement chez un operateur ({@link #shown()}), editable par
+ * tout operateur equipe du {@code world_editor} avec les outils Rotation et Echelle (pas de translation : elle est
+ * posee par le module).
  * <p>
  * Placement ecrit par le module ({@code docs/space/04-mathematiques.md} par. 7) : translation = parent affiche du
- * corps (au temps fige {@code t_edit}), rotation = {@code R_cube . R_orbite}, echelle
- * {@code (a_aff . sigma, a_aff . sigma, b_aff . sigma)} (demi-axes affiches, a l'echelle de la vue : systeme entier
- * ou zoom sur un corps, T25 ; en zoom, la poignee n'existe que si le parent est dans le voisinage du corps zoome).
+ * corps dans la vue de la Map (centre, demi-etendue) au temps fige {@code t_edit} du Configurator, rotation =
+ * {@code R_cube . R_orbite}, echelle {@code (a_aff . sigma, a_aff . sigma, b_aff . sigma)} (demi-axes affiches, a
+ * l'echelle de la vue ; la poignee n'existe que si l'orbite y est entiere et assez grande, parent pres du centre).
  * Le renderer dessine dans le repere local la courbe {@code (cos t - e, 0, sin t)} : avec l'echelle, l'ellipse de
  * l'orbite, parent au foyer. L'excentricite se lit dans le rapport {@code scaleZ / scaleX} ({@link #eccentricity}).
  * <p>

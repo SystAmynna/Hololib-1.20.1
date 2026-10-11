@@ -15,7 +15,8 @@ import java.util.UUID;
 
 /**
  * Backend client du module {@code hololib:space_environment} ({@link SpaceEnvironmentModule.Backend}) : miroir de la
- * dimension du joueur local, temps de jeu du niveau client, joueur local. Installe au setup client. Fil client.
+ * dimension du joueur local, temps de jeu du niveau client, joueur local ; sons du vaisseau
+ * ({@link SpaceSoundController}, T36). Installe au setup client. Fil client.
  */
 @Mod.EventBusSubscriber(modid = HoloLib.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
 public final class SpaceEnvironmentClient implements SpaceEnvironmentModule.Backend
@@ -47,4 +48,11 @@ public final class SpaceEnvironmentClient implements SpaceEnvironmentModule.Back
         Minecraft mc = Minecraft.getInstance();
         return mc.player == null ? null : mc.player.getUUID();
     }
+
+    /** Sons du vaisseau (T36) : {@link SpaceSoundController}. */
+    @Override
+    public void tickSounds(SpaceEnvironmentModule environment) { SpaceSoundController.tick(environment); }
+
+    @Override
+    public void released(SpaceEnvironmentModule environment) { SpaceSoundController.release(environment); }
 }

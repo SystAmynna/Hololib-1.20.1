@@ -46,6 +46,24 @@ public final class SpaceLimits
     public static final double MIN_WARP_SPEED = 0.01;
     public static final double MAX_WARP_SPEED = 1_000.0;
 
+    /**
+     * Periode siderale de la rotation propre (T28), en heures, <b>en valeur absolue</b> : une periode non nulle est
+     * ramenee a {@code [MIN, MAX]} en gardant son signe ({@code < 0} = retrograde) ; {@code 0} = rotation synchrone.
+     * Minimum 36 s (aucun corps du modele ne tourne plus vite), maximum environ 114 ans (Venus : 5 833 h).
+     */
+    public static final double MIN_ROTATION_PERIOD = 0.01;
+    public static final double MAX_ROTATION_PERIOD = 1.0e6;
+    /** Obliquite de la rotation propre (T28), degres. */
+    public static final double MAX_OBLIQUITY = 180.0;
+
+    /**
+     * Masse d'un corps (T39, D29), en kg : minimum 10^10 kg (un corps de 1 km de rayon pese de l'ordre de 10^12 kg ;
+     * Deimos 1,5e15), maximum 10^33 kg (environ 500 masses solaires). La masse ne sert qu'a choisir le referentiel
+     * (spheres d'influence), jamais aux orbites ni au mouvement.
+     */
+    public static final double MIN_MASS = 1.0e10;
+    public static final double MAX_MASS = 1.0e33;
+
     private SpaceLimits() {}
 
     // ---------------------------------------------------------------- verification
@@ -121,10 +139,51 @@ public final class SpaceLimits
         return wrapped;
     }
 
+    /** Masse bornee a {@code [MIN_MASS, MAX_MASS]} (kg, T39) ; une masse nulle ou negative donne {@code MIN_MASS}. */
+    public static double sanitizeMass(double mass) { return clamp(mass, MIN_MASS, MAX_MASS); }
+
     /** Vitesse de distorsion bornee a {@code [MIN_WARP_SPEED, MAX_WARP_SPEED]} (al/s). */
     public static double sanitizeWarpSpeed(double warpSpeed)
     {
         return clamp(warpSpeed, MIN_WARP_SPEED, MAX_WARP_SPEED);
+    }
+
+    // ---------------------------------------------------------------- rotation propre (T28)
+    // Les quatre valeurs de la rotation propre sont ramenees a la precision d'un float (C13 pour les bornes) : elles
+    // circulent en float sur le reseau (16 octets par corps au lieu de 32) et l'aller-retour reste exact ; le calcul de
+    // l'orientation (double, StrictMath) part donc des memes valeurs sur le serveur et sur les clients.
+
+    /**
+     * Periode de rotation propre (heures, signee) : {@code 0} reste {@code 0} (synchrone), sinon valeur absolue bornee
+     * a {@code [MIN_ROTATION_PERIOD, MAX_ROTATION_PERIOD]}, signe garde, precision float.
+     */
+    public static double sanitizeRotationPeriod(double hours)
+    {
+        requireFinite(hours);
+        if (hours == 0.0) return 0.0;
+        double magnitude = toFloatPrecision(clamp(Math.abs(hours), MIN_ROTATION_PERIOD, MAX_ROTATION_PERIOD));
+        return hours < 0.0 ? -magnitude : magnitude;
+    }
+
+    /** Obliquite (degres) bornee a {@code [0, MAX_OBLIQUITY]}, precision float. */
+    public static double sanitizeObliquity(double degrees)
+    {
+        return toFloatPrecision(clamp(degrees, 0.0, MAX_OBLIQUITY));
+    }
+
+    /** Longitude du noeud du pole (degres) ramenee a {@code [-180, 180[} ({@link #sanitizeAngle}), precision float. */
+    public static double sanitizeRotationNode(double degrees)
+    {
+        double value = toFloatPrecision(sanitizeAngle(degrees));
+        // L'arrondi en float peut atteindre la borne exclue.
+        return value >= 180.0 ? -180.0 : value;
+    }
+
+    /** Phase de rotation propre (degres) ramenee a {@code [0, 360[} ({@link #sanitizePhase}), precision float. */
+    public static double sanitizeRotationPhase(double degrees)
+    {
+        double value = toFloatPrecision(sanitizePhase(degrees));
+        return value >= 360.0 ? 0.0 : value;
     }
 
     /** Couleur d'un corps : ARGB rendue opaque (l'alpha est ignore pour les corps). */
@@ -158,6 +217,9 @@ public final class SpaceLimits
         requireFinite(value);
         return Math.max(min, Math.min(max, value));
     }
+
+    /** Valeur finie arrondie au float le plus proche (sans depassement : l'appelant l'a deja bornee). */
+    private static double toFloatPrecision(double value) { return (float) value; }
 
     private static void requireFinite(double value)
     {

@@ -10,8 +10,8 @@ import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 
 /**
  * Backend client du module {@code hololib:space_configurator} ({@link SpaceConfiguratorModule.Backend}) : niveau de
- * permission du joueur local, qui decide de l'affichage du cube et de la fenetre ({@code shown()}). Installe au setup
- * client. Fil client.
+ * permission du joueur local, qui decide de l'affichage de la fenetre et des poignees ({@code shown()}) ; import d'une
+ * texture d'astre (T45, {@link SpaceTextureImport}). Installe au setup client. Fil client.
  */
 @Mod.EventBusSubscriber(modid = HoloLib.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
 public final class SpaceConfiguratorClient implements SpaceConfiguratorModule.Backend
@@ -31,4 +31,14 @@ public final class SpaceConfiguratorClient implements SpaceConfiguratorModule.Ba
         Minecraft mc = Minecraft.getInstance();
         return mc.player != null && mc.player.hasPermissions(SpaceConfiguratorModule.OP_LEVEL);
     }
+
+    /** T45 : choix du fichier, preparation et envoi ({@link SpaceTextureImport}), operateur seulement. */
+    @Override
+    public boolean importTexture(SpaceConfiguratorModule module, int systemId, int bodyId)
+    {
+        return localOp() && SpaceTextureImport.start(module, systemId, bodyId);
+    }
+
+    @Override
+    public int importProgress() { return SpaceTextureImport.progress(); }
 }

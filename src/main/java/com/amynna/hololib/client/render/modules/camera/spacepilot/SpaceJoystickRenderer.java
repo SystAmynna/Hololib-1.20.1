@@ -30,8 +30,12 @@ import org.joml.Vector3f;
 public final class SpaceJoystickRenderer
 {
     private static final int SEGMENTS = 48;
-    /** Demi-epaisseur des traits, en blocs (a {@value SpaceJoystickForward#DISTANCE} blocs de l'oeil). */
-    private static final float THICKNESS = 0.0035f;
+    /**
+     * Demi-epaisseur des traits, en blocs (a {@value SpaceJoystickForward#DISTANCE} blocs de l'oeil) : le bord
+     * exterieur du cercle avant est a {@code RADIUS + THICKNESS}, d'ou part le lien vers le referentiel
+     * ({@link SpaceReferenceLinkRenderer}, T33).
+     */
+    static final float THICKNESS = 0.0035f;
     /** Espace laisse entre le segment et chaque anneau, en blocs. */
     private static final float GAP = 0.01f;
     private static final int ACCENT_RGB = ConfigWindow.ACCENT & 0xFFFFFF;

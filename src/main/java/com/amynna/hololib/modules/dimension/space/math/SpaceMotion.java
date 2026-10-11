@@ -15,23 +15,29 @@ import java.util.List;
  * defaut d'un systeme ; corps le plus proche ; corps de reference ; interpolation d'affichage dans le repere du
  * referentiel.
  * <p>
- * <b>Referentiel</b> (doc 04 par. 5 point 0, decisions D7, D8) : la vitesse nominale {@code V} est relative a un
- * <b>corps de reference</b>, designe par son id (stable), qui entraine le monde dans son mouvement orbital (a
- * {@code V = 0}, le monde reste immobile par rapport a lui). Il se choisit par un score <b>proximite x regard</b>
- * {@code S_i = P_i G_i} ({@link #score}) : {@code P_i = 1 / max(h_i, 1 km)}, {@code G_i = 1 / (1 + (theta_i /}
- * {@value #AIM_HALF_ANGLE}{@code deg)^2)}, {@code theta_i} = angle entre la visee du pilote (ou l'axe avant) et le
- * corps, moins son rayon angulaire. Tres pres d'un corps, la proximite domine ; loin de tout, le corps vise gagne.
- * Bascule vers le meilleur score s'il depasse {@value #SWITCH_MARGIN} fois celui du referentiel pendant
- * {@value #SWITCH_DELAY} ticks consecutifs, au plus une fois tous les {@value #SWITCH_COOLDOWN} ticks ; le mouvement
- * d'entrainement passe de l'ancien au nouveau referentiel en {@value #BLEND_TICKS} ticks (smoothstep). L'etat
- * ({@link SpaceFrameState}) entre dans {@link #step} et y est mis a jour en place.
+ * <b>Referentiel</b> (doc 04 par. 5 point 0, decisions D7, D29 ; D8 remplacee en T39) : la vitesse nominale {@code V}
+ * est relative a un <b>corps de reference</b>, designe par son id (stable), qui entraine le monde dans son mouvement
+ * orbital (a {@code V = 0}, le monde reste immobile par rapport a lui). Il se choisit par les <b>spheres
+ * d'influence</b> (style Kerbal Space Program, {@link #influenceRadius}) : sphere d'un corps de parent {@code p}
+ * {@code r_i = a_i (m_i / m_p)^}{@value #INFLUENCE_EXPONENT} ({@code a_i} demi-grand axe en km), au moins
+ * {@value #INFLUENCE_FLOOR} rayons du corps, puis rayon "de jeu" : x {@value #MOON_INFLUENCE_FACTOR} pour une lune, x
+ * {@value #PLANET_INFLUENCE_FACTOR} pour une planete ou un objet mineur, au plus {@value #INFLUENCE_MAX_ORBIT_FRACTION}
+ * {@code a_i} (etoile compagne : rayon de base) ; sphere infinie pour un corps sans parent. Le referentiel vise est le
+ * corps <b>le plus profond</b> de la hierarchie dont la sphere contient le monde ({@link #influenceTarget} : on descend
+ * de l'etoile vers ses enfants, entre deux freres qui contiennent le monde le plus attirant {@code m / d^2}) ; on ne
+ * quitte la sphere du referentiel (et de ses ancetres) qu'au-dela de {@value #INFLUENCE_HYSTERESIS} fois son rayon. Le
+ * regard n'y entre plus. Bascule vers le corps vise apres {@value #SWITCH_DELAY} ticks consecutifs de candidature, au
+ * plus une fois tous les {@value #SWITCH_COOLDOWN} ticks ; le mouvement d'entrainement passe de l'ancien au nouveau
+ * referentiel en {@value #BLEND_TICKS} ticks (smoothstep). La masse ne sert qu'a ce choix : <b>aucune gravite</b> n'est
+ * appliquee au monde et les orbites n'en dependent pas. L'etat ({@link SpaceFrameState}) entre dans {@link #step} et y
+ * est mis a jour en place.
  * <p>
  * {@link #step} est <b>pure et deterministe bit a bit</b> : memes entrees -> memes sorties sur le serveur et sur les
  * clients (dead reckoning, {@code docs/space/05-synchronisation.md} par. 2). Trigonometrie par {@link StrictMath},
  * arithmetique ecrite ici ({@code SpaceRotations}), corps parcourus dans l'ordre du systeme.
  * <p>
- * <b>Instance</b> : elle porte son espace de travail (positions des corps au debut et a la fin du pas, scores, axes,
- * quaternion, referentiel), donc aucune allocation par appel ; une instance par fil (serveur, client, affichage),
+ * <b>Instance</b> : elle porte son espace de travail (positions des corps au debut et a la fin du pas, spheres
+ * d'influence du dernier systeme vu, axes, quaternion, referentiel), donc aucune allocation par appel ; une instance par fil (serveur, client, affichage),
  * jamais partagee. Apres {@link #step}, {@link #defaultPose}, {@link #refreshReference} ou
  * {@link #nearestBody(SpacePose, SpaceSystem, double)}, {@link #bodyPositions()} contient les positions des corps au
  * temps demande (fin du pas pour {@link #step}).
@@ -56,25 +62,67 @@ public final class SpaceMotion
     public static final double ACCELERATION = 1.05;
     /** Frein : vitesse nominale multipliee par ce facteur a chaque tick de deceleration. */
     public static final double DECELERATION = 0.92;
+    /**
+     * Gaz avec boost (T32, touche Sprint maintenue, C74) : facteur d'acceleration par tick, {@code 1,05^3} (pente
+     * logarithmique triplee : de 1 km/tick a {@code V_max} = 10^7 en 111 ticks au lieu de 331).
+     */
+    public static final double BOOST_ACCELERATION = 1.157625;
+    /**
+     * Frein, ou gaz oppose au sens de la vitesse, avec boost (T32, C74) : facteur de deceleration par tick,
+     * {@code 0,92^3} (pente logarithmique triplee : de 10^7 km/tick a l'arret en 65 ticks au lieu de 194).
+     */
+    public static final double BOOST_DECELERATION = 0.778688;
     /** Vitesse minimale, km par tick : depart du gaz, et arret net en dessous au freinage. */
     public static final double MIN_SPEED = 1.0;
     /**
-     * Referentiel, regard : ecart angulaire {@code theta_0} (degres, hors du disque du corps) auquel le facteur de
-     * regard {@code G} vaut 1/2 ; a 3 {@code theta_0}, il vaut 1/10.
+     * Referentiel (T39, D29), sphere d'influence : exposant de {@code r = a (m / m_parent)^0,4} (Laplace). Terre
+     * 0,92 M km, Lune 66 000 km, Jupiter 48 M km.
      */
-    public static final double AIM_HALF_ANGLE = 20.0;
-    /** Referentiel, proximite : altitude plancher (km) du facteur {@code P = 1 / max(h, plancher)}. */
-    public static final double MIN_SCORE_ALTITUDE = 1.0;
-    /** Referentiel : un autre corps doit avoir un score superieur a ce facteur fois celui du referentiel. */
-    public static final double SWITCH_MARGIN = 1.25;
+    public static final double INFLUENCE_EXPONENT = 0.4;
+    /**
+     * Referentiel, sphere d'influence : rayon minimal, en rayons du corps (10 depuis la retouche de T39, 2 avant) : une
+     * petite lune rapide (Phobos, Io, Europe, Rhea...) a une sphere assez grande pour que le monde y reste le delai de
+     * bascule et qu'elle devienne son referentiel.
+     */
+    public static final double INFLUENCE_FLOOR = 10.0;
+    /**
+     * Referentiel, rayon "de jeu" (retouche de T39 apres essai en jeu : lunes trop difficiles a atteindre sans les
+     * manquer) : facteur applique au rayon de base d'une lune ({@code MOON}, y compris autour d'un objet mineur).
+     */
+    public static final double MOON_INFLUENCE_FACTOR = 4.0;
+    /**
+     * Referentiel, rayon de jeu : facteur d'une planete ou d'un objet mineur (une etoile compagne garde son rayon de
+     * base, sans plafond).
+     */
+    public static final double PLANET_INFLUENCE_FACTOR = 1.5;
+    /**
+     * Referentiel, rayon de jeu : plafond d'une planete, d'un objet mineur ou d'une lune, en demi-grands axes de son
+     * orbite (la sphere d'une lune ne contient jamais le centre de son parent ; Lune : 4 x 66 184 km plafonne a
+     * 192 203 km). Les etoiles compagnes n'ont pas de plafond.
+     */
+    public static final double INFLUENCE_MAX_ORBIT_FRACTION = 0.5;
+    /**
+     * Referentiel, hysteresis : le monde ne quitte la sphere du referentiel (ou d'un de ses ancetres) qu'au-dela de ce
+     * facteur fois son rayon (remplace la marge de score de D8).
+     */
+    public static final double INFLUENCE_HYSTERESIS = 1.05;
     /** Referentiel, delai : ticks consecutifs de candidature avant la bascule (0,5 s). */
     public static final int SWITCH_DELAY = 10;
     /** Referentiel, cooldown : ticks minimum entre deux bascules (3 s). */
     public static final int SWITCH_COOLDOWN = 60;
     /** Referentiel, fondu : ticks pour passer du mouvement d'entrainement de l'ancien au nouveau (2 s). */
     public static final int BLEND_TICKS = 40;
-    /** Pose par defaut : distance au parent de la planete de depart, en demi-grands axes de son orbite. */
-    public static final double DEFAULT_ORBIT_FACTOR = 1.02;
+    /**
+     * Pose par defaut : ecart maximal a la planete de depart, vers l'exterieur de son orbite, en demi-grands axes
+     * (0,02 a : l'ancienne pose a 1,02 a du parent).
+     */
+    public static final double DEFAULT_PLANET_GAP = 0.02;
+    /**
+     * Pose par defaut (T39, C115) : ecart maximal a la planete de depart, en rayons de <b>base</b> de sa sphere
+     * d'influence ({@link #baseInfluenceRadius}, sans le facteur de jeu) : le monde y part dans la sphere de la
+     * planete, qui est son referentiel et l'entraine (Terre : 739 720 km, hors de la sphere de jeu de la Lune).
+     */
+    public static final double DEFAULT_INFLUENCE_FACTOR = 0.8;
     /**
      * Pose par defaut : demi-grand axe vise pour la planete de depart, en UA (la Terre dans Sol) ; la planete retenue
      * est celle dont le demi-grand axe en est le plus proche en echelle logarithmique ({@link #startPlanet}).
@@ -86,8 +134,12 @@ public final class SpaceMotion
     public static final double DEFAULT_CLEARANCE = 20.0;
     /** Pose par defaut : nombre de passes d'ecartement des corps (borne fixe : deterministe). */
     private static final int CLEARANCE_PASSES = 4;
-    /** {@link #AIM_HALF_ANGLE} en radians. */
-    private static final double AIM_HALF_ANGLE_RAD = Math.toRadians(AIM_HALF_ANGLE);
+    /** Teleportation (T44, D34) : distance au centre du corps, en rayons du corps (comme l'arrivee d'un saut). */
+    public static final double TELEPORT_RADII = 10.0;
+    /** Teleportation : distance au plus cette part du rayon de jeu de la sphere d'influence du corps. */
+    public static final double TELEPORT_INFLUENCE_FRACTION = 0.5;
+    /** Teleportation : distance au moins ce nombre de rayons du corps (sphere d'influence minuscule). */
+    public static final double TELEPORT_MIN_RADII = 1.5;
 
     /** Positions des corps a la fin du pas (ou au temps demande hors pas). */
     private final Vector3d[] bodies = SpaceOrbits.newPositionArray();
@@ -95,13 +147,18 @@ public final class SpaceMotion
     private final Vector3d[] startBodies = SpaceOrbits.newPositionArray();
     /** Positions des corps au temps d'affichage ({@link #interpolate} seulement). */
     private final Vector3d[] displayBodies = SpaceOrbits.newPositionArray();
-    /** Scores du referentiel par corps ({@link #score}). */
-    private final double[] scores = new double[SpaceLimits.MAX_BODIES];
+    /** Rayons des spheres d'influence (km) des corps de {@link #influenceSystem} ({@link #prepareInfluence}). */
+    private final double[] influence = new double[SpaceLimits.MAX_BODIES];
+    /** Indices des parents des corps de {@link #influenceSystem} ({@code -1} : sans parent). */
+    private final int[] parents = new int[SpaceLimits.MAX_BODIES];
+    /** Corps du referentiel courant et ses ancetres ({@link #influenceTarget}, hysteresis). */
+    private final boolean[] chain = new boolean[SpaceLimits.MAX_BODIES];
+    /** Systeme dont {@link #influence} et {@link #parents} sont calcules (systemes immuables : identite). */
+    private SpaceSystem influenceSystem;
     private final Vector3d forward = new Vector3d();
     private final Vector3d right = new Vector3d();
     private final Vector3d up = new Vector3d();
     private final Vector3d direction = new Vector3d();
-    private final Vector3d aim = new Vector3d();
     private final Quaterniond rotation = new Quaterniond();
     /** Position galactique d'une cible de saut ({@link SpaceJump.Targets}). */
     private final Vector3d jumpTarget = new Vector3d();
@@ -139,16 +196,19 @@ public final class SpaceMotion
     /**
      * Un pas de tick (doc 04 par. 5) :
      * <ol start="0">
-     *     <li>referentiel, pose et positions au debut du pas ({@link #selectReference}) : score {@code P G} de
-     *     chaque corps, visee de {@code input} ; {@code ref} absent -> meilleur score, sans delai ni fondu ; sinon
-     *     bascule vers le meilleur score {@code c} s'il depasse {@value #SWITCH_MARGIN} fois celui de {@code ref}
+     *     <li>referentiel, pose et positions au debut du pas ({@link #selectReference}) : corps le plus profond dont
+     *     la sphere d'influence contient le monde ({@link #influenceTarget}, hysteresis
+     *     {@value #INFLUENCE_HYSTERESIS} sur le referentiel et ses ancetres ; la visee de {@code input} ne compte
+     *     pas) ; {@code ref} absent -> ce corps, sans delai ni fondu ; sinon bascule vers lui s'il reste le corps vise
      *     pendant {@value #SWITCH_DELAY} pas consecutifs et que {@value #SWITCH_COOLDOWN} pas ont passe depuis la
      *     bascule precedente. Ne modifie ni la pose ni {@code V} ;</li>
      *     <li>gaz, vitesse <b>signee</b> {@code V} dans {@code [-V_max, V_max]} ({@code V < 0} : le monde part en
      *     arriere) : frein ({@code brake}) -> {@code V = 0,92 V}, puis {@code 0} sous 1 km/tick en valeur absolue,
      *     quel que soit {@code throttle} (le frein prime) ; sinon gaz {@code s = throttle != 0} de signe oppose a
      *     {@code V} -> meme deceleration jusqu'a 0 ; sinon {@code V = s min(V_max, max(1, 1,05 |V|))} (accelere
-     *     dans le sens {@code s}, en partant de 1 km/tick) ; sans touche, {@code V} inchangee (l'elan est garde) ;</li>
+     *     dans le sens {@code s}, en partant de 1 km/tick) ; sans touche, {@code V} inchangee (l'elan est garde).
+     *     Avec {@code boost} (T32), facteurs {@value #BOOST_DECELERATION} et {@value #BOOST_ACCELERATION} au lieu de
+     *     {@value #DECELERATION} et {@value #ACCELERATION} ; seul, le boost ne change rien ;</li>
      *     <li>rotation dans les axes du monde, composee a droite :
      *     {@code Q <- Q Rot(U, -yawRate turn) Rot(R, pitchRate turn) Rot(F, roll rollSpeed)}, normalisee ;</li>
      *     <li>vitesse effective {@code v = V Q F}, relative au referentiel (vers l'arriere du monde si {@code V < 0}) ;
@@ -182,8 +242,8 @@ public final class SpaceMotion
      *                  0 ; bornee a {@code [-V_max, V_max]})
      * @param frame     etat du referentiel au debut du pas, <b>mis a jour en place</b> (etat de fin de pas, a passer
      *                  au pas suivant)
-     * @param input     entree du pilote, visee comprise ({@link SpacePilotInput#ZERO} sans pilote : visee sur l'axe
-     *                  avant)
+     * @param input     entree du pilote ({@link SpacePilotInput#ZERO} sans pilote ; sa visee n'est plus lue depuis
+     *                  T39)
      * @param system    systeme courant ({@code null} = espace vide, aucun freinage, aucun referentiel)
      * @param startDays temps simule au <b>debut</b> du pas (jours), {@code settings.days(gameTime, 0)}
      * @param endDays   temps simule a la <b>fin</b> du pas (jours), {@code settings.days(gameTime + 1, 0)} ; la fin
@@ -210,7 +270,8 @@ public final class SpaceMotion
      *     <li>{@code CHARGE} (la cible reste celle du debut, meme si l'entree en designe une autre) : drapeau perdu ->
      *     {@code NONE} (orientation atteinte gardee) et pas normal ; sinon pas
      *     <b>verrouille</b> (frein force, gaz / roulis / taux ignores ; referentiel, entrainement, freinage
-     *     d'approche et garde-fou comme d'habitude, avec l'orientation du debut du pas), puis orientation de fin de pas
+     *     d'approche et garde-fou comme d'habitude, avec l'orientation du debut du pas ; frein a
+     *     {@value #DECELERATION}, boost ignore), puis orientation de fin de pas
      *     {@link SpaceJump#chargeOrientation} au pas {@code n} de la charge ; au pas {@value SpaceJump#CHARGE_TICKS}
      *     -> {@code TRAVEL}, {@code V = 0} ;</li>
      *     <li>{@code TRAVEL} : pose figee ({@code dest = pose}), referentiel inchange, {@code V = 0}, compteur borne a
@@ -259,8 +320,8 @@ public final class SpaceMotion
 
     /**
      * Corps du pas (voir {@link #step(SpacePose, double, SpaceFrameState, SpacePilotInput, SpaceSystem, double,
-     * double, SpaceMotionSettings, SpacePose) step}) ; {@code locked} (charge du saut) : frein force, gaz et rotations
-     * ignores (la visee de {@code input} compte toujours pour le referentiel).
+     * double, SpaceMotionSettings, SpacePose) step}) ; {@code locked} (charge du saut) : frein force (sans boost), gaz
+     * et rotations ignores (le referentiel est choisi comme d'habitude).
      */
     private double move(SpacePose pose, double speed, SpaceFrameState frame, SpacePilotInput input, SpaceSystem system,
                         double startDays, double endDays, SpaceMotionSettings settings, SpacePose dest,
@@ -277,7 +338,7 @@ public final class SpaceMotion
         // de l'ancien et du nouveau referentiel pendant un fondu).
         List<SpaceBody> list = computePositions(system, endDays);
         if (bodyCount > 0) SpaceOrbits.positions(system, startDays, startBodies);
-        int ref = bodyCount > 0 ? selectReference(pose, input, system, startBodies, settings, frame) : -1;
+        int ref = bodyCount > 0 ? selectReference(pose, system, startBodies, frame) : -1;
         if (ref < 0) frame.reset(0);
         int from = ref >= 0 && frame.blending() ? system.indexOf(frame.previous()) : -1;
         boolean blending = from >= 0;
@@ -294,13 +355,16 @@ public final class SpaceMotion
         }
         boolean frameMoving = refMoving || blending;
 
-        // 1. Gaz, vitesse signee : le frein prime ; un gaz oppose au sens de V freine d'abord jusqu'a 0.
+        // 1. Gaz, vitesse signee : le frein prime ; un gaz oppose au sens de V freine d'abord jusqu'a 0. Le boost
+        // (Sprint, T32) renforce les deux pentes ; ignore pendant la charge du saut.
         int throttle = locked ? 0 : input.throttleSign();
+        boolean boost = !locked && input.boost();
         if (locked || input.brake() || throttle > 0 && v < 0.0 || throttle < 0 && v > 0.0) {
-            v *= DECELERATION;
+            v *= boost ? BOOST_DECELERATION : DECELERATION;
             if (Math.abs(v) < MIN_SPEED) v = 0.0;
         } else if (throttle != 0) {
-            v = throttle * Math.min(maxSpeed, Math.max(MIN_SPEED, Math.abs(v) * ACCELERATION));
+            v = throttle * Math.min(maxSpeed, Math.max(MIN_SPEED, Math.abs(v) * (boost ? BOOST_ACCELERATION
+                    : ACCELERATION)));
         }
 
         // 2. Rotation, dans les axes du monde, composee a droite (Rot(axe, 0) = identite exacte : sautee).
@@ -450,14 +514,16 @@ public final class SpaceMotion
     /**
      * Pose par defaut d'un systeme (doc 04 par. 5) au temps {@code tDays} : sur la droite parent -> planete de depart
      * ({@link #startPlanet} : la planete dont le demi-grand axe est le plus proche de 1 UA, la Terre dans Sol, quel que
-     * soit son rang dans la liste), a {@code 1,02 a} de son parent ; sans planete, a 1 UA de l'etoile principale sur
-     * {@code +X}. Puis ecartee de chaque corps a une altitude d'au moins 20 rayons (4 passes
+     * soit son rang dans la liste), au-dela de la planete, a {@code min(0,02 a, 0,8 r)} d'elle ({@code r} = rayon de
+     * <b>base</b> de sa sphere d'influence, {@link #baseInfluenceRadius}, sans le facteur de jeu, T39, C115 : le monde
+     * part dans la sphere de la planete) ; sans planete, a 1 UA de
+     * l'etoile principale sur {@code +X}. Puis ecartee de chaque corps a une altitude d'au moins 20 rayons (4 passes
      * radiales, dans l'ordre des corps). Orientation : avant du monde {@code Q F_W} tourne vers l'etoile principale,
      * haut du monde au plus pres de {@code +Y} du systeme (sinon de {@code -Z} si l'etoile est a la verticale).
      * La vitesse associee est {@code 0} (a poser par l'appelant). Fixe aussi le referentiel
-     * ({@link #referenceBodyId()}, a poser par l'appelant dans son {@link SpaceFrameState#reset}) : le meilleur score
-     * proximite x regard a la pose par defaut, visee sur l'axe avant ({@link #score}). Sans systeme : origine,
-     * identite, aucun referentiel.
+     * ({@link #referenceBodyId()}, a poser par l'appelant dans son {@link SpaceFrameState#reset}) : le corps le plus
+     * profond dont la sphere d'influence contient la pose par defaut ({@link #influenceTarget}, sans hysteresis).
+     * Sans systeme : origine, identite, aucun referentiel.
      *
      * @return {@code dest}
      */
@@ -481,15 +547,17 @@ public final class SpaceMotion
             double dy = p.y - parent.y;
             double dz = p.z - parent.z;
             double d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            double distance = DEFAULT_ORBIT_FACTOR * list.get(planet).orbit().semiMajorAxis() * SpaceUnits.AU_KM;
+            double gap = Math.min(DEFAULT_PLANET_GAP * list.get(planet).orbit().semiMajorAxis() * SpaceUnits.AU_KM,
+                    DEFAULT_INFLUENCE_FACTOR * baseInfluenceRadius(list.get(planet),
+                            list.get(system.parentIndex(planet))));
             if (d > 0.0) {
-                sx = parent.x + dx / d * distance;
-                sy = parent.y + dy / d * distance;
-                sz = parent.z + dz / d * distance;
+                sx = p.x + dx / d * gap;
+                sy = p.y + dy / d * gap;
+                sz = p.z + dz / d * gap;
             } else {
-                sx = parent.x + distance;
-                sy = parent.y;
-                sz = parent.z;
+                sx = p.x + gap;
+                sy = p.y;
+                sz = p.z;
             }
         } else {
             sx = star.x + DEFAULT_DISTANCE_AU * SpaceUnits.AU_KM;
@@ -517,11 +585,100 @@ public final class SpaceMotion
             }
         }
 
-        // Orientation : f_S = direction vers l'etoile principale, r_S = f_S x haut, u_S = r_S x f_S ; Q envoie
+        lookAt(sx, sy, sz, star.x, star.y, star.z, settings, dest.orientation());
+        dest.position().set(sx, sy, sz);
+        setReference(dest.position(), system, influenceTarget(dest.position(), system, bodies, -1), bodies);
+        return dest;
+    }
+
+    /**
+     * Pose de <b>teleportation</b> pres du corps d'indice {@code index} de {@code system} au temps {@code tDays} (T44,
+     * D34, doc 04 par. 5 bis), « comme en orbite » : a la distance
+     * {@code d = max(}{@value #TELEPORT_MIN_RADII}{@code  R, min(}{@value #TELEPORT_RADII}{@code  R,
+     * }{@value #TELEPORT_INFLUENCE_FRACTION}{@code  r))} de son centre ({@code R} rayon du corps, {@code r} rayon de
+     * jeu de sa sphere d'influence, {@link #influenceRadius} ; infini pour un corps sans parent : 10 rayons, comme
+     * l'arrivee d'un saut). Cote : vers l'etoile la plus proche dans sa parente (face eclairee) ; pour une etoile, vers
+     * {@code approach} (direction d'ou l'on vient, depuis le corps ; nulle : vers son parent, sinon {@code +X}). Si ce
+     * point n'a pas le corps pour cible de la regle des spheres d'influence (avec l'hysteresis du referentiel : la
+     * sphere d'un enfant ou d'un voisin le contient) ou tombe dans un autre corps (altitude sous le plancher), les six
+     * directions des axes sont essayees dans l'ordre {@code +X, -X, +Y, -Y, +Z, -Z} ; aucune ne convient : le premier
+     * point est garde. Orientation : avant du monde tourne vers le corps ({@link #lookAt}). Vitesse associee nulle (a
+     * poser par l'appelant) ; referentiel a poser par l'appelant = le corps ({@link #referenceBodyId()} le donne).
+     * Deterministe, sans allocation.
+     *
+     * @param approach direction (depuis le corps) d'ou arrive le vaisseau, pour une etoile ; peut etre nulle
+     * @return {@code dest}
+     */
+    public SpacePose orbitPose(SpaceSystem system, int index, double tDays, SpaceMotionSettings settings,
+                               Vector3dc approach, SpacePose dest)
+    {
+        List<SpaceBody> list = computePositions(system, tDays);
+        SpaceBody body = list.get(index);
+        Vector3d p = bodies[index];
+        int parent = system.parentIndex(index);
+        double radius = body.radius();
+        double influenceRadius = influenceRadius(body, parent < 0 ? null : list.get(parent));
+        double d = Math.max(TELEPORT_MIN_RADII * radius,
+                Math.min(TELEPORT_RADII * radius, TELEPORT_INFLUENCE_FRACTION * influenceRadius));
+
+        // Direction principale : vers l'etoile ancetre la plus proche, ou (etoile) d'ou l'on vient.
+        int star = parent;
+        while (star >= 0 && list.get(star).kind() != SpaceBodyKind.STAR) star = system.parentIndex(star);
+        if (body.kind() != SpaceBodyKind.STAR && star >= 0) {
+            direction.set(bodies[star]).sub(p);
+        } else if (approach != null && approach.lengthSquared() > 0.0) {
+            direction.set(approach);
+        } else if (parent >= 0) {
+            direction.set(bodies[parent]).sub(p);
+        } else {
+            direction.set(1.0, 0.0, 0.0);
+        }
+        if (!(direction.lengthSquared() > 0.0) || !direction.isFinite()) direction.set(1.0, 0.0, 0.0);
+        direction.normalize();
+        double fx = direction.x;
+        double fy = direction.y;
+        double fz = direction.z;
+
+        Vector3d s = dest.position();
+        boolean found = false;
+        for (int attempt = 0; attempt <= 6 && !found; attempt++) {
+            if (attempt > 0) {
+                int axis = (attempt - 1) / 2;
+                double sign = (attempt - 1) % 2 == 0 ? 1.0 : -1.0;
+                direction.set(axis == 0 ? sign : 0.0, axis == 1 ? sign : 0.0, axis == 2 ? sign : 0.0);
+            }
+            s.set(p).fma(d, direction);
+            found = clearOfBodies(s, list) && influenceTarget(s, system, bodies, index) == index;
+        }
+        if (!found) s.set(p).fma(d, direction.set(fx, fy, fz));
+        lookAt(s.x, s.y, s.z, p.x, p.y, p.z, settings, dest.orientation());
+        setReference(s, system, index, bodies);
+        return dest;
+    }
+
+    /** Vrai si {@code position} est au-dessus de l'altitude plancher de chaque corps (positions deja calculees). */
+    private boolean clearOfBodies(Vector3dc position, List<SpaceBody> list)
+    {
+        for (int i = 0; i < bodyCount; i++) {
+            if (altitude(position, list.get(i), bodies[i]) <= MIN_ALTITUDE_FACTOR * list.get(i).radius()) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Orientation du monde dont l'avant {@code Q F_W} vise le point {@code (tx, ty, tz)} depuis {@code (sx, sy, sz)},
+     * haut du monde au plus pres de {@code +Y} du systeme (sinon de {@code -Z} si la cible est a la verticale) ; cible
+     * confondue : avant sur {@code -Z}. Pose par defaut et teleportation ({@link #orbitPose}). Deterministe, sans
+     * allocation.
+     */
+    private void lookAt(double sx, double sy, double sz, double tx, double ty, double tz,
+                        SpaceMotionSettings settings, Quaterniond dest)
+    {
+        // f_S = direction vers la cible, r_S = f_S x haut, u_S = r_S x f_S ; Q envoie
         // (R_W, U_W, F_W) sur (r_S, u_S, f_S) : Q = r_S R_W^T + u_S U_W^T + f_S F_W^T.
-        double fx = star.x - sx;
-        double fy = star.y - sy;
-        double fz = star.z - sz;
+        double fx = tx - sx;
+        double fy = ty - sy;
+        double fz = tz - sz;
         double fl = Math.sqrt(fx * fx + fy * fy + fz * fz);
         if (fl > 0.0) {
             fx /= fl;
@@ -562,10 +719,7 @@ public final class SpaceMotion
                 rz * right.x + uz * up.x + fz * forward.x,
                 rz * right.y + uz * up.y + fz * forward.y,
                 rz * right.z + uz * up.z + fz * forward.z,
-                dest.orientation());
-        dest.position().set(sx, sy, sz);
-        setReference(dest.position(), system, score(dest, SpacePilotInput.ZERO, system, bodies, settings), bodies);
-        return dest;
+                dest);
     }
 
     /**
@@ -637,33 +791,100 @@ public final class SpaceMotion
         return Math.sqrt(dx * dx + dy * dy + dz * dz) - body.radius();
     }
 
+    /**
+     * Distance d'arret au frein (doc 04 par. 5, T32 ; pour la vitesse de croisiere de T34), en km, relative au
+     * referentiel : somme des deplacements nominaux {@code |V| k^n} des pas du freinage,
+     * {@code k} = {@value #DECELERATION} ou, avec {@code boost}, {@value #BOOST_DECELERATION}, jusqu'au pas ou la
+     * vitesse passe sous
+     * {@value #MIN_SPEED} km/tick (arret net, deplacement nul). Meme suite de multiplications que {@link #step} :
+     * resultat exact pour un pas sans freinage d'approche. Majoree par {@code k |V| / (1 - k)} (11,5 |V| sans boost,
+     * 3,52 |V| avec). Le freinage d'approche ({@value #APPROACH_FACTOR} rayons) ne fait que ralentir davantage : la
+     * distance reelle est plus courte. Sans allocation, au plus quelques centaines d'iterations pour
+     * {@code |V| <= V_max}.
+     *
+     * @param speed vitesse nominale signee au debut du freinage, km/tick (non finie = 0)
+     * @param boost frein renforce (Sprint + Saut)
+     */
+    public static double stoppingDistance(double speed, boolean boost)
+    {
+        double k = boost ? BOOST_DECELERATION : DECELERATION;
+        double v = Double.isFinite(speed) ? Math.abs(speed) : 0.0;
+        double distance = 0.0;
+        while (true) {
+            v *= k;
+            if (v < MIN_SPEED) return distance;
+            distance += v;
+        }
+    }
+
     // ---------------------------------------------------------------- referentiel
 
     /**
+     * Rayon "de jeu" de la sphere d'influence d'un corps (T39, D29, doc 04 par. 5 point 0), en km, celui qui choisit le
+     * referentiel : rayon de base ({@link #baseInfluenceRadius}) fois un facteur du type
+     * ({@value #MOON_INFLUENCE_FACTOR} pour une lune, {@value #PLANET_INFLUENCE_FACTOR} pour une planete ou un objet
+     * mineur), au plus {@value #INFLUENCE_MAX_ORBIT_FRACTION} fois le demi-grand axe de son orbite (km) ; une etoile
+     * compagne garde son rayon de base (ni facteur, ni plafond) ; infini pour un corps sans parent. Deterministe
+     * ({@link StrictMath}).
+     *
+     * @param parent parent du corps ({@code null} = sans parent)
+     */
+    public static double influenceRadius(SpaceBody body, SpaceBody parent)
+    {
+        double base = baseInfluenceRadius(body, parent);
+        if (base == Double.POSITIVE_INFINITY) return base;
+        double factor = switch (body.kind()) {
+            case MOON -> MOON_INFLUENCE_FACTOR;
+            case PLANET, MINOR -> PLANET_INFLUENCE_FACTOR;
+            default -> 1.0;
+        };
+        // Etoile compagne : rayon de base, sans facteur ni plafond.
+        if (body.kind() == SpaceBodyKind.STAR) return base;
+        double cap = INFLUENCE_MAX_ORBIT_FRACTION * body.orbit().semiMajorAxis() * SpaceUnits.AU_KM;
+        return Math.min(base * factor, cap);
+    }
+
+    /**
+     * Rayon de base de la sphere d'influence d'un corps, en km :
+     * {@code r = a (m / m_parent)^}{@value #INFLUENCE_EXPONENT} (Laplace), {@code a} = demi-grand axe de son orbite en
+     * km, au moins {@value #INFLUENCE_FLOOR} rayons du corps ; infini pour un corps sans parent. Sert a la pose par
+     * defaut ({@link #defaultPose}) ; le choix du referentiel utilise le rayon de jeu ({@link #influenceRadius}).
+     * Deterministe ({@link StrictMath}).
+     *
+     * @param parent parent du corps ({@code null} = sans parent)
+     */
+    public static double baseInfluenceRadius(SpaceBody body, SpaceBody parent)
+    {
+        if (parent == null || body.orbit() == null) return Double.POSITIVE_INFINITY;
+        double a = body.orbit().semiMajorAxis() * SpaceUnits.AU_KM;
+        double r = a * StrictMath.pow(body.mass() / parent.mass(), INFLUENCE_EXPONENT);
+        return Math.max(r, INFLUENCE_FLOOR * body.radius());
+    }
+
+    /**
      * Regle de bascule du referentiel (doc 04 par. 5 point 0) au debut d'un pas, positions des corps deja calculees ;
-     * met {@code frame} a jour (candidature, bascule) sans avancer son compteur de pas. {@code frame.reference()}
-     * absent du systeme ({@code 0}, corps retire, systeme change) -> meilleur score aussitot, sans delai ni fondu ;
-     * sinon le meilleur score {@code c} est candidat s'il depasse {@value #SWITCH_MARGIN} fois celui du referentiel,
-     * et le devient apres {@value #SWITCH_DELAY} candidatures consecutives si {@value #SWITCH_COOLDOWN} pas ont passe
-     * depuis la bascule precedente. Sans allocation.
+     * met {@code frame} a jour (candidature, bascule) sans avancer son compteur de pas. Corps vise {@code c} =
+     * {@link #influenceTarget} (hysteresis sur le referentiel courant). {@code frame.reference()} absent du systeme
+     * ({@code 0}, corps retire, systeme change) -> {@code c} aussitot, sans delai ni fondu ; sinon {@code c} different
+     * du referentiel est candidat, et le devient apres {@value #SWITCH_DELAY} candidatures consecutives si
+     * {@value #SWITCH_COOLDOWN} pas ont passe depuis la bascule precedente. Sans allocation.
      *
      * @return indice du referentiel (apres la regle) dans {@code system.bodies()}, {@code -1} si le systeme n'a pas de
      * corps
      */
-    private int selectReference(SpacePose pose, SpacePilotInput input, SpaceSystem system, Vector3d[] positions,
-                                SpaceMotionSettings settings, SpaceFrameState frame)
+    private int selectReference(SpacePose pose, SpaceSystem system, Vector3d[] positions, SpaceFrameState frame)
     {
-        int best = score(pose, input, system, positions, settings);
+        int current = system.indexOf(frame.reference());
+        int best = influenceTarget(pose.position(), system, positions, current);
         if (best < 0) {
             frame.reset(0);
             return -1;
         }
-        int current = system.indexOf(frame.reference());
         if (current < 0) {
             frame.reset(system.bodies().get(best).id());
             return best;
         }
-        if (best == current || !(scores[best] > SWITCH_MARGIN * scores[current])) {
+        if (best == current) {
             frame.clearCandidate();
             return current;
         }
@@ -677,72 +898,85 @@ public final class SpaceMotion
     }
 
     /**
-     * Scores du referentiel vus de {@code pose}, positions des corps deja calculees, rendus dans {@link #scores} :
-     * {@code S_i = P_i G_i} avec {@code P_i = 1 / max(h_i, 1 km)} et {@code G_i = 1 / (1 + (theta_i / theta_0)^2)},
-     * {@code theta_i = max(0, angle(a, w_i) - alpha_i)} : angle entre la direction de visee {@code a} et la direction
-     * du corps {@code w_i}, moins son rayon angulaire {@code alpha_i = asin(min(1, R_i / d_i))} (viser n'importe ou
-     * sur le disque vaut viser le centre). {@code a = Q} x regard {@code (yaw_F + aimYaw, pitch_F - aimPitch)} (axes
-     * du monde -> systeme) : visee du pilote, ou axe avant sans visee. Monde au centre d'un corps : {@code theta = 0}.
-     * Deterministe ({@link StrictMath}), sans allocation.
+     * Corps vise par la regle des spheres d'influence (T39, D29) vu de {@code position}, positions des corps deja
+     * calculees : on part des corps sans parent (spheres infinies ; plusieurs : le plus attirant), puis on descend
+     * tant qu'un enfant du corps retenu contient le monde (distance au centre {@code d <= r}) ; entre plusieurs enfants
+     * qui le contiennent (spheres qui se recouvrent), le plus attirant {@code m / d^2} ({@code d^2} au moins 1 km^2) ;
+     * a egalite, le premier dans l'ordre du systeme. <b>Hysteresis</b> : le corps d'indice {@code current} et ses
+     * ancetres ont une sphere agrandie de {@value #INFLUENCE_HYSTERESIS} (on ne la quitte qu'au-dela). Deterministe,
+     * sans allocation (spheres calculees une fois par systeme, {@link #prepareInfluence}).
      *
-     * @return indice du meilleur score (le premier en cas d'egalite), {@code -1} si le systeme n'a pas de corps
+     * @param current indice du referentiel courant, {@code -1} sans hysteresis (pose par defaut, referentiel absent)
+     * @return indice du corps vise, {@code -1} si le systeme n'a pas de corps
      */
-    private int score(SpacePose pose, SpacePilotInput input, SpaceSystem system, Vector3d[] positions,
-                      SpaceMotionSettings settings)
+    private int influenceTarget(Vector3dc position, SpaceSystem system, Vector3d[] positions, int current)
     {
         List<SpaceBody> list = system.bodies();
-        double yaw = Math.toRadians(settings.forwardYaw() + input.aimYawDegrees());
-        double pitch = Math.toRadians(settings.forwardPitch() - input.aimPitchDegrees());
-        double horizontal = StrictMath.cos(pitch);
-        SpaceRotations.rotate(pose.orientation(), -StrictMath.sin(yaw) * horizontal, -StrictMath.sin(pitch),
-                StrictMath.cos(yaw) * horizontal, aim);
-        Vector3dc s = pose.position();
-        int best = -1;
-        double bestScore = 0.0;
-        for (int i = 0; i < list.size(); i++) {
-            double radius = list.get(i).radius();
-            Vector3d p = positions[i];
-            double dx = p.x - s.x();
-            double dy = p.y - s.y();
-            double dz = p.z - s.z();
-            double d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            double theta = 0.0;
-            if (d > 0.0) {
-                double cx = aim.y * dz - aim.z * dy;
-                double cy = aim.z * dx - aim.x * dz;
-                double cz = aim.x * dy - aim.y * dx;
-                double angle = StrictMath.atan2(Math.sqrt(cx * cx + cy * cy + cz * cz),
-                        aim.x * dx + aim.y * dy + aim.z * dz);
-                theta = Math.max(0.0, angle - StrictMath.asin(Math.min(1.0, radius / d)));
+        int count = list.size();
+        if (count == 0) return -1;
+        prepareInfluence(system);
+        for (int i = 0; i < count; i++) chain[i] = false;
+        for (int i = current; i >= 0; i = parents[i]) chain[i] = true;
+        double sx = position.x();
+        double sy = position.y();
+        double sz = position.z();
+        int node = -1;
+        while (true) {
+            int best = -1;
+            double bestPull = 0.0;
+            for (int i = 0; i < count; i++) {
+                if (parents[i] != node) continue;
+                Vector3d p = positions[i];
+                double dx = p.x - sx;
+                double dy = p.y - sy;
+                double dz = p.z - sz;
+                double d2 = dx * dx + dy * dy + dz * dz;
+                double limit = chain[i] ? influence[i] * INFLUENCE_HYSTERESIS : influence[i];
+                if (!(d2 <= limit * limit)) continue;
+                double pull = list.get(i).mass() / Math.max(d2, 1.0);
+                if (best < 0 || pull > bestPull) {
+                    best = i;
+                    bestPull = pull;
+                }
             }
-            double ratio = theta / AIM_HALF_ANGLE_RAD;
-            double value = 1.0 / (Math.max(d - radius, MIN_SCORE_ALTITUDE) * (1.0 + ratio * ratio));
-            scores[i] = value;
-            if (best < 0 || value > bestScore) {
-                best = i;
-                bestScore = value;
-            }
+            if (best < 0) return node;
+            node = best;
         }
-        return best;
+    }
+
+    /**
+     * Spheres d'influence et parents des corps de {@code system} ({@link #influence}, {@link #parents}), recalcules
+     * seulement quand le systeme change (instance immuable : une edition ou un changement de systeme en donne une
+     * autre). Sans allocation.
+     */
+    private void prepareInfluence(SpaceSystem system)
+    {
+        if (system == influenceSystem) return;
+        List<SpaceBody> list = system.bodies();
+        for (int i = 0; i < list.size(); i++) {
+            int parent = system.parentIndex(i);
+            parents[i] = parent;
+            influence[i] = influenceRadius(list.get(i), parent < 0 ? null : list.get(parent));
+        }
+        influenceSystem = system;
     }
 
     /**
      * Referentiel au temps {@code tDays} (serveur, chaque tick, et apres une edition) : positions calculees, puis
-     * {@code frame.reference()} absent du systeme -> meilleur score aussitot ({@link #score}, sans delai ni fondu) ;
-     * sinon {@code frame} inchange (les bascules ne se font que dans {@link #step}). Rend l'indice du referentiel et
-     * fixe {@link #referenceBodyId()}, {@link #referenceAltitude()}. Sans allocation.
+     * {@code frame.reference()} absent du systeme -> corps vise aussitot ({@link #influenceTarget}, sans delai ni
+     * fondu) ; sinon {@code frame} inchange (les bascules ne se font que dans {@link #step}). Rend l'indice du
+     * referentiel et fixe {@link #referenceBodyId()}, {@link #referenceAltitude()}. Sans allocation.
      *
      * @return indice du referentiel dans {@code system.bodies()}, {@code -1} sans corps
      */
-    public int refreshReference(SpacePose pose, SpacePilotInput input, SpaceSystem system, double tDays,
-                                SpaceMotionSettings settings, SpaceFrameState frame)
+    public int refreshReference(SpacePose pose, SpaceSystem system, double tDays, SpaceFrameState frame)
     {
         computePositions(system, tDays);
         int index = -1;
         if (bodyCount > 0) {
             index = system.indexOf(frame.reference());
             if (index < 0) {
-                index = score(pose, input, system, bodies, settings);
+                index = influenceTarget(pose.position(), system, bodies, -1);
                 frame.reset(system.bodies().get(index).id());
             }
         } else {

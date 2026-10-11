@@ -47,7 +47,8 @@ import java.util.Map;
  *     consommes), et encore au debut de chaque tick (touche enfoncee avant la capture) ;</li>
  *     <li>Echap / Entree : {@code InputEvent.Key} ; les mappings lies a la touche sont neutralises ; Echap capture
  *     annule l'ouverture du menu pause ({@code ScreenEvent.Opening}, poste par {@code pauseGame} <b>avant</b>
- *     {@code InputEvent.Key}) ;</li>
+ *     {@code InputEvent.Key}) ; {@code pauseGame} met quand meme les sons en pause juste apres (solo) : ils sont
+ *     relances au debut de la frame ou du tick suivant si aucun ecran n'est ouvert ;</li>
  *     <li>molette : {@code MouseScrollingEvent} ; attaque / utilisation / pick maintenus :
  *     {@code InteractionKeyMappingTriggered} ;</li>
  *     <li>mouvements de souris (sans Mixin) : vanilla tourne le joueur, l'ecart est lu et reverse au debut de chaque
@@ -66,6 +67,8 @@ public final class HoloControlCapture
 {
     /** Duree de frame maximale transmise, en secondes (apres un gel). */
     private static final float MAX_FRAME_SECONDS = 0.25f;
+    /** Menu pause annule : sons a relancer ({@code pauseGame} les a mis en pause apres l'annulation). */
+    private static boolean resumeSounds;
 
     /** Captures explicites, de la plus ancienne a la plus recente. */
     private static final List<HoloCaptor> EXPLICIT = new ArrayList<>();
@@ -186,6 +189,7 @@ public final class HoloControlCapture
     public static void onRenderTick(TickEvent.RenderTickEvent event)
     {
         if (event.phase != TickEvent.Phase.START) return;
+        resumeSounds(Minecraft.getInstance());
         long now = System.nanoTime();
         frameSeconds = lastFrameNanos == 0L ? 0f : Math.min(MAX_FRAME_SECONDS, (now - lastFrameNanos) * 1e-9f);
         lastFrameNanos = now;
@@ -205,6 +209,7 @@ public final class HoloControlCapture
     {
         if (event.phase != TickEvent.Phase.START) return;
         Minecraft mc = Minecraft.getInstance();
+        resumeSounds(mc);
         if (!updateActivity(mc)) return;
         // Touches enfoncees avant la capture : neutralisees avant handleKeybinds et les entrees du joueur.
         refreshMappings(mc);
@@ -212,6 +217,17 @@ public final class HoloControlCapture
             KeyMapping mapping = entry.getKey();
             if (mapping.isDown() && captorFor(entry.getValue()) != null) neutralize(mapping);
         }
+    }
+
+    /**
+     * Relance les sons mis en pause par {@code pauseGame} apres un menu pause annule, s'il n'y a toujours pas d'ecran
+     * (sinon sa fermeture, {@code setScreen(null)}, les relance).
+     */
+    private static void resumeSounds(Minecraft mc)
+    {
+        if (!resumeSounds) return;
+        resumeSounds = false;
+        if (mc.screen == null) mc.getSoundManager().resume();
     }
 
     /**
@@ -313,7 +329,9 @@ public final class HoloControlCapture
         Minecraft mc = Minecraft.getInstance();
         if (!(event.getNewScreen() instanceof PauseScreen) || !active(mc)) return;
         if (!InputConstants.isKeyDown(mc.getWindow().getWindow(), GLFW.GLFW_KEY_ESCAPE)) return;
-        if (captorFor(HoloControl.ESCAPE) != null) event.setCanceled(true);
+        if (captorFor(HoloControl.ESCAPE) == null) return;
+        event.setCanceled(true);
+        resumeSounds = true;
     }
 
     @SubscribeEvent
