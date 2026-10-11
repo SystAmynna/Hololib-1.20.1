@@ -1,6 +1,7 @@
 package com.amynna.hololib.client.render.view;
 
 import com.amynna.hololib.HoloLib;
+import com.amynna.hololib.client.render.HoloBuffers;
 import com.amynna.hololib.client.render.StableProjection;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -45,7 +46,7 @@ public final class ViewRenderPass
         boolean prepared = false;
         float fogStart = 0f;
         float fogEnd = 0f;
-        MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
+        MultiBufferSource.BufferSource buffers = HoloBuffers.source();
         try
         {
             for (ViewRenderer renderer : renderers) {

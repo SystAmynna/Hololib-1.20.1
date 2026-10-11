@@ -9,14 +9,17 @@ import net.minecraft.world.phys.Vec3;
 import java.util.List;
 
 /**
- * Dessine des objets {@code T} ancres dans le monde, comme des entites : apres les entites ({@code AFTER_ENTITIES}),
- * avec le test de profondeur du monde, donc caches par les blocs opaques et les entites places devant ; l'eau et le
- * verre, dessines ensuite, passent correctement par-dessus. API calquee sur {@code EntityRenderer}.
+ * Dessine des objets {@code T} ancres dans le monde, apres toutes les entites et le terrain translucide
+ * ({@code AFTER_TRANSLUCENT_BLOCKS} ; avec un shaderpack, a {@code AFTER_LEVEL} par-dessus l'image composee), avec le
+ * test de profondeur du monde : caches par les blocs, les entites, l'eau et le verre places devant (en Fabulous,
+ * l'eau est composee devant ou derriere) ; une entite derriere un objet translucide est teintee par lui. API calquee
+ * sur {@code EntityRenderer}.
  * <p>
  * Pour chaque instance visible, {@link WorldRenderPass} place la pile a la position de l'objet (relative a la camera,
  * pour garder la precision des flottants loin de l'origine) puis appelle {@link #render}. Les vertices vont dans le
- * {@code BufferSource} du jeu, vide par vanilla avec les entites : utiliser des {@code RenderType} d'entite ou ceux de
- * {@code HoloRenderTypes}, sans vider les buffers soi-meme.
+ * {@code BufferSource} du mod (mode immediat : changer de {@code RenderType} envoie le lot precedent), vide a la fin
+ * de la passe : utiliser des {@code RenderType} de la cible principale ({@code HoloRenderTypes}, texte...), sans vider
+ * les buffers soi-meme. Avec un shaderpack, rien n'est eclaire ni embrume par le pack.
  * <p>
  * Pour un objet qui existe cote serveur, preferer une vraie {@code Entity} et son {@code EntityRenderer}.
  */

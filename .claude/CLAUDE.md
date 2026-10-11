@@ -86,6 +86,7 @@ com.amynna.hololib
         ├── package-info.java    doc detaillee : ordre de rendu, regles (source de verite)
         ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
         ├── HoloRenderers.java   registre des renderers (register/unregister, fil de rendu)
+        ├── HoloBuffers.java     BufferSource immediat du mod (toutes les passes) ; ShaderPacks : shaderpack Oculus actif
         ├── sky/                 SkyRenderer, SkyRenderContext, SkyRenderPass
         ├── world/               WorldRenderer<T>, WorldRenderable, WorldRenderContext, WorldRenderPass
         ├── view/                ViewRenderer, ViewRenderContext, ViewRenderPass
@@ -390,12 +391,17 @@ ou synthetises) : toute ressource ajoutee y est creditee.
 
 ### Les quatre familles de renderers
 
-| Famille | Stage Forge | Resultat | Gestion de la profondeur |
+| Famille | Stage Forge (sans shaderpack / avec) | Resultat | Gestion de la profondeur |
 |---|---|---|---|
-| `SkyRenderer` | `AFTER_SKY` (+ `ComputeFogColor` avant) | dans la skybox, derriere tout le monde ; peut fixer la couleur du brouillard (`fogColor` : fond de l'ecran, horizon, terrain lointain) | profondeur entre objets du ciel, **videe apres** la passe ; projection du monde sans la translation du bobbing (comme le soleil) |
-| `WorldRenderer<T>` | `AFTER_ENTITIES` | ancre dans le monde, cache par blocs et entites | profondeur du monde ; buffers **vides par vanilla** avec les entites |
+| `SkyRenderer` | `AFTER_SKY` (+ `ComputeFogColor` avant) / `AFTER_LEVEL`, cible hors ecran composee sur les pixels de profondeur 1 | dans la skybox, derriere tout le monde ; peut fixer la couleur du brouillard (`fogColor` : fond de l'ecran, horizon, terrain lointain) | profondeur entre objets du ciel, **videe apres** la passe ; projection du monde sans la translation du bobbing (comme le soleil) |
+| `WorldRenderer<T>` | `AFTER_TRANSLUCENT_BLOCKS` (cible principale, meme en Fabulous) / `AFTER_LEVEL` apres le ciel | ancre dans le monde, cache par blocs, entites, eau ; teinte ce qui est derriere | profondeur du monde (de la scene composee avec shaderpack) |
 | `ViewRenderer` | `AFTER_LEVEL` | dans la vue, au-dessus du monde, sous main et GUI | profondeur **videe avant** ; projection `STABLE` (sans bobbing, FOV des options) ou `WORLD` |
 | `HudRenderer` | overlay GUI sous tous les autres | a l'ecran, orthographique, sous le HUD vanilla | profondeur **videe apres** la passe |
+
+Toutes les passes dessinent dans `HoloBuffers` (mode immediat : ordre d'emission = ordre de dessin), jamais dans
+`RenderBuffers.bufferSource()`. Shaderpack detecte par `ShaderPacks` (reflexion sur `IrisApi`, fige par frame a
+`AFTER_SKY`) ; avec un pack, Sky et World ne sont ni eclaires ni embrumes par lui, et les `ViewRenderer` passent sur la
+main (dessinee par Oculus avant `AFTER_LEVEL`).
 
 Chaque famille suit le meme schema dans son sous-package : `XxxRenderer` (API publique), `XxxRenderContext` (donnees
 de la frame, objet reutilise, setters package-private) et `XxxRenderPass` (interne, appelee par `RenderDispatcher`).
@@ -412,6 +418,15 @@ Un objet qui existe cote serveur doit plutot etre une vraie `Entity` + `EntityRe
 - `ITEM_ENTITY_TARGET` est deja compose a `AFTER_LEVEL` : les `ViewRenderer` doivent utiliser la cible principale.
 - Les `RenderType` imposent leur test de profondeur : pour passer devant/derriere, vider la profondeur
   (`RenderSystem.clear(GL_DEPTH_BUFFER_BIT, ...)`) plutot que `disableDepthTest()`.
+- Oculus, meme sans shaderpack : pendant `LevelRenderer.renderLevel`, `RenderBuffers.bufferSource()` est un
+  `FullyBufferedMultiBufferSource` qui ignore `endBatch(RenderType)`, ne dessine entites et block entities qu'au
+  profiler `"translucent"` (apres `AFTER_ENTITIES` / `AFTER_BLOCK_ENTITIES`) et reordonne les `RenderType`.
+- Oculus avec shaderpack : un shader vanilla non remplace par le pack (`position_color_lightmap` notamment) est
+  applique avec couleur et profondeur masquees (`DepthColorStorage`) jusqu'a la fin du niveau ; le pack recalcule le
+  ciel sur les pixels de profondeur 1 ; composite et final sont faits avant `AFTER_LEVEL` (profondeur principale =
+  scene, main comprise) ; bobbing, secousse et nausee passent de la projection au model-view.
+- `AFTER_TRANSLUCENT_BLOCKS` (et chaque stage de terrain) est emis entre `setupRenderState` et `clearRenderState` du
+  type : en Fabulous la cible translucide est liee.
 - Plan lointain = `GameRenderer.getDepthFar()` (128 au minimum) : objets du ciel a ~100 blocs (`SkyRenderContext.SKY_RADIUS`).
 
 ## Conventions
