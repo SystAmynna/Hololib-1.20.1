@@ -14,6 +14,10 @@ JAVA_HOME=~/.jdks/temurin-17.0.17 ./gradlew compileJava   # compilation
 JAVA_HOME=~/.jdks/temurin-17.0.17 ./gradlew runClient     # lancer le jeu
 ```
 
+Mods de test : deposer les jars (1.20.1 Forge, dependances comprises) dans `dev-mods/` (ignore par git) ; remappes
+par `fg.deobf`, charges par tous les runs (un mod purement client fait planter `runServer`), jamais compiles ni
+publies.
+
 Le Java systeme est en version 26, que Gradle 8.8 / ForgeGradle 6 refusent ("Unsupported class file major version 70").
 
 Pour verifier le comportement de Minecraft/Forge, lire les sources mappees plutot que deviner :

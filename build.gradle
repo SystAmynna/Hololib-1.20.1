@@ -74,6 +74,10 @@ minecraft {
             // Please read: https://stackoverflow.com/questions/2031163/when-to-use-the-different-log-levels
             property 'forge.logging.console.level', 'debug'
 
+            // Refmaps des mods de test a mixins (dev-mods/) remappees SRG -> official
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+
             mods {
                 "${mod_id}" {
                     source sourceSets.main
@@ -133,6 +137,11 @@ repositories {
     // flatDir {
     //     dir 'libs'
     // }
+
+    // Mods de test deposes dans dev-mods/ (voir dependencies)
+    flatDir {
+        dir 'dev-mods'
+    }
 }
 
 dependencies {
@@ -142,6 +151,12 @@ dependencies {
     // If the group id is "net.minecraft" and the artifact id is one of ["client", "server", "joined"],
     // then special handling is done to allow a setup of a vanilla dependency without the use of an external repository.
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // Mods de test (dossier dev-mods/, ignore par git) : remappes SRG -> official, charges par les runs,
+    // jamais compiles ni publies
+    fileTree('dev-mods').matching { include '*.jar' }.each { f ->
+        runtimeOnly fg.deobf("dev_mods:${f.name - '.jar'}:0")
+    }
 
     // Example mod dependency with JEI - using fg.deobf() ensures the dependency is remapped to your development mappings
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
