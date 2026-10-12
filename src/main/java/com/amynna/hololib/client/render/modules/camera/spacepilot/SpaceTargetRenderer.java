@@ -104,9 +104,10 @@ public final class SpaceTargetRenderer implements ViewRenderer
     private static final float[] RING_COS = new float[RING_SEGMENTS + 1];
     private static final float[] RING_SIN = new float[RING_SEGMENTS + 1];
     private static final int LIGHT = LightTexture.FULL_BRIGHT;
-    private static final float RED = SpaceOverlay.red(SpaceOverlay.TARGET_COLOR);
-    private static final float GREEN = SpaceOverlay.green(SpaceOverlay.TARGET_COLOR);
-    private static final float BLUE = SpaceOverlay.blue(SpaceOverlay.TARGET_COLOR);
+    /** Couleur de la cible ({@link SpaceOverlay#TARGET_COLOR}) dans le theme de la frame (fil de rendu). */
+    private static float red;
+    private static float green;
+    private static float blue;
 
     static
     {
@@ -175,6 +176,10 @@ public final class SpaceTargetRenderer implements ViewRenderer
     @Override
     public void render(PoseStack stack, MultiBufferSource buffers, ViewRenderContext ctx)
     {
+        int targetColor = SpaceOverlay.rgb(SpaceOverlay.TARGET_COLOR);
+        red = SpaceOverlay.red(targetColor);
+        green = SpaceOverlay.green(targetColor);
+        blue = SpaceOverlay.blue(targetColor);
         SpaceEnvironmentModule env = environment;
         environment = null;
         if (env == null) return;
@@ -334,6 +339,6 @@ public final class SpaceTargetRenderer implements ViewRenderer
     private void vertex(VertexConsumer vc, Matrix4f m, float x, float y, float z, float a)
     {
         m.transformPosition(x, y, z, transformed);
-        vc.vertex(transformed.x, transformed.y, transformed.z).color(RED, GREEN, BLUE, a).uv2(LIGHT).endVertex();
+        vc.vertex(transformed.x, transformed.y, transformed.z).color(red, green, blue, a).uv2(LIGHT).endVertex();
     }
 }

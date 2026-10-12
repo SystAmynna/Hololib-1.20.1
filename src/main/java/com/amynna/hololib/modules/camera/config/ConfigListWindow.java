@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.config;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloTransform;
 import com.amynna.hololib.holo.widget.control.HoloWidgetButton;
@@ -24,8 +25,9 @@ public final class ConfigListWindow extends ConfigWindow
     private static final int CONTENT_HEIGHT = 104;
     private static final int MARGIN = 5;
     private static final float ROW_HEIGHT = 16f;
-    private static final int ROW = 0x6020A0FF;
-    private static final int ROW_OPEN = 0xA040C0FF;
+    private static final HoloColor ROW = HoloColor.secondary(0x60);
+    private static final HoloColor ROW_OPEN = HoloColor.primary(0xA0);
+    private static final HoloColor TEXT = HoloColor.special(0xFF);
 
     private final HoloWidgetList list;
     private final List<Configurable> entries = new ArrayList<>();
@@ -62,7 +64,7 @@ public final class ConfigListWindow extends ConfigWindow
         for (int i = 0; i < windows.size(); i++) {
             ConfigWindow window = windows.get(i);
             window.setPinned(config.pinned(ids.get(i)));
-            rows.get(i).setColors(window.isOpen() ? ROW_OPEN : ROW, ACCENT, 0xFFFFFFFF);
+            rows.get(i).setColors(window.isOpen() ? ROW_OPEN : ROW, ACCENT, TEXT);
         }
         setPinned(config.pinned(config.listId()));
     }

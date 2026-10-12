@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.attackguard;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.object.HoloTransform;
 import com.amynna.hololib.holo.widget.HoloLabel;
 import com.amynna.hololib.modules.camera.config.ConfigWindow;
@@ -29,7 +30,7 @@ final class AttackGuardConfigWindow extends ConfigWindow
         this.module = module;
         float width = WIDTH - 2 * MARGIN;
         content().add(new HoloLabel(MARGIN, GAP, width, LABEL_HEIGHT, Component.literal("Cles protegees :"))
-                .setColor(0xFFC0D0E0));
+                .setColor(HoloColor.special(0xFF).darker(0.18f)));
         editor = content().add(new KeyListEditor(MARGIN, GAP + LABEL_HEIGHT + GAP, width, EDITOR_HEIGHT,
                 module::requestAdd, module::requestRemove));
     }

@@ -1,5 +1,7 @@
 package com.amynna.hololib.modules.monde.spaceconfigurator;
 
+import com.amynna.hololib.holo.theme.HoloThemed;
+import com.amynna.hololib.holo.theme.HoloThemeSource;
 import com.amynna.hololib.holo.edit.HoloEditRotation;
 import com.amynna.hololib.holo.edit.HoloEditScale;
 import com.amynna.hololib.holo.object.HoloAnchor;
@@ -27,7 +29,7 @@ import com.amynna.hololib.modules.dimension.space.model.SpaceLimits;
  * dernieres qu'il a ecrites et en deduit la nouvelle orbite ({@code updateBody}). {@code scaleY} n'a pas de sens : il
  * est reecrit a {@code scaleX}.
  */
-public final class SpaceOrbitHandle extends HoloObject implements HoloEditRotation, HoloEditScale
+public final class SpaceOrbitHandle extends HoloObject implements HoloEditRotation, HoloEditScale, HoloThemed
 {
     /** Cle de l'objet dans le module. */
     public static final String KEY = "orbit";
@@ -69,4 +71,11 @@ public final class SpaceOrbitHandle extends HoloObject implements HoloEditRotati
     /** Dessinee seulement chez un operateur (backend client du module). */
     @Override
     public boolean shown() { return SpaceConfiguratorModule.localOp(); }
+
+    /** Theme du serveur (objet partage), jeu staff (reserve aux ops). */
+    @Override
+    public HoloThemeSource themeSource() { return HoloThemeSource.SERVER; }
+
+    @Override
+    public boolean staffTheme() { return true; }
 }

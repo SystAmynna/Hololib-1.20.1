@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget.control;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloWidget;
 import net.minecraft.network.chat.Component;
@@ -18,6 +19,15 @@ import java.util.function.Consumer;
  */
 public class HoloWidgetKeyBox extends HoloWidget implements HoloDirectionalInput, HoloHoverable
 {
+    private static final HoloColor BACKGROUND = HoloColor.selection(0x40).darker(0.71f);
+    private static final HoloColor BACKGROUND_HOVER = HoloColor.selection(0x50).darker(0.67f);
+    private static final HoloColor BACKGROUND_ACTIVE = HoloColor.selection(0x60).darker(0.37f);
+    private static final HoloColor BORDER = HoloColor.selection(0xFF).darker(0.35f);
+    private static final HoloColor BORDER_ACTIVE = HoloColor.selection(0xFF).lighter(0.2f);
+    private static final HoloColor TEXT = HoloColor.selection(0xFF).lighter(0.6f);
+    private static final HoloColor POINT = HoloColor.selection(0xFF).lighter(0.39f);
+    private static final HoloColor POINT_ACTIVE = HoloColor.special(0xFF);
+
     protected static final float DOT = 6f;
 
     private final HoloDirections directions = new HoloDirections();
@@ -100,17 +110,19 @@ public class HoloWidgetKeyBox extends HoloWidget implements HoloDirectionalInput
     protected void draw(HoloCanvas canvas)
     {
         boolean controlling = controlling();
-        canvas.fill(0, 0, width(), height(), controlling ? 0x6020A040 : hovered ? 0x50205020 : 0x40204020);
-        canvas.outline(0, 0, width(), height(), 1f, controlling ? 0xFF80FF80 : 0xFF40A040);
+        canvas.fill(0, 0, width(), height(), canvas.color(controlling ? BACKGROUND_ACTIVE : hovered ? BACKGROUND_HOVER
+                : BACKGROUND));
+        canvas.outline(0, 0, width(), height(), 1f, canvas.color(controlling ? BORDER_ACTIVE : BORDER));
         Component text = controlling ? controlText : idleText;
-        canvas.text(text, (width() - canvas.textWidth(text)) / 2f, height() - 12f, 0xFFC0FFC0);
+        canvas.text(text, (width() - canvas.textWidth(text)) / 2f, height() - 12f, canvas.color(TEXT));
         drawContent(canvas, canvas.partialTick(), controlling);
     }
 
     /** Contenu de la boite : par defaut, le point. */
     protected void drawContent(HoloCanvas canvas, float partialTick, boolean controlling)
     {
-        drawDot(canvas, interpolatedX(partialTick), interpolatedY(partialTick), controlling ? 0xFFFFFFFF : 0xFFA0C0A0,
+        drawDot(canvas, interpolatedX(partialTick), interpolatedY(partialTick),
+                canvas.color(controlling ? POINT_ACTIVE : POINT),
                 false);
     }
 
@@ -119,10 +131,12 @@ public class HoloWidgetKeyBox extends HoloWidget implements HoloDirectionalInput
 
     protected float interpolatedY(float partialTick) { return previousY + (pointY - previousY) * partialTick; }
 
-    /** Point centre en {@code (x, y)}, entoure de blanc si {@code highlighted}. */
+    /** Point centre en {@code (x, y)}, entoure de la couleur speciale si {@code highlighted}. */
     protected static void drawDot(HoloCanvas canvas, float x, float y, int color, boolean highlighted)
     {
-        if (highlighted) canvas.fill(x - DOT / 2f - 1f, y - DOT / 2f - 1f, DOT + 2f, DOT + 2f, 0xFFFFFFFF);
+        if (highlighted) {
+            canvas.fill(x - DOT / 2f - 1f, y - DOT / 2f - 1f, DOT + 2f, DOT + 2f, canvas.color(POINT_ACTIVE));
+        }
         canvas.fill(x - DOT / 2f, y - DOT / 2f, DOT, DOT, color);
     }
 }

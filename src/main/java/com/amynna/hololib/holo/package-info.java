@@ -13,6 +13,8 @@
  *     <li>{@code edit} : interfaces d'edition en jeu des objets, affichage ({@code HoloDisplay}), regles.</li>
  *     <li>{@code mode} : modes d'un joueur (focus, edition) portes par des modules de sa memoire.</li>
  *     <li>{@code render} : annulation d'elements du rendu vanilla par un module (RenderCanceler).</li>
+ *     <li>{@code theme} : themes (motif de fond, six couleurs), bibliotheque du serveur, resolution par objet
+ *     ({@code HoloThemed}, {@code HoloColor}).</li>
  * </ul>
  *
  * <h2>Replication</h2>

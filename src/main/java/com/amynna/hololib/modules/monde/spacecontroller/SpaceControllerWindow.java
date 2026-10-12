@@ -1,5 +1,7 @@
 package com.amynna.hololib.modules.monde.spacecontroller;
 
+import com.amynna.hololib.holo.theme.HoloThemeSource;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.edit.HoloEditRotation;
 import com.amynna.hololib.holo.edit.HoloEditScale;
@@ -47,13 +49,13 @@ public final class SpaceControllerWindow extends HoloWindow implements HoloEditT
     /** Hauteur du centre de la fenetre au-dessus du marker, en blocs. */
     public static final float HEIGHT_ABOVE = 1.6f;
 
-    private static final int TEXT = 0xFFE0F0FF;
-    private static final int FREE = 0xFF80FF80;
-    private static final int BUSY = 0xFFFFC040;
-    private static final int MISSING = 0xFFFF8060;
+    private static final HoloColor TEXT = HoloColor.primary(0xFF).lighter(0.84f);
+    private static final HoloColor FREE = HoloColor.selection(0xFF).lighter(0.2f);
+    private static final HoloColor BUSY = HoloColor.action(0xFF);
+    private static final HoloColor MISSING = HoloColor.critical(0xFF).lighter(0.18f);
     /** Etat du saut : charge (couleur de selection des modules Space), voyage (blanc bleute). */
-    private static final int JUMP_CHARGE = 0xFFFFE040;
-    private static final int JUMP_TRAVEL = 0xFFE0F8FF;
+    private static final HoloColor JUMP_CHARGE = HoloColor.action(0xFF).lighter(0.03f);
+    private static final HoloColor JUMP_TRAVEL = HoloColor.special(0xFF).darker(0.05f);
     private static final Component ACCESS_ALL = Component.literal("Pilotage : tous");
     private static final Component ACCESS_OPS = Component.literal("Pilotage : ops");
 
@@ -65,10 +67,10 @@ public final class SpaceControllerWindow extends HoloWindow implements HoloEditT
     private final SpacePilotPad pad;
     /** Etat normal de la ligne d'etat (dernier {@link #showState}), remis a la fin d'un saut. */
     private Component stateText = Component.empty();
-    private int stateColor = TEXT;
+    private HoloColor stateColor = TEXT;
     /** Texte du saut en cours qui remplace l'etat normal, ou {@code null}. */
     private Component jumpText;
-    private int jumpColor;
+    private HoloColor jumpColor = JUMP_CHARGE;
 
     /**
      * @param link             envois du pilotage (module)
@@ -79,9 +81,10 @@ public final class SpaceControllerWindow extends HoloWindow implements HoloEditT
         super(key, new HoloAnchor.World(), HoloTransform.translation(0f, HEIGHT_ABOVE, 0f), WIDTH, HEIGHT,
                 PIXEL_SCALE);
         setVisibility(HoloVisibility.PUBLIC);
+        setThemeSource(HoloThemeSource.SERVER);
         setAccess(HoloAccess.EVERYONE);
         setInterceptedInputs(HoloControl.LEFT_CLICK, HoloControl.RIGHT_CLICK);
-        root().setBackground(ConfigWindow.BACKGROUND).setBorder(ConfigWindow.ACCENT, 1f);
+        root().setPattern(ConfigWindow.BACKGROUND_ALPHA).setBorder(ConfigWindow.ACCENT, 1f);
         root().add(new HoloLabel(4, 3, WIDTH - 8, 11, Component.literal("Space Controller"))
                 .setAlign(HoloLabel.Align.CENTER).setColor(ConfigWindow.ACCENT));
         state = root().add(new HoloLabel(6, 16, WIDTH - 12, 10, Component.empty()));
@@ -91,7 +94,7 @@ public final class SpaceControllerWindow extends HoloWindow implements HoloEditT
         Objects.requireNonNull(opsOnlyRequested);
         accessSwitch = root().add(new HoloWidgetSwitch(6, 62, WIDTH - 12, 12, ACCESS_ALL,
                 (widget, requested) -> opsOnlyRequested.accept(requested)));
-        accessSwitch.setPredictive(false).setColors(BUSY, 0xFF40A060, TEXT);
+        accessSwitch.setPredictive(false).setColors(BUSY, HoloColor.selection(0xFF).darker(0.28f), TEXT);
         pad = root().add(new SpacePilotPad(6, 76, WIDTH - 12, 26, link));
     }
 
@@ -173,7 +176,7 @@ public final class SpaceControllerWindow extends HoloWindow implements HoloEditT
     }
 
     /** Etat normal (synchronise), affiche sauf pendant un saut. */
-    private void setState(Component text, int color)
+    private void setState(Component text, HoloColor color)
     {
         stateText = text;
         stateColor = color;

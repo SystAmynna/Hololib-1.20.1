@@ -1,5 +1,7 @@
 package com.amynna.hololib.modules.monde.spacemap;
 
+import com.amynna.hololib.holo.theme.HoloThemeSource;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.edit.HoloEditRotation;
 import com.amynna.hololib.holo.edit.HoloEditTranslation;
@@ -72,20 +74,20 @@ public final class SpaceMapWindow extends HoloWindow implements HoloEditTranslat
     /** Rafraichissement des coordonnees d'un corps (temps vivant), en ticks. */
     public static final int INFO_TICKS = 10;
 
-    private static final int TEXT = 0xFFE0F0FF;
-    private static final int MISSING = 0xFFFF8060;
-    private static final int MUTED = 0xFF90A0B0;
-    private static final int BUTTON_BACKGROUND = 0x6020A0FF;
-    private static final int BUTTON_TEXT = 0xFFFFFFFF;
-    private static final int DISABLED_BACKGROUND = 0x40404850;
-    private static final int DISABLED_BORDER = 0xFF586070;
-    private static final int DISABLED_TEXT = 0xFF808890;
-    private static final int ROW = 0x4020A0FF;
-    private static final int ROW_SELECTED = 0xA040C0FF;
+    private static final HoloColor TEXT = HoloColor.primary(0xFF).lighter(0.84f);
+    private static final HoloColor MISSING = HoloColor.critical(0xFF).lighter(0.18f);
+    private static final HoloColor MUTED = HoloColor.special(0xFF).darker(0.37f);
+    private static final HoloColor BUTTON_BACKGROUND = HoloColor.secondary(0x60);
+    private static final HoloColor BUTTON_TEXT = HoloColor.special(0xFF);
+    private static final HoloColor DISABLED_BACKGROUND = HoloColor.special(0x40).darker(0.7f);
+    private static final HoloColor DISABLED_BORDER = HoloColor.special(0xFF).darker(0.6f);
+    private static final HoloColor DISABLED_TEXT = HoloColor.special(0xFF).darker(0.47f);
+    private static final HoloColor ROW = HoloColor.secondary(0x40);
+    private static final HoloColor ROW_SELECTED = HoloColor.primary(0xA0);
     /** Systeme montre par la vue systeme, dans la liste. */
-    private static final int ROW_ACTIVE = 0x7030B0FF;
-    private static final int SELECTED_TEXT = 0xFFFFE040;
-    private static final int CURRENT_TEXT = SpaceMapCube.WORLD_COLOR;
+    private static final HoloColor ROW_ACTIVE = HoloColor.secondary(0x70).lighter(0.07f);
+    private static final HoloColor SELECTED_TEXT = HoloColor.action(0xFF).lighter(0.03f);
+    private static final HoloColor CURRENT_TEXT = SpaceMapCube.WORLD_COLOR;
     private static final int MARGIN = 6;
     private static final int GAP = 4;
     private static final int BUTTON_HEIGHT = 14;
@@ -97,10 +99,10 @@ public final class SpaceMapWindow extends HoloWindow implements HoloEditTranslat
     private static final int ZOOM_BUTTON_WIDTH = 40;
     private static final int MODE_WIDTH = 48;
     private static final int OVERVIEW_WIDTH = 84;
-    /** Vert de la cible du vaisseau (T43, C125 : meme valeur que {@code SpaceOverlay.TARGET_COLOR} des renderers). */
-    public static final int TARGET_COLOR = 0xFF40FF40;
+    /** Cible du vaisseau (T43, C125 : meme role que {@code SpaceOverlay.TARGET} des renderers). */
+    public static final HoloColor TARGET_COLOR = HoloColor.selection(0xFF);
     /** Fond du bouton de cible d'une ligne. */
-    private static final int TARGET_BACKGROUND = 0x90183048;
+    private static final HoloColor TARGET_BACKGROUND = HoloColor.secondary(0x90).darker(0.72f);
     private static final Component TARGET = Component.literal("CIBLER");
     private static final Component UNTARGET = Component.literal("DECIBLER");
     private static final String ORIGIN_PREFIX = "@ ";
@@ -148,9 +150,10 @@ public final class SpaceMapWindow extends HoloWindow implements HoloEditTranslat
         super(key, new HoloAnchor.World(), transform, WIDTH, HEIGHT, PIXEL_SCALE);
         this.module = Objects.requireNonNull(module);
         setVisibility(HoloVisibility.PUBLIC);
+        setThemeSource(HoloThemeSource.SERVER);
         setAccess(HoloAccess.EVERYONE);
         setInterceptedInputs(HoloControl.LEFT_CLICK, HoloControl.RIGHT_CLICK, HoloControl.SCROLL);
-        root().setBackground(ConfigWindow.BACKGROUND).setBorder(ConfigWindow.ACCENT, 1f);
+        root().setPattern(ConfigWindow.BACKGROUND_ALPHA).setBorder(ConfigWindow.ACCENT, 1f);
         root().add(new HoloLabel(4, 3, WIDTH - 8, 11, Component.literal("Space Map"))
                 .setAlign(HoloLabel.Align.CENTER).setColor(ConfigWindow.ACCENT));
         infoLine = root().add(new HoloLabel(MARGIN, 14, WIDTH - 2 * MARGIN, 10, Component.empty()).setColor(MUTED));
@@ -162,7 +165,7 @@ public final class SpaceMapWindow extends HoloWindow implements HoloEditTranslat
         zoomZone = root().add(new HoloWidgetScrollZone(MARGIN + ZOOM_BUTTON_WIDTH + GAP, row1,
                 inner - 2 * (ZOOM_BUTTON_WIDTH + GAP), BUTTON_HEIGHT, Component.empty(), ZOOM_HOVER,
                 (zone, steps) -> module.requestZoom(steps)));
-        zoomZone.setColors(0x2080C0, ConfigWindow.ACCENT, TEXT);
+        zoomZone.setColors(HoloColor.secondary(0xFF).darker(0.25f), ConfigWindow.ACCENT, TEXT);
         zoomInButton = root().add(button(WIDTH - MARGIN - ZOOM_BUTTON_WIDTH, row1, ZOOM_BUTTON_WIDTH, "Zoom +",
                 b -> module.requestZoom(1)));
         float row2 = row1 + BUTTON_HEIGHT + GAP;
@@ -408,7 +411,7 @@ public final class SpaceMapWindow extends HoloWindow implements HoloEditTranslat
                 boolean open = displayed != null && id == treeSystem && !systemCollapsed;
                 boolean selected = !systemView && module.selectedSystem() == id;
                 boolean active = systemView && displayed != null && displayed.id() == id;
-                int text = selected ? SELECTED_TEXT : id == current ? CURRENT_TEXT : BUTTON_TEXT;
+                HoloColor text = selected ? SELECTED_TEXT : id == current ? CURRENT_TEXT : BUTTON_TEXT;
                 addRow((id == originId ? ORIGIN_PREFIX : "") + header.name(), 1, true, open,
                         selected ? ROW_SELECTED : active ? ROW_ACTIVE : ROW, text,
                         () -> module.requestSelectSystem(id), () -> toggleSystem(id), selected, selected,
@@ -456,7 +459,8 @@ public final class SpaceMapWindow extends HoloWindow implements HoloEditTranslat
      * @param targetButton vrai pour la ligne selectionnee (bouton de cible au bout, T43)
      * @param targeted     sa selection est la cible du vaisseau : « DECIBLER » (sinon « CIBLER »)
      */
-    private void addRow(String text, int depth, boolean expandable, boolean expanded, int background, int textColor,
+    private void addRow(String text, int depth, boolean expandable, boolean expanded, HoloColor background,
+                        HoloColor textColor,
                         Runnable onSelect, Runnable onToggle, boolean selected, boolean targetButton,
                         boolean targeted)
     {

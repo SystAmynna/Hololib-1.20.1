@@ -1,5 +1,6 @@
 package com.amynna.hololib.demo;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.edit.HoloDisplay;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAnchor;
@@ -39,25 +40,25 @@ public final class DemoPlayerModule extends HoloModule
     {
         addObject(DemoWindows.labeled("hud", new HoloAnchor.Hud(1f, 0f),
                 HoloTransform.translation(-88f, 32f, 0f).setScale(160f), 1f / 160f,
-                "HUD", "Ecran, sous le HUD du jeu", 0xFF40C0FF));
+                "HUD", "Ecran, sous le HUD du jeu", HoloColor.primary(0xFF)));
 
         local = addObject(DemoWindows.labeled("local", new HoloAnchor.Local(false),
                 HoloTransform.translation(0f, 0f, LOCAL_DISTANCE), 1f / 160f, "Camera", "Reste en place",
-                0xFF80FF80));
+                HoloColor.selection(0xFF).lighter(0.2f)));
         local.setVisibility(HoloVisibility.PUBLIC);
 
         HoloWindow follow = addObject(DemoWindows.labeled("follow", new HoloAnchor.Local(true),
                 HoloTransform.translation(32f, 16f, 0.8f), 1f / 200f, "Camera follow", "Suit le regard",
-                0xFFFF80C0));
+                HoloColor.critical(0xFF).lighter(0.4f)));
         follow.setVisibility(HoloVisibility.PUBLIC);
 
         DemoCube cube = addObject(new DemoCube("cube", new HoloAnchor.World(), HoloTransform.translation(0f, 2.4f, 0f),
-                0.3f, 0xA0FF80C0));
+                0.3f, HoloColor.critical(0xA0).lighter(0.4f)));
         cube.setVisibility(HoloVisibility.PUBLIC);
 
         // Position relative au regard a l'ouverture du focus : 40 degres a gauche, un peu en haut.
         DemoRelativeWindow focus = addObject(DemoWindows.relative("focus", HoloTransform.translation(-40f, -8f, 0.8f),
-                1f / 160f, "Focus", "Placee a l'ouverture", 0xFFFFC040));
+                1f / 160f, "Focus", "Placee a l'ouverture", HoloColor.action(0xFF)));
         focus.setDisplay(HoloDisplay.FOCUS);
         focus.setVisibility(HoloVisibility.PUBLIC);
     }

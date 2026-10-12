@@ -3,6 +3,8 @@ package com.amynna.hololib;
 import com.amynna.hololib.demo.DemoModules;
 import com.amynna.hololib.holo.memory.HoloContainers;
 import com.amynna.hololib.holo.module.HoloModuleTypes;
+import com.amynna.hololib.holo.theme.HoloThemePatterns;
+import com.amynna.hololib.holo.theme.pattern.HoloLibThemePatterns;
 import com.amynna.hololib.modules.HoloLibModules;
 import com.amynna.hololib.network.HoloNetwork;
 import com.mojang.logging.LogUtils;
@@ -22,6 +24,8 @@ public class HoloLib
     {
         IEventBus modBus = context.getModEventBus();
         HoloModuleTypes.REGISTER.register(modBus);
+        HoloThemePatterns.REGISTER.register(modBus);
+        HoloLibThemePatterns.REGISTER.register(modBus);
         DemoModules.REGISTER.register(modBus);
         HoloLibModules.REGISTER.register(modBus);
         modBus.addListener(HoloContainers::registerCapabilities);

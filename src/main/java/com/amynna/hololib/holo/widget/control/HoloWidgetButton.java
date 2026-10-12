@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget.control;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import net.minecraft.network.chat.Component;
 
@@ -50,6 +51,13 @@ public class HoloWidgetButton extends HoloWidgetMultiButton
 
     @Override
     public HoloWidgetButton setColors(int background, int border, int textColor)
+    {
+        super.setColors(background, border, textColor);
+        return this;
+    }
+
+    @Override
+    public HoloWidgetButton setColors(HoloColor background, HoloColor border, HoloColor textColor)
     {
         super.setColors(background, border, textColor);
         return this;

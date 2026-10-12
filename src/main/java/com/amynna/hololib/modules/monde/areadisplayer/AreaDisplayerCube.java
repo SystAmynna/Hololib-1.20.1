@@ -1,5 +1,7 @@
 package com.amynna.hololib.modules.monde.areadisplayer;
 
+import com.amynna.hololib.holo.theme.HoloThemed;
+import com.amynna.hololib.holo.theme.HoloThemeSource;
 import com.amynna.hololib.holo.edit.HoloEditRotation;
 import com.amynna.hololib.holo.edit.HoloEditScale;
 import com.amynna.hololib.holo.edit.HoloEditTranslation;
@@ -20,7 +22,8 @@ import com.amynna.hololib.holo.object.HoloVisibility;
  * <p>
  * Aucune interaction : le regard le traverse (le nom d'un point regarde est un affichage du renderer).
  */
-public final class AreaDisplayerCube extends HoloObject implements HoloEditTranslation, HoloEditRotation, HoloEditScale
+public final class AreaDisplayerCube extends HoloObject implements HoloEditTranslation, HoloEditRotation, HoloEditScale,
+        HoloThemed
 {
     /** Hauteur par defaut du centre du pave au-dessus du marker, en blocs. */
     public static final float DEFAULT_HEIGHT = 2f;
@@ -72,4 +75,8 @@ public final class AreaDisplayerCube extends HoloObject implements HoloEditTrans
         float z = halfZ();
         return (float) Math.sqrt(x * x + y * y + z * z);
     }
+
+    /** Theme du serveur (objet partage). */
+    @Override
+    public HoloThemeSource themeSource() { return HoloThemeSource.SERVER; }
 }

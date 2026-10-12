@@ -1,5 +1,8 @@
 package com.amynna.hololib.client.render.modules.monde.spaceconfigurator;
 
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloTheme;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.client.render.holo.HoloDrawContext;
 import com.amynna.hololib.client.render.holo.HoloObjectRenderer;
 import com.amynna.hololib.client.render.type.HoloRenderTypes;
@@ -46,11 +49,24 @@ public final class SpaceOrbitHandleRenderer implements HoloObjectRenderer<SpaceO
     private static final float AXIS_THICKNESS = 0.003f;
     /** Rayon de l'octaedre du foyer, en blocs. */
     private static final float CORE = 0.015f;
-    private static final int COLOR = 0xE0FFE040;
-    private static final int AXIS_COLOR = 0xA0FFE040;
-    private static final int CORE_COLOR = 0xFFFFF0A0;
+    private static final HoloColor COLOR = HoloColor.action(0xE0).lighter(0.03f);
+    private static final HoloColor AXIS_COLOR = HoloColor.action(0xA0).lighter(0.03f);
+    private static final HoloColor CORE_COLOR = HoloColor.action(0xFF).lighter(0.55f);
     private static final float[] COS = new float[SEGMENTS + 1];
     private static final float[] SIN = new float[SEGMENTS + 1];
+
+    // Couleurs du theme de la frame en cours (fil de rendu), posees par {@link #applyTheme}.
+    private static int color;
+    private static int axisColor;
+    private static int coreColor;
+
+    /** Resout les couleurs dans le theme de l'objet (debut de frame). */
+    private static void applyTheme(HoloTheme theme)
+    {
+        color = COLOR.resolve(theme);
+        axisColor = AXIS_COLOR.resolve(theme);
+        coreColor = CORE_COLOR.resolve(theme);
+    }
 
     static
     {
@@ -73,6 +89,7 @@ public final class SpaceOrbitHandleRenderer implements HoloObjectRenderer<SpaceO
     public void render(SpaceOrbitHandle handle, PoseStack pose, MultiBufferSource buffers, int packedLight,
                        HoloDrawContext ctx)
     {
+        applyTheme(HoloThemes.resolve(handle));
         HoloTransform t = handle.transform();
         float sx = Math.max(1e-6f, t.scaleX());
         float sy = Math.max(1e-6f, t.scaleY());
@@ -100,25 +117,25 @@ public final class SpaceOrbitHandleRenderer implements HoloObjectRenderer<SpaceO
             float nbx = b * COS[i + 1];
             float nbz = a * SIN[i + 1];
             float lb = THICKNESS / Math.max(1e-9f, Mth.sqrt(nbx * nbx + nbz * nbz));
-            vertex(consumer, ax - nax * la, oy, az - naz * la, COLOR, packedLight);
-            vertex(consumer, bx - nbx * lb, oy, bz - nbz * lb, COLOR, packedLight);
-            vertex(consumer, bx + nbx * lb, oy, bz + nbz * lb, COLOR, packedLight);
-            vertex(consumer, ax + nax * la, oy, az + naz * la, COLOR, packedLight);
-            vertex(consumer, ax, oy - THICKNESS, az, COLOR, packedLight);
-            vertex(consumer, bx, oy - THICKNESS, bz, COLOR, packedLight);
-            vertex(consumer, bx, oy + THICKNESS, bz, COLOR, packedLight);
-            vertex(consumer, ax, oy + THICKNESS, az, COLOR, packedLight);
+            vertex(consumer, ax - nax * la, oy, az - naz * la, color, packedLight);
+            vertex(consumer, bx - nbx * lb, oy, bz - nbz * lb, color, packedLight);
+            vertex(consumer, bx + nbx * lb, oy, bz + nbz * lb, color, packedLight);
+            vertex(consumer, ax + nax * la, oy, az + naz * la, color, packedLight);
+            vertex(consumer, ax, oy - THICKNESS, az, color, packedLight);
+            vertex(consumer, bx, oy - THICKNESS, bz, color, packedLight);
+            vertex(consumer, bx, oy + THICKNESS, bz, color, packedLight);
+            vertex(consumer, ax, oy + THICKNESS, az, color, packedLight);
         }
         // Segment foyer -> periapse (+X), deux bandes croisees.
         float periapsis = a * (1f - e);
-        vertex(consumer, ox, oy - AXIS_THICKNESS, oz, AXIS_COLOR, packedLight);
-        vertex(consumer, ox + periapsis, oy - AXIS_THICKNESS, oz, AXIS_COLOR, packedLight);
-        vertex(consumer, ox + periapsis, oy + AXIS_THICKNESS, oz, AXIS_COLOR, packedLight);
-        vertex(consumer, ox, oy + AXIS_THICKNESS, oz, AXIS_COLOR, packedLight);
-        vertex(consumer, ox, oy, oz - AXIS_THICKNESS, AXIS_COLOR, packedLight);
-        vertex(consumer, ox + periapsis, oy, oz - AXIS_THICKNESS, AXIS_COLOR, packedLight);
-        vertex(consumer, ox + periapsis, oy, oz + AXIS_THICKNESS, AXIS_COLOR, packedLight);
-        vertex(consumer, ox, oy, oz + AXIS_THICKNESS, AXIS_COLOR, packedLight);
+        vertex(consumer, ox, oy - AXIS_THICKNESS, oz, axisColor, packedLight);
+        vertex(consumer, ox + periapsis, oy - AXIS_THICKNESS, oz, axisColor, packedLight);
+        vertex(consumer, ox + periapsis, oy + AXIS_THICKNESS, oz, axisColor, packedLight);
+        vertex(consumer, ox, oy + AXIS_THICKNESS, oz, axisColor, packedLight);
+        vertex(consumer, ox, oy, oz - AXIS_THICKNESS, axisColor, packedLight);
+        vertex(consumer, ox + periapsis, oy, oz - AXIS_THICKNESS, axisColor, packedLight);
+        vertex(consumer, ox + periapsis, oy, oz + AXIS_THICKNESS, axisColor, packedLight);
+        vertex(consumer, ox, oy, oz + AXIS_THICKNESS, axisColor, packedLight);
         octahedron(consumer, ox, oy, oz, packedLight);
     }
 
@@ -155,10 +172,10 @@ public final class SpaceOrbitHandleRenderer implements HoloObjectRenderer<SpaceO
         for (int sx = -1; sx <= 1; sx += 2) {
             for (int sy = -1; sy <= 1; sy += 2) {
                 for (int sz = -1; sz <= 1; sz += 2) {
-                    vertex(consumer, x + sx * CORE, y, z, CORE_COLOR, light);
-                    vertex(consumer, x, y + sy * CORE, z, CORE_COLOR, light);
-                    vertex(consumer, x, y, z + sz * CORE, CORE_COLOR, light);
-                    vertex(consumer, x, y, z + sz * CORE, CORE_COLOR, light);
+                    vertex(consumer, x + sx * CORE, y, z, coreColor, light);
+                    vertex(consumer, x, y + sy * CORE, z, coreColor, light);
+                    vertex(consumer, x, y, z + sz * CORE, coreColor, light);
+                    vertex(consumer, x, y, z + sz * CORE, coreColor, light);
                 }
             }
         }

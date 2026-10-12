@@ -1,5 +1,6 @@
 package com.amynna.hololib.demo;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
@@ -15,7 +16,7 @@ public final class DemoWorldPosModule extends HoloModule
     public void onLoad()
     {
         DemoCube cube = addObject(new DemoCube("cube", new HoloAnchor.World(), HoloTransform.translation(0f, 1f, 0f),
-                0.5f, 0xA040C0FF));
+                0.5f, HoloColor.primary(0xA0)));
         cube.setEditRules(false, true);
         cube.setVisibility(HoloVisibility.PUBLIC);
     }

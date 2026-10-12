@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.editor;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.edit.HoloEditTranslation;
 import com.amynna.hololib.holo.interact.HoloInteraction;
@@ -23,6 +24,8 @@ import java.util.Objects;
  */
 public class EditorHudFrame extends HoloWidget implements HoloClickable, HoloScrollable
 {
+    private static final HoloColor OUTLINE = HoloColor.special(0xFF).darker(0.43f);
+
     /** Partie client du cadre. */
     @ApiStatus.Internal
     public interface Backend
@@ -116,6 +119,6 @@ public class EditorHudFrame extends HoloWidget implements HoloClickable, HoloScr
     protected void draw(HoloCanvas canvas)
     {
         canvas.fill(0, 0, width(), height(), 0xA0000000);
-        canvas.outline(0, 0, width(), height(), 1f, 0xFF8090A0);
+        canvas.outline(0, 0, width(), height(), 1f, canvas.color(OUTLINE));
     }
 }

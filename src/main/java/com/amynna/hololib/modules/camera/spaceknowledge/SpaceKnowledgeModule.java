@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.spaceknowledge;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.modules.camera.config.ConfigWindow;
@@ -45,6 +46,12 @@ import java.util.List;
  */
 public final class SpaceKnowledgeModule extends HoloModule implements Configurable, QuickActionProvider
 {
+    private static final HoloColor ICON_PLANET = HoloColor.primary(0xFF);
+    private static final HoloColor ICON_RING = HoloColor.primary(0xFF).lighter(0.51f);
+    private static final HoloColor ICON_OFF = HoloColor.special(0xFF).darker(0.56f);
+    private static final HoloColor ICON_RING_OFF = HoloColor.special(0xFF).darker(0.43f);
+    private static final HoloColor ICON_STRIKE = HoloColor.critical(0xFF);
+
     /** Bornes et defaut de l'angle du nom au regard, en degres (C46). */
     public static final int MIN_NAME_ANGLE = 1;
     public static final int MAX_NAME_ANGLE = 30;
@@ -233,16 +240,16 @@ public final class SpaceKnowledgeModule extends HoloModule implements Configurab
             float c = size / 2f;
             // Planete, puis son anneau incline, puis (actif) la barre rouge : une couche par forme.
             canvas.beginLayer();
-            disk(canvas, c, c, 0.27f * size, on ? 0xFF607080 : 0xFF40C0FF);
+            disk(canvas, c, c, 0.27f * size, canvas.color(on ? ICON_OFF : ICON_PLANET));
             canvas.endLayer();
             canvas.beginLayer();
             canvas.ellipse(c, c, 0.47f * size, 0.17f * size, Math.max(1f, 0.06f * size), SEGMENTS,
-                    on ? 0xFF8090A0 : 0xFFA0E0FF);
+                    canvas.color(on ? ICON_RING_OFF : ICON_RING));
             canvas.endLayer();
             if (on) {
                 canvas.beginLayer();
                 canvas.line(0.15f * size, 0.85f * size, 0.85f * size, 0.15f * size, Math.max(1.5f, 0.1f * size),
-                        0xFFFF5050);
+                        canvas.color(ICON_STRIKE));
                 canvas.endLayer();
             }
         }

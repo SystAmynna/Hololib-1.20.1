@@ -1,5 +1,6 @@
 package com.amynna.hololib.demo;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
@@ -16,7 +17,7 @@ public final class DemoEditableCubeModule extends HoloModule
     public void onLoad()
     {
         DemoCube cube = addObject(new DemoCube("cube", new HoloAnchor.World(), HoloTransform.translation(0f, 1.5f, 0f),
-                0.6f, 0xA0FFC040));
+                0.6f, HoloColor.action(0xA0)));
         // Immobile : seules les modifications de l'edition le font bouger.
         cube.setAnimated(false);
         cube.setVisibility(HoloVisibility.PUBLIC);

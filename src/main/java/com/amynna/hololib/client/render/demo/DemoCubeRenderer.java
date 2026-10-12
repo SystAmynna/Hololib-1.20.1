@@ -1,5 +1,6 @@
 package com.amynna.hololib.client.render.demo;
 
+import com.amynna.hololib.holo.theme.HoloThemes;
 import com.amynna.hololib.client.render.holo.HoloDrawContext;
 import com.amynna.hololib.client.render.holo.HoloObjectRenderer;
 import com.amynna.hololib.client.render.type.HoloRenderTypes;
@@ -28,7 +29,7 @@ final class DemoCubeRenderer implements HoloObjectRenderer<DemoCube>
         pose.pushPose();
         pose.mulPose(rotation.rotationY(cube.spin(ctx.partialTick()) * Mth.DEG_TO_RAD).rotateX(TILT));
         float h = cube.size() * 0.5f;
-        int color = cube.color();
+        int color = cube.color().resolve(HoloThemes.resolve(cube));
         Matrix4f m = pose.last().pose();
         VertexConsumer vc = buffers.getBuffer(HoloRenderTypes.TRANSLUCENT_QUADS);
         // Haut, bas, puis les quatre cotes.

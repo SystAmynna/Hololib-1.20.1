@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.monde.spacemap;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.widget.HoloCanvas;
@@ -36,16 +37,16 @@ public final class SpaceMapTreeRow extends HoloWidgetMultiButton
     private final int depth;
     private final boolean expandable;
     private final boolean expanded;
-    private int background = 0x6020A0FF;
-    private int border = 0xFF40C0FF;
-    private int textColor = 0xFFFFFFFF;
-    private int toggleColor = 0xFFA0C8E0;
+    private HoloColor background = HoloColor.secondary(0x60);
+    private HoloColor border = HoloColor.primary(0xFF);
+    private HoloColor textColor = HoloColor.special(0xFF);
+    private HoloColor toggleColor = HoloColor.primary(0xFF).lighter(0.5f);
     /** Abscisse du dernier clic dans la ligne (pixels). */
     private float clickX;
     /** Bouton de cible (T43) : libelle, {@code null} = pas de bouton ; couleurs ; action. */
     private Component targetLabel;
-    private int targetText = 0xFFFFFFFF;
-    private int targetBackground = 0x90183048;
+    private HoloColor targetText = HoloColor.special(0xFF);
+    private HoloColor targetBackground = HoloColor.secondary(0x90).darker(0.72f);
     private Runnable onTarget;
 
     /**
@@ -84,7 +85,8 @@ public final class SpaceMapTreeRow extends HoloWidgetMultiButton
      * Ajoute le bouton de cible a l'extremite droite (T43) : libelle {@code label} (« CIBLER » / « DECIBLER ») de
      * couleur {@code textColor} sur le fond {@code background} ; clic gauche dans la zone = {@code onTarget}.
      */
-    public SpaceMapTreeRow setTargetButton(Component label, int textColor, int background, Runnable onTarget)
+    public SpaceMapTreeRow setTargetButton(Component label, HoloColor textColor, HoloColor background,
+                                          Runnable onTarget)
     {
         this.targetLabel = Objects.requireNonNull(label);
         this.targetText = textColor;
@@ -101,6 +103,12 @@ public final class SpaceMapTreeRow extends HoloWidgetMultiButton
     @Override
     public SpaceMapTreeRow setColors(int background, int border, int textColor)
     {
+        return setColors(HoloColor.fixed(background), HoloColor.fixed(border), HoloColor.fixed(textColor));
+    }
+
+    @Override
+    public SpaceMapTreeRow setColors(HoloColor background, HoloColor border, HoloColor textColor)
+    {
         super.setColors(background, border, textColor);
         this.background = background;
         this.border = border;
@@ -109,9 +117,9 @@ public final class SpaceMapTreeRow extends HoloWidgetMultiButton
     }
 
     /** Couleur du repere de depliage. */
-    public SpaceMapTreeRow setToggleColor(int argb)
+    public SpaceMapTreeRow setToggleColor(HoloColor color)
     {
-        this.toggleColor = argb;
+        this.toggleColor = Objects.requireNonNull(color);
         return this;
     }
 
@@ -125,21 +133,25 @@ public final class SpaceMapTreeRow extends HoloWidgetMultiButton
     @Override
     protected void draw(HoloCanvas canvas)
     {
-        canvas.fill(0, 0, width(), height(), background);
-        if (pressed() || hovered()) canvas.fill(0, 0, width(), height(), pressed() ? PRESSED_OVERLAY : HOVER_OVERLAY);
-        canvas.outline(0, 0, width(), height(), 1f, border);
+        int borderColor = canvas.color(border);
+        canvas.fill(0, 0, width(), height(), canvas.color(background));
+        if (pressed() || hovered()) {
+            canvas.fill(0, 0, width(), height(), canvas.color(pressed() ? PRESSED_OVERLAY : HOVER_OVERLAY));
+        }
+        canvas.outline(0, 0, width(), height(), 1f, borderColor);
         float y = (height() - canvas.lineHeight()) / 2f + 1f;
         float x = PAD + depth * INDENT;
         if (expandable) {
             Component mark = expanded ? EXPANDED : COLLAPSED;
-            canvas.text(mark, x + (TOGGLE_WIDTH - canvas.textWidth(mark)) / 2f, y, toggleColor);
+            canvas.text(mark, x + (TOGGLE_WIDTH - canvas.textWidth(mark)) / 2f, y, canvas.color(toggleColor));
         }
-        canvas.text(text(), x + TOGGLE_WIDTH, y, textColor);
+        canvas.text(text(), x + TOGGLE_WIDTH, y, canvas.color(textColor));
         if (targetLabel != null) {
             float left = width() - TARGET_WIDTH;
-            canvas.fill(left, 0, TARGET_WIDTH, height(), targetBackground);
-            canvas.outline(left, 0, TARGET_WIDTH, height(), 1f, border);
-            canvas.text(targetLabel, left + (TARGET_WIDTH - canvas.textWidth(targetLabel)) / 2f, y, targetText);
+            canvas.fill(left, 0, TARGET_WIDTH, height(), canvas.color(targetBackground));
+            canvas.outline(left, 0, TARGET_WIDTH, height(), 1f, borderColor);
+            canvas.text(targetLabel, left + (TARGET_WIDTH - canvas.textWidth(targetLabel)) / 2f, y,
+                    canvas.color(targetText));
         }
     }
 }

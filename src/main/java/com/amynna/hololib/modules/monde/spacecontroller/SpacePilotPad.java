@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.monde.spacecontroller;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloCapture;
 import com.amynna.hololib.holo.capture.HoloCaptures;
 import com.amynna.hololib.holo.capture.HoloControl;
@@ -146,7 +147,11 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
      */
     public static final HoloControl BOOST = HoloControl.mapping("key.sprint");
 
-    private static final int ACCENT = 0x40C0FF;
+    private static final HoloColor ACCENT = HoloColor.primary(0xFF);
+    private static final HoloColor UNAVAILABLE = HoloColor.special(0xFF).darker(0.5f);
+    private static final HoloColor TEXT = HoloColor.special(0xFF);
+    private static final HoloColor EXIT = HoloColor.primary(0xFF).lighter(0.66f);
+    private static final HoloColor TEXT_DISABLED = HoloColor.special(0xFF).darker(0.37f);
     private static final Component IDLE_TEXT = Component.literal("Cliquer pour piloter");
     private static final Component PILOTING_TEXT = Component.literal("Pilotage en cours");
     private static final Component EXIT_TEXT = Component.literal("Echap : rendre la main");
@@ -659,16 +664,16 @@ public class SpacePilotPad extends HoloWidget implements HoloPointerInput
     {
         boolean allowed = allowed();
         int alpha = !available ? 0x20 : piloting ? 0x80 : hovered && allowed ? 0x58 : 0x38;
-        int color = available && (piloting || pilot == null && allowed) ? ACCENT : 0x808080;
-        canvas.fill(0, 0, width(), height(), alpha << 24 | color);
-        canvas.outline(0, 0, width(), height(), 1f, 0xFF000000 | color);
+        HoloColor color = available && (piloting || pilot == null && allowed) ? ACCENT : UNAVAILABLE;
+        canvas.fill(0, 0, width(), height(), color.resolve(canvas.theme(), alpha));
+        canvas.outline(0, 0, width(), height(), 1f, color.resolve(canvas.theme(), 0xFF));
         if (piloting) {
-            centered(canvas, PILOTING_TEXT, height() / 2f - canvas.lineHeight(), 0xFFFFFFFF);
-            centered(canvas, EXIT_TEXT, height() / 2f + 1f, 0xFFC0E8FF);
+            centered(canvas, PILOTING_TEXT, height() / 2f - canvas.lineHeight(), canvas.color(TEXT));
+            centered(canvas, EXIT_TEXT, height() / 2f + 1f, canvas.color(EXIT));
         } else {
             Component text = !available ? UNAVAILABLE_TEXT : !allowed ? RESERVED_TEXT : pilot == null ? IDLE_TEXT
                     : pilotHere ? BUSY_TEXT : ELSEWHERE_TEXT;
-            int textColor = available && allowed ? 0xFFFFFFFF : 0xFFA0A0A0;
+            int textColor = canvas.color(available && allowed ? TEXT : TEXT_DISABLED);
             centered(canvas, text, (height() - canvas.lineHeight()) / 2f + 1f, textColor);
         }
     }

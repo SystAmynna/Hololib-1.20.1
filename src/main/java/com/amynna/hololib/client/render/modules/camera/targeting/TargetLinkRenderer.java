@@ -1,5 +1,8 @@
 package com.amynna.hololib.client.render.modules.camera.targeting;
 
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloTheme;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.client.modules.camera.targeting.TargetingClient;
 import com.amynna.hololib.client.render.type.HoloRenderTypes;
 import com.amynna.hololib.client.render.view.ViewRenderContext;
@@ -29,7 +32,16 @@ final class TargetLinkRenderer implements ViewRenderer
     private static final float START = 1f;
     private static final float NEAR = 0.05f;
     private static final float HALF_WIDTH = 0.0016f;
-    private static final int COLOR = 0xD040FF60;
+    private static final HoloColor COLOR = HoloColor.selection(0xD0);
+
+    // Couleurs du theme de la frame en cours (fil de rendu), posees par {@link #applyTheme}.
+    private static int color;
+
+    /** Resout les couleurs dans le theme de l'objet (debut de frame). */
+    private static void applyTheme(HoloTheme theme)
+    {
+        color = COLOR.resolve(theme);
+    }
 
     private final Vector3f end = new Vector3f();
     private final Vector3f forward = new Vector3f();
@@ -57,6 +69,7 @@ final class TargetLinkRenderer implements ViewRenderer
     @Override
     public void render(PoseStack pose, MultiBufferSource buffers, ViewRenderContext ctx)
     {
+        applyTheme(HoloThemes.clientStandard());
         Vec3 camera = ctx.camera().getPosition();
         if (!target(camera, ctx.partialTick())) return;
         forward.set(ctx.camera().getLookVector());
@@ -90,7 +103,7 @@ final class TargetLinkRenderer implements ViewRenderer
 
     private static void vertex(VertexConsumer c, Matrix4f matrix, float x, float y, float z)
     {
-        c.vertex(matrix, x, y, z).color(COLOR >> 16 & 0xFF, COLOR >> 8 & 0xFF, COLOR & 0xFF, COLOR >>> 24)
+        c.vertex(matrix, x, y, z).color(color >> 16 & 0xFF, color >> 8 & 0xFF, color & 0xFF, color >>> 24)
                 .uv2(LightTexture.FULL_BRIGHT).endVertex();
     }
 

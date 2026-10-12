@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.keys;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloPanel;
 import com.amynna.hololib.holo.widget.HoloWidget;
@@ -24,6 +25,10 @@ import java.util.function.Consumer;
  */
 public class KeyListEditor extends HoloPanel
 {
+    private static final HoloColor EMPTY = HoloColor.special(0xFF).darker(0.47f);
+    private static final HoloColor CHIP = HoloColor.secondary(0x30);
+    private static final HoloColor TEXT = HoloColor.special(0xFF);
+
     private static final float FIELD_HEIGHT = 18f;
     private static final float BUTTON_WIDTH = 46f;
     private static final float GAP = 4f;
@@ -84,7 +89,7 @@ public class KeyListEditor extends HoloPanel
     {
         super.draw(canvas);
         if (shown.isEmpty()) {
-            canvas.text(Component.literal("Aucune cle"), 6f, FIELD_HEIGHT + GAP + 6f, 0xFF808890);
+            canvas.text(Component.literal("Aucune cle"), 6f, FIELD_HEIGHT + GAP + 6f, canvas.color(EMPTY));
         }
     }
 
@@ -100,7 +105,8 @@ public class KeyListEditor extends HoloPanel
             text = Component.literal(key);
             remove = add(new HoloWidgetButton(0, 0, ROW_HEIGHT, ROW_HEIGHT, Component.literal("x"),
                     button -> onRemove.accept(key)));
-            remove.setColors(0x60A02020, 0xFFFF6060, 0xFFFFA0A0);
+            remove.setColors(HoloColor.critical(0x60).darker(0.39f), HoloColor.critical(0xFF).lighter(0.09f),
+                    HoloColor.critical(0xFF).lighter(0.46f));
             placeRemove();
         }
 
@@ -118,8 +124,8 @@ public class KeyListEditor extends HoloPanel
         @Override
         protected void draw(HoloCanvas canvas)
         {
-            canvas.fill(0, 0, width(), height(), 0x3020A0FF);
-            canvas.text(text, 3f, (height() - canvas.lineHeight()) / 2f + 1f, 0xFFFFFFFF);
+            canvas.fill(0, 0, width(), height(), canvas.color(CHIP));
+            canvas.text(text, 3f, (height() - canvas.lineHeight()) / 2f + 1f, canvas.color(TEXT));
             super.draw(canvas);
         }
     }

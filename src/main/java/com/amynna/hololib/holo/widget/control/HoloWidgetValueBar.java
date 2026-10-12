@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget.control;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.widget.HoloCanvas;
@@ -23,9 +24,12 @@ public class HoloWidgetValueBar extends HoloWidget implements HoloScrollable, Ho
     private float step = 0.05f;
     private boolean hovered;
     private boolean dragging;
-    private int fillColor = 0xC040A0FF;
-    private int trackColor = 0x60202040;
-    private int border = 0xFF40C0FF;
+    private static final HoloColor HOVER = HoloColor.special(0x20);
+    private static final HoloColor TEXT = HoloColor.special(0xFF);
+
+    private HoloColor fillColor = HoloColor.secondary(0xC0).lighter(0.12f);
+    private HoloColor trackColor = HoloColor.secondary(0x60).darker(0.75f);
+    private HoloColor border = HoloColor.primary(0xFF);
     private Component display = Component.empty();
 
     public HoloWidgetValueBar(float x, float y, float width, float height, Component label,
@@ -62,6 +66,12 @@ public class HoloWidgetValueBar extends HoloWidget implements HoloScrollable, Ho
     }
 
     public HoloWidgetValueBar setColors(int fillColor, int trackColor, int border)
+    {
+        return setColors(HoloColor.fixed(fillColor), HoloColor.fixed(trackColor), HoloColor.fixed(border));
+    }
+
+    /** Remplissage, piste, bordure (par defaut : secondaire, secondaire sombre, principale). */
+    public HoloWidgetValueBar setColors(HoloColor fillColor, HoloColor trackColor, HoloColor border)
     {
         this.fillColor = fillColor;
         this.trackColor = trackColor;
@@ -121,11 +131,11 @@ public class HoloWidgetValueBar extends HoloWidget implements HoloScrollable, Ho
     @Override
     protected void draw(HoloCanvas canvas)
     {
-        canvas.fill(0, 0, width(), height(), trackColor);
-        canvas.fill(0, 0, width() * value, height(), fillColor);
-        if (hovered || dragging) canvas.fill(0, 0, width(), height(), 0x20FFFFFF);
-        canvas.outline(0, 0, width(), height(), 1f, border);
+        canvas.fill(0, 0, width(), height(), canvas.color(trackColor));
+        canvas.fill(0, 0, width() * value, height(), canvas.color(fillColor));
+        if (hovered || dragging) canvas.fill(0, 0, width(), height(), canvas.color(HOVER));
+        canvas.outline(0, 0, width(), height(), 1f, canvas.color(border));
         canvas.text(display, (width() - canvas.textWidth(display)) / 2f, (height() - canvas.lineHeight()) / 2f + 1f,
-                0xFFFFFFFF);
+                canvas.color(TEXT));
     }
 }

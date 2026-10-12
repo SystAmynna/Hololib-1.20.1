@@ -1,5 +1,6 @@
 package com.amynna.hololib.demo;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAccess;
@@ -47,9 +48,8 @@ public final class DemoKeyboardModule extends HoloModule
     /** Ecart angulaire des fenetres de part et d'autre du regard, en degres. */
     private static final float PAD_YAW = -36f;
     private static final float EDITOR_YAW = 40f;
-    private static final int BACKGROUND = 0x8010304A;
-    private static final int PAD_ACCENT = 0xFF80FF80;
-    private static final int EDITOR_ACCENT = 0xFFFFE060;
+    private static final HoloColor PAD_ACCENT = HoloColor.selection(0xFF).lighter(0.2f);
+    private static final HoloColor EDITOR_ACCENT = HoloColor.action(0xFF).lighter(0.18f);
 
     /** Bornes de l'editeur (reappliquees cote serveur). */
     private static final int TEXT_LENGTH = 512;
@@ -98,11 +98,11 @@ public final class DemoKeyboardModule extends HoloModule
         refresh();
     }
 
-    private static void setUp(HoloWindow window, String title, int accent)
+    private static void setUp(HoloWindow window, String title, HoloColor accent)
     {
         window.setVisibility(HoloVisibility.PUBLIC);
         window.setInterceptedInputs(HoloControl.LEFT_CLICK, HoloControl.RIGHT_CLICK, HoloControl.MIDDLE_CLICK);
-        window.root().setBackground(BACKGROUND).setBorder(accent, 1f);
+        window.root().setPattern(0x80).setBorder(accent, 1f);
         window.root().add(new HoloLabel(4, 4, window.width() - 8, 14, Component.literal(title))
                 .setAlign(HoloLabel.Align.CENTER).setColor(accent));
     }

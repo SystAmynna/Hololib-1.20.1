@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget.control;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloCapture;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.widget.HoloCanvas;
@@ -31,8 +32,12 @@ public class HoloWidgetMouseBox extends HoloWidget implements HoloPointerInput
     private Component idleText = Component.literal("Boite a souris");
     private Component capturedText = Component.literal("Souris capturee");
     private Component exitText = Component.literal("Echap / Entree");
-    private int color = 0xA02020;
-    private int border = 0xFFFF6060;
+    private static final HoloColor TEXT = HoloColor.critical(0xFF).lighter(0.64f);
+    private static final HoloColor EXIT_TEXT = HoloColor.critical(0xFF).lighter(0.82f);
+    private static final HoloColor POINT = HoloColor.special(0xFF);
+
+    private HoloColor color = HoloColor.critical(0xFF).darker(0.39f);
+    private HoloColor border = HoloColor.critical(0xFF).lighter(0.09f);
 
     public HoloWidgetMouseBox(float x, float y, float width, float height)
     {
@@ -76,7 +81,13 @@ public class HoloWidgetMouseBox extends HoloWidget implements HoloPointerInput
 
     public HoloWidgetMouseBox setColors(int rgb, int border)
     {
-        this.color = rgb & 0xFFFFFF;
+        return setColors(HoloColor.fixed(0xFF000000 | rgb), HoloColor.fixed(border));
+    }
+
+    /** Fond (son alpha est ignore : il suit l'etat) et bordure (par defaut : critique). */
+    public HoloWidgetMouseBox setColors(HoloColor color, HoloColor border)
+    {
+        this.color = color;
         this.border = border;
         return this;
     }
@@ -139,12 +150,12 @@ public class HoloWidgetMouseBox extends HoloWidget implements HoloPointerInput
     @Override
     protected void draw(HoloCanvas canvas)
     {
-        canvas.fill(0, 0, width(), height(), (captured ? 0x80 : hovered ? 0x58 : 0x40) << 24 | color);
-        canvas.outline(0, 0, width(), height(), 1f, border);
+        canvas.fill(0, 0, width(), height(), color.resolve(canvas.theme(), captured ? 0x80 : hovered ? 0x58 : 0x40));
+        canvas.outline(0, 0, width(), height(), 1f, canvas.color(border));
         Component text = captured ? capturedText : idleText;
-        canvas.text(text, (width() - canvas.textWidth(text)) / 2f, 4f, 0xFFFFC0C0);
+        canvas.text(text, (width() - canvas.textWidth(text)) / 2f, 4f, canvas.color(TEXT));
         if (!captured) return;
-        canvas.text(exitText, (width() - canvas.textWidth(exitText)) / 2f, height() - 12f, 0xFFFFE0E0);
-        canvas.fill(pointX - DOT / 2f, pointY - DOT / 2f, DOT, DOT, 0xFFFFFFFF);
+        canvas.text(exitText, (width() - canvas.textWidth(exitText)) / 2f, height() - 12f, canvas.color(EXIT_TEXT));
+        canvas.fill(pointX - DOT / 2f, pointY - DOT / 2f, DOT, DOT, canvas.color(POINT));
     }
 }

@@ -1,5 +1,6 @@
 package com.amynna.hololib.demo;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloWidget;
 import net.minecraft.util.Mth;
@@ -7,6 +8,11 @@ import net.minecraft.util.Mth;
 /** Petite animation : une vague de barres, avancee au tick et interpolee au dessin. Non interactive. */
 final class DemoAnimation extends HoloWidget
 {
+    private static final HoloColor BACKGROUND = HoloColor.secondary(0x40).darker(0.7f);
+    private static final HoloColor BORDER = HoloColor.primary(0xFF).lighter(0.4f);
+    private static final HoloColor BAR_LOW = HoloColor.secondary(0xE0);
+    private static final HoloColor BAR_HIGH = HoloColor.primary(0xE0).lighter(0.4f);
+
     private static final int BARS = 9;
     private static final float GAP = 3f;
 
@@ -23,17 +29,18 @@ final class DemoAnimation extends HoloWidget
     @Override
     protected void draw(HoloCanvas canvas)
     {
-        canvas.fill(0, 0, width(), height(), 0x40202060);
-        canvas.outline(0, 0, width(), height(), 1f, 0xFF8080FF);
+        canvas.fill(0, 0, width(), height(), canvas.color(BACKGROUND));
+        canvas.outline(0, 0, width(), height(), 1f, canvas.color(BORDER));
+        int low = canvas.color(BAR_LOW);
+        int high = canvas.color(BAR_HIGH);
         float time = age + canvas.partialTick();
         float barWidth = (width() - 4f - GAP * (BARS - 1)) / BARS;
         float maxHeight = height() - 8f;
         for (int i = 0; i < BARS; i++) {
             float wave = 0.5f + 0.5f * Mth.sin(time * 0.25f - i * 0.7f);
             float barHeight = 3f + (maxHeight - 3f) * wave;
-            int green = 0x60 + (int) (0x9F * wave);
             canvas.fill(2f + i * (barWidth + GAP), height() - 4f - barHeight, barWidth, barHeight,
-                    0xE0000000 | 0x60 << 16 | green << 8 | 0xFF);
+                    HoloColor.lerp(low, high, wave));
         }
     }
 }

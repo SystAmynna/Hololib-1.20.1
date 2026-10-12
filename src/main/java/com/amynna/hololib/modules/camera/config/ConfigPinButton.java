@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.config;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloWidget;
@@ -15,8 +16,10 @@ import java.util.function.Consumer;
  */
 public class ConfigPinButton extends HoloWidget implements HoloToggleable, HoloHoverable
 {
-    private static final int PINNED = 0xFFFFC040;
-    private static final int UNPINNED = 0xFFA0A0A0;
+    private static final HoloColor PINNED = HoloColor.action(0xFF);
+    private static final HoloColor UNPINNED = HoloColor.special(0xFF).darker(0.37f);
+    private static final HoloColor NEEDLE = HoloColor.special(0xFF).darker(0.12f);
+    private static final HoloColor HOVER = HoloColor.special(0x30);
     /** Taille de reference du dessin (unites des formes ci-dessous). */
     private static final float SIZE = 14f;
     private static final float TILT = (float) Math.toRadians(45.0);
@@ -58,7 +61,7 @@ public class ConfigPinButton extends HoloWidget implements HoloToggleable, HoloH
     @Override
     protected void draw(HoloCanvas canvas)
     {
-        if (hovered) canvas.fill(0, 0, width(), height(), 0x30FFFFFF);
+        if (hovered) canvas.fill(0, 0, width(), height(), canvas.color(HOVER));
         float k = Math.min(width(), height()) / SIZE;
         // Droite (pointe vers le bas) si epinglee, penchee vers la gauche sinon.
         float angle = on ? 0f : TILT;
@@ -66,12 +69,12 @@ public class ConfigPinButton extends HoloWidget implements HoloToggleable, HoloH
         cy = height() / 2f;
         ax = -(float) Math.sin(angle) * k;
         ay = (float) Math.cos(angle) * k;
-        int color = on ? PINNED : UNPINNED;
+        int color = canvas.color(on ? PINNED : UNPINNED);
         // (u le long de l'axe depuis le centre, v en travers) : tete, corps, collerette, aiguille.
         part(canvas, -5.5f, -3.5f, 3.5f, 3.5f, color);
         part(canvas, -3.5f, 0.5f, 2f, 2f, color);
         part(canvas, 0.5f, 1.5f, 3.5f, 3.5f, color);
-        part(canvas, 1.5f, 6f, 0.6f, 0f, 0xFFE0E0E0);
+        part(canvas, 1.5f, 6f, 0.6f, 0f, canvas.color(NEEDLE));
     }
 
     /** Trapeze de {@code u0} a {@code u1} le long de l'axe, de demi-largeurs {@code v0} puis {@code v1}. */

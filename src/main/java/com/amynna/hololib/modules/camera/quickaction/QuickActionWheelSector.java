@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.quickaction;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.widget.HoloCanvas;
@@ -24,10 +25,10 @@ final class QuickActionWheelSector extends HoloWidget implements HoloClickable, 
     private static final float GAP = 0.04f;
     private static final float RIM = 1.2f;
     private static final float MAX_ICON = 28f;
-    private static final int FILL = 0xB0101828;
-    private static final int FILL_HOVER = 0xD02060A0;
-    private static final int RIM_COLOR = 0xFF40C0FF;
-    private static final int RIM_HOVER = 0xFFA0E8FF;
+    private static final HoloColor FILL = HoloColor.secondary(0xB0).darker(0.84f);
+    private static final HoloColor FILL_HOVER = HoloColor.secondary(0xD0).darker(0.37f);
+    private static final HoloColor RIM_COLOR = HoloColor.primary(0xFF);
+    private static final HoloColor RIM_HOVER = HoloColor.primary(0xFF).lighter(0.51f);
 
     private final QuickAction action;
     private final Consumer<QuickAction> onSelect;
@@ -98,8 +99,8 @@ final class QuickActionWheelSector extends HoloWidget implements HoloClickable, 
         float a0 = start + gap / 2f;
         float a1 = start + span - gap / 2f;
         int steps = Math.max(1, (int) Math.ceil((a1 - a0) / SEGMENT));
-        int fill = hovered ? FILL_HOVER : FILL;
-        int rim = hovered ? RIM_HOVER : RIM_COLOR;
+        int fill = canvas.color(hovered ? FILL_HOVER : FILL);
+        int rim = canvas.color(hovered ? RIM_HOVER : RIM_COLOR);
         float rimInner = outer - RIM;
         for (int i = 0; i < steps; i++) {
             float b0 = a0 + (a1 - a0) * i / steps;

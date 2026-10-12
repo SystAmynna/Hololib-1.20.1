@@ -1,5 +1,8 @@
 package com.amynna.hololib.client.render.modules.camera.attackguard;
 
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloTheme;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.client.modules.camera.attackguard.AttackGuardClient;
 import com.amynna.hololib.client.render.hud.HudRenderContext;
 import com.amynna.hololib.client.render.hud.HudRenderer;
@@ -19,7 +22,16 @@ final class AttackGuardCrossRenderer implements HudRenderer
 {
     private static final float HALF = 5f;
     private static final float THICKNESS = 1.5f;
-    private static final int COLOR = 0xFFFF3030;
+    private static final HoloColor COLOR = HoloColor.critical(0xFF);
+
+    // Couleurs du theme de la frame en cours (fil de rendu), posees par {@link #applyTheme}.
+    private static int color;
+
+    /** Resout les couleurs dans le theme de l'objet (debut de frame). */
+    private static void applyTheme(HoloTheme theme)
+    {
+        color = COLOR.resolve(theme);
+    }
 
     @Override
     public boolean shouldRender(HudRenderContext ctx)
@@ -31,6 +43,7 @@ final class AttackGuardCrossRenderer implements HudRenderer
     @Override
     public void render(PoseStack pose, MultiBufferSource buffers, HudRenderContext ctx)
     {
+        applyTheme(HoloThemes.clientStandard());
         Matrix4f matrix = pose.last().pose();
         VertexConsumer c = buffers.getBuffer(RenderType.gui());
         float cx = ctx.width() / 2f;
@@ -54,7 +67,7 @@ final class AttackGuardCrossRenderer implements HudRenderer
 
     private static void vertex(VertexConsumer c, Matrix4f matrix, float x, float y)
     {
-        c.vertex(matrix, x, y, 0f).color(COLOR >> 16 & 0xFF, COLOR >> 8 & 0xFF, COLOR & 0xFF, COLOR >>> 24)
+        c.vertex(matrix, x, y, 0f).color(color >> 16 & 0xFF, color >> 8 & 0xFF, color & 0xFF, color >>> 24)
                 .endVertex();
     }
 }

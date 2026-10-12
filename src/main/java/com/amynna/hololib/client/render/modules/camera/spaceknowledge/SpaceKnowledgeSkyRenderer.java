@@ -163,8 +163,6 @@ public final class SpaceKnowledgeSkyRenderer implements SkyRenderer
     private static final float NAME_Y = -4f;
     /** Decalage vertical de la ligne de distance (unites de police) : juste sous le nom. */
     private static final float DISTANCE_Y = NAME_Y + 10f;
-    /** Etoiles de fond (autres systemes) : couleur du double cercle et du nom. */
-    private static final int DISTANT_STAR_COLOR = SpaceOverlay.DISTANT_STAR_COLOR;
 
 
     private static final int LIGHT = LightTexture.FULL_BRIGHT;
@@ -902,9 +900,10 @@ public final class SpaceKnowledgeSkyRenderer implements SkyRenderer
         double outer = inner + pixels(STAR_OUTER_PX - STAR_INNER_PX);
         double half = pixels(0.5 * STAR_RING_THICKNESS_PX);
         float cull = cosLimit(halfDiagonal + outer + half);
-        float starRed = red(DISTANT_STAR_COLOR);
-        float starGreen = green(DISTANT_STAR_COLOR);
-        float starBlue = blue(DISTANT_STAR_COLOR);
+        int starColor = SpaceOverlay.rgb(SpaceOverlay.DISTANT_STAR_COLOR);
+        float starRed = red(starColor);
+        float starGreen = green(starColor);
+        float starBlue = blue(starColor);
         for (int i = 0, n = stars.size(); i < n; i++) {
             BackgroundStar star = stars.get(i);
             double lightYears = frame.galacticDirection(current, star, direction);
@@ -919,7 +918,7 @@ public final class SpaceKnowledgeSkyRenderer implements SkyRenderer
             }
             if (names && dot > bestDot) {
                 bestDot = dot;
-                pickName(star.name(), direction, outer, 0xFF000000 | DISTANT_STAR_COLOR, lightYears, true);
+                pickName(star.name(), direction, outer, 0xFF000000 | starColor, lightYears, true);
             }
         }
         return bestDot;

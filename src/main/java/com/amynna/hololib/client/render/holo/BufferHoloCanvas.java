@@ -1,6 +1,7 @@
 package com.amynna.hololib.client.render.holo;
 
 import com.amynna.hololib.client.render.type.HoloRenderTypes;
+import com.amynna.hololib.holo.theme.HoloTheme;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -36,13 +37,15 @@ final class BufferHoloCanvas implements HoloCanvas
     private Font font;
     private int light;
     private float partialTick;
+    private HoloTheme theme = HoloTheme.DEFAULT;
     private float ox;
     private float oy;
     private float z;
 
-    void begin(PoseStack.Pose pose, MultiBufferSource buffers, int light, float partialTick)
+    void begin(PoseStack.Pose pose, MultiBufferSource buffers, int light, float partialTick, HoloTheme theme)
     {
         this.pose = pose;
+        this.theme = theme;
         this.partialTick = partialTick;
         this.buffers = buffers;
         this.light = light;
@@ -62,6 +65,9 @@ final class BufferHoloCanvas implements HoloCanvas
 
     @Override
     public float partialTick() { return partialTick; }
+
+    @Override
+    public HoloTheme theme() { return theme; }
 
     @Override
     public void push(float dx, float dy)
@@ -118,6 +124,30 @@ final class BufferHoloCanvas implements HoloCanvas
         vc.vertex(m, x1, y1, z).color(r, g, b, a).uv2(light).endVertex();
         vc.vertex(m, x1, y0, z).color(r, g, b, a).uv2(light).endVertex();
         advance();
+    }
+
+    @Override
+    public void gradient(float x, float y, float width, float height, int topLeft, int topRight, int bottomRight,
+                         int bottomLeft)
+    {
+        if (width <= 0f || height <= 0f) return;
+        float x0 = ox + x;
+        float y0 = oy + y;
+        float x1 = x0 + width;
+        float y1 = y0 + height;
+        Matrix4f m = pose.pose();
+        VertexConsumer vc = buffers.getBuffer(HoloRenderTypes.TRANSLUCENT_QUADS);
+        vertex(vc, m, x0, y0, topLeft);
+        vertex(vc, m, x0, y1, bottomLeft);
+        vertex(vc, m, x1, y1, bottomRight);
+        vertex(vc, m, x1, y0, topRight);
+        advance();
+    }
+
+    private void vertex(VertexConsumer vc, Matrix4f m, float x, float y, int argb)
+    {
+        vc.vertex(m, x, y, z).color(argb >> 16 & 0xFF, argb >> 8 & 0xFF, argb & 0xFF, argb >>> 24).uv2(light)
+                .endVertex();
     }
 
     @Override

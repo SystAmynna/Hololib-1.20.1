@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import net.minecraft.network.chat.Component;
 
 import java.util.Objects;
@@ -13,7 +14,7 @@ public class HoloLabel extends HoloWidget
     }
 
     private Component text;
-    private int color = 0xFFFFFFFF;
+    private HoloColor color = HoloColor.special(0xFF);
     private Align align = Align.LEFT;
 
     public HoloLabel(float x, float y, float width, float height, Component text)
@@ -30,9 +31,13 @@ public class HoloLabel extends HoloWidget
         return this;
     }
 
-    public HoloLabel setColor(int argb)
+    /** Couleur fixe {@code 0xAARRGGBB}. */
+    public HoloLabel setColor(int argb) { return setColor(HoloColor.fixed(argb)); }
+
+    /** Couleur du texte (role SPECIAL par defaut). */
+    public HoloLabel setColor(HoloColor color)
     {
-        this.color = argb;
+        this.color = Objects.requireNonNull(color);
         return this;
     }
 
@@ -50,6 +55,6 @@ public class HoloLabel extends HoloWidget
             case CENTER -> (width() - canvas.textWidth(text)) / 2f;
             case RIGHT -> width() - canvas.textWidth(text);
         };
-        canvas.text(text, tx, (height() - canvas.lineHeight()) / 2f + 1f, color);
+        canvas.text(text, tx, (height() - canvas.lineHeight()) / 2f + 1f, canvas.color(color));
     }
 }

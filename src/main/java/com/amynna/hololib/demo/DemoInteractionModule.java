@@ -1,5 +1,6 @@
 package com.amynna.hololib.demo;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAccess;
@@ -51,7 +52,7 @@ public final class DemoInteractionModule extends HoloModule
     private static final int WIDTH = 240;
     private static final int HEIGHT = 208;
     private static final float DISTANCE = 0.8f;
-    private static final int ACCENT = 0xFF40C0FF;
+    private static final HoloColor ACCENT = HoloColor.primary(0xFF);
 
     private static final int ACTION_LEFT = 0;
     private static final int ACTION_RIGHT = 1;
@@ -93,7 +94,7 @@ public final class DemoInteractionModule extends HoloModule
         window.setAccess(shared ? HoloAccess.EVERYONE : HoloAccess.OWNER);
         window.setInterceptedInputs(HoloControl.LEFT_CLICK, HoloControl.RIGHT_CLICK, HoloControl.MIDDLE_CLICK);
         HoloPanel root = window.root();
-        root.setBackground(0x8010304A).setBorder(ACCENT, 1f);
+        root.setPattern(0x80).setBorder(ACCENT, 1f);
 
         root.add(new HoloLabel(4, 4, WIDTH - 8, 14, Component.literal("Interaction"))
                 .setAlign(HoloLabel.Align.CENTER).setColor(ACCENT));
@@ -118,7 +119,7 @@ public final class DemoInteractionModule extends HoloModule
                 (bar, v) -> sendInt(ACTION_VALUE, Math.round(v * 100f))));
 
         HoloPanel track = root.add(new HoloPanel(6, 158, 228, 28));
-        track.setBackground(0x30000000).setBorder(0x60D0A0FF, 1f);
+        track.setBackground(0x30000000).setBorder(HoloColor.secondary(0x60).lighter(0.66f), 1f);
         draggable = track.add(new HoloWidgetDraggable(dragX, dragY, 60, 14, Component.literal("Glisse-moi")));
         draggable.setOnDrop(widget -> sendAction(window, buf -> {
             buf.writeByte(ACTION_DRAG);

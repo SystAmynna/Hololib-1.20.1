@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget.control;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloWidget;
@@ -21,9 +22,11 @@ public class HoloWidgetHoverZone extends HoloWidget implements HoloHoverable
     private Component hoverText;
     private Component detail = Component.empty();
     private boolean hasDetail;
-    private int color = 0xC06020;
-    private int border = 0xFFFFA040;
-    private int textColor = 0xFFFFE0A0;
+    private static final HoloColor DETAIL = HoloColor.special(0xFF);
+
+    private HoloColor color = HoloColor.action(0xFF).darker(0.38f);
+    private HoloColor border = HoloColor.action(0xFF).darker(0.09f);
+    private HoloColor textColor = HoloColor.action(0xFF).lighter(0.5f);
     private BiConsumer<? super HoloWidgetHoverZone, Boolean> onHoverChanged = (zone, hovered) -> {};
     private boolean hovered;
     private int glow;
@@ -57,7 +60,13 @@ public class HoloWidgetHoverZone extends HoloWidget implements HoloHoverable
      */
     public HoloWidgetHoverZone setColors(int rgb, int border, int textColor)
     {
-        this.color = rgb & 0xFFFFFF;
+        return setColors(HoloColor.fixed(0xFF000000 | rgb), HoloColor.fixed(border), HoloColor.fixed(textColor));
+    }
+
+    /** Fond (son alpha est ignore : il suit le fondu), bordure, titre (par defaut : action). */
+    public HoloWidgetHoverZone setColors(HoloColor color, HoloColor border, HoloColor textColor)
+    {
+        this.color = color;
         this.border = border;
         this.textColor = textColor;
         return this;
@@ -95,13 +104,13 @@ public class HoloWidgetHoverZone extends HoloWidget implements HoloHoverable
     protected void draw(HoloCanvas canvas)
     {
         int alpha = 0x30 + (int) (0x70 * glow(canvas.partialTick()));
-        canvas.fill(0, 0, width(), height(), alpha << 24 | color);
-        canvas.outline(0, 0, width(), height(), 1f, border);
+        canvas.fill(0, 0, width(), height(), color.resolve(canvas.theme(), alpha));
+        canvas.outline(0, 0, width(), height(), 1f, canvas.color(border));
         Component title = hovered ? hoverText : idleText;
         float titleY = hasDetail ? 8f : (height() - canvas.lineHeight()) / 2f + 1f;
-        canvas.text(title, (width() - canvas.textWidth(title)) / 2f, titleY, textColor);
+        canvas.text(title, (width() - canvas.textWidth(title)) / 2f, titleY, canvas.color(textColor));
         if (hasDetail) {
-            canvas.text(detail, (width() - canvas.textWidth(detail)) / 2f, height() - 16f, 0xFFFFFFFF);
+            canvas.text(detail, (width() - canvas.textWidth(detail)) / 2f, height() - 16f, canvas.color(DETAIL));
         }
     }
 }

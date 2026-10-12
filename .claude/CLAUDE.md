@@ -41,9 +41,13 @@ com.amynna.hololib
 │   ├── edit/                    interfaces d'edition (HoloEditable + outils), HoloDisplay, HoloRelativeToOpen,
 │   │                            HoloEditRules (droits, validation), HoloEditMath (rotations, Local relatif <-> follow)
 │   ├── mode/                    HoloMode (FOCUS, EDITOR), HoloModeModule (module qui porte un mode)
-│   └── render/                  HoloRenderCanceler (annuler un element du rendu vanilla), HoloRenderElement
+│   ├── render/                  HoloRenderCanceler (annuler un element du rendu vanilla), HoloRenderElement
+│   └── theme/                   themes : HoloTheme, HoloThemeColor (6 roles), HoloColor (role + alpha + nuance),
+│                                HoloThemed / HoloThemeSource, HoloThemeLibrary (SavedData, bibliotheque serveur),
+│                                HoloThemeSelector, HoloThemes (resolution) ; motifs : registre HoloThemePatterns,
+│                                pattern/ (solid, scanlines, diagonal, grid)
 ├── network/                     HoloNetwork + paquets (snapshot, module, objet, origine, oubli ; deplacement, action,
-│                                edition)
+│                                edition ; themes)
 ├── command/ demo/               /hololib_marker, /hololib_module, /holo_memory, /hololib_(force_)inspect ; demos (1 module par compatibilite + interaction)
 ├── modules/                     modules du mod (HoloLibModules = registre) : un sous-package par compatibilite
 │   ├── dimension/planet1/       (dimension, monde, camera), un package par module (module + objets, code commun)
@@ -76,11 +80,15 @@ com.amynna.hololib
 │   ├── camera/targeting/        Ciblage (joueur) : TargetingModule (cible entite / bloc), TargetingThroughWalls
 │   ├── camera/keys/ keyseditor/ Keys (joueur) : KeysModule, KeySet, widget KeyListEditor ; Keys Editor (Config)
 │   ├── camera/attackguard/      Attack Guard (joueur) : whitelist (Config), joueurs proteges, AttackEntityEvent
+│   ├── camera/themeconfigurator/ Theme Configurator / Admin Theme Configurator (joueur) : ThemeConfiguratorBase
+│   │                            (code commun), ThemeConfigWindow (onglets, bibliotheque, parametres, outil),
+│   │                            ThemePreviewWindow (apercu a droite), ThemeParamRow
 │   └── camera/focus|editor|config|quickaction/ modules joueur : mode focus (H) ; editeurs (G)
 │                                own fix/dyn/hud, world/dimension/other + editor_panel (fenetre Config) ; config (ecrou du focus -> liste des modules
 │                                Configurable) ; quickaction (roue d'actions du focus, QuickActionProvider)
 └── client/
     ├── holo/                    ClientHoloWorld (miroirs des modules par portee), handlers des paquets, HoloModes
+    ├── theme/                   ClientThemes : backend de HoloThemes (miroir de la bibliotheque, selection locale)
     ├── capture/                 HoloControlCapture : SEUL abonne aux inputs ; HoloKeyboardScreen (clavier entier)
     ├── interact/                HoloInteractions : picking + survol ; captor passif de la capture
     ├── key/                     HoloKeyMappings (touches du mod, etat physique d'un controle)
@@ -192,7 +200,7 @@ com.amynna.hololib
 - Droit d'usage : `HoloObject.access()` (`HoloAccess` : `OWNER` par defaut, liste de joueurs, `EVERYONE` ; le
   proprietaire toujours ; sans proprietaire `OWNER` = personne), synchronise et sauvegarde par le framework. Callbacks
   locaux ; effet sur le jeu via `sendAction(source, ...)`, verifie par le serveur (acces, `PUBLIC` pour un
-  non-proprietaire, et `viewers` pour la memoire d'un autre joueur). Protocole reseau `"8"`.
+  non-proprietaire, et `viewers` pour la memoire d'un autre joueur). Protocole reseau `"9"`.
 
 ### Widgets interactifs (`holo/widget/control`)
 
@@ -204,7 +212,7 @@ com.amynna.hololib
 - Widgets prets a l'emploi, prefixes `HoloWidget` (`HoloWidgetButton`, `HoloWidgetMultiButton`, `HoloWidgetHoverZone`,
   `HoloWidgetScrollZone`, `HoloWidgetSwitch`, `HoloWidgetValueBar`, `HoloWidgetTextBox`, `HoloWidgetMouseBox`,
   `HoloWidgetDraggable`, `HoloWidgetKeyBox`, `HoloWidgetList`, `HoloWidgetDragRow` : ligne d'une liste reordonnee au
-  glisser), non finaux. Les demos les utilisent ; ne plus ecrire de widget ad hoc
+  glisser, `HoloWidgetColorPicker` : carre saturation / valeur, teinte, champ `#rrggbb`), non finaux. Les demos les utilisent ; ne plus ecrire de widget ad hoc
   dans un module si un trait ou un widget existe.
 - Framework : `onDrag` (chaque frame, clic intercepte maintenu, regard projete par `HoloPicking.project`) et
   `hoverMargin()` (survol conserve sur le fond / hors fenetre dans la marge).
@@ -212,6 +220,44 @@ com.amynna.hololib
   different selon le bouton (gauche / droit / molette), cran pris par un `HoloScrollable` = son de molette ;
   `clickSound()` / `scrollSound()` = false pour un element qui joue le sien (poignees d'edition, cadre HUD : son
   d'edition a la saisie d'un objet).
+
+### Themes (`holo/theme`, `client/theme`, `modules/camera/themeconfigurator`)
+
+- Un **theme** (`HoloTheme`, immuable) = un motif de fond des fenetres (`HoloThemePattern`, registre Forge
+  `hololib:theme_pattern`, extensible par un autre mod ; integres `solid` Uni, `scanlines` Lignes TV, `diagonal` Bandes
+  diagonales, `grid` Grille ; inconnu -> `solid` ; **regle** : un motif se dessine en morceaux qui ne se recouvrent
+  pas, dans une couche, couleurs pre-melangees `HoloThemePattern.mix` : des quads translucides superposes scintillent
+  avec Embeddium / Oculus, surtout vus de dos) + une couleur RGB par role `HoloThemeColor` : `PRIMARY` (bleu),
+  `SECONDARY` (autre bleu, fond des motifs), `SELECTION` (vert), `ACTION` (jaune), `SPECIAL` (blanc), `CRITICAL`
+  (rouge). Defaut `HoloTheme.DEFAULT` (apparence d'avant les themes), staff `DEFAULT_STAFF` (violet, diagonales).
+- **Regle** : aucune couleur en dur dans un module ou un renderer ; un `HoloColor` = role + alpha (l'objet garde sa
+  transparence) + nuance `lighter` / `darker`, constante resolue au dessin (`canvas.color(c)`, `c.resolve(theme)`),
+  sans allocation. Couleurs fixes seulement pour les donnees (astres, palette du Configurator, textures) et les noirs
+  d'ombre. Correspondance des anciennes couleurs : par teinte (jaunes = `ACTION` meme quand ils signalaient une
+  selection).
+- **Bibliotheque nommee** du serveur (`HoloThemeLibrary`, `data/hololib_themes.dat` de l'overworld) : themes partages
+  (id, createur ou serveur, theme ; 64 au plus, 8 par joueur), deux integres non supprimables ("Defaut" 0, "Staff" 1),
+  et deux **selections du serveur** (standard, staff). Instantane complet (`HoloThemesPacket`) a la connexion et a
+  tous apres chaque changement (au plus un par tick).
+- **Selection du joueur** : module de sa memoire `HoloThemeSelector` (Theme Configurator) ; sans module ou "Suivre le
+  serveur" (-1), theme disparu, ou jeu staff d'un non-op : la selection du serveur.
+- Objet theme = `HoloThemed` (toutes les `HoloWindow`) : la **source** (`SERVER` commun a tous, `CLIENT` du joueur qui
+  regarde, defaut) et le **jeu staff** (objet reserve aux ops) sont un **choix du module** dans le code
+  (`HoloWindow.setThemeSource` / `setStaffTheme`, ou surcharge) ; jamais synchronises ni edites en jeu. Objets de
+  marker / dimension : `SERVER` ; staff : fenetres et poignees du Space Configurator, Area Configurator, Admin Theme
+  Configurator. `themeOverride()` : theme impose (apercu). Resolution client : `HoloThemes.resolve(objet)` (cache de
+  `ClientThemes`, `revision()` pour les tables precalculees) ; rendus hors objet (radar, ciblage, Attack Guard,
+  surcouches Space) : `HoloThemes.clientStandard()`.
+- Dessin : `HoloWindowRenderer` passe le theme au canvas (`HoloCanvas.theme()`, `color()`, `gradient()`) ; fond de
+  fenetre = `root().setPattern(alpha)`.
+- Modules `hololib:theme_configurator` (joueur ; edite ses propres themes, choisit les siens) et
+  `hololib:admin_theme_configurator` (ops verifies en premier ; edite tous les themes, choisit ceux du serveur) : meme
+  code (`ThemeConfiguratorBase`), `Configurable` ; fenetre de Config (onglets Standard / Staff pour les ops,
+  bibliotheque + Nouveau / Dupliquer / nom / Supprimer a deux clics, parametres Motif + 6 couleurs, outil :
+  `HoloWidgetColorPicker` ou liste des motifs ; theme non modifiable : "Dupliquer pour modifier") et fenetre d'apercu
+  (`ThemePreviewWindow`, pas `HoloRelativeToOpen` : ouverte avec la config, placee a sa droite chaque tick par le
+  client du proprietaire, theme = brouillon local suivi pendant le glisser). Actions `SELECT`, `CREATE`, `RENAME`,
+  `DELETE`, `SET_COLOR`, `SET_PATTERN`.
 
 ### Edition en jeu (`holo/edit`, `client/edit`)
 
@@ -570,5 +616,6 @@ Un objet qui existe cote serveur doit plutot etre une vraie `Entity` + `EntityRe
   Oculus/Embeddium, migration future vers `GpuDevice` en 1.21.5+).
 - Pas d'allocation par frame dans les chemins de rendu ; tout etat GL modifie est restaure (y compris sur exception).
 - Un renderer lit un etat et dessine ; la logique (interaction, animations d'etat) vit ailleurs.
+- Couleurs : roles du theme (`HoloColor`), jamais de teinte en dur (voir Themes).
 - Style : commentaires et javadoc en francais **sans accents**, accolades sur une nouvelle ligne, une
   `package-info.java` documente chaque package non trivial.

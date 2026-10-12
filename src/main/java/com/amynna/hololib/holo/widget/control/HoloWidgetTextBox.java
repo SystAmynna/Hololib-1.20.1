@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget.control;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloWidget;
 import net.minecraft.network.chat.Component;
@@ -28,10 +29,14 @@ public class HoloWidgetTextBox extends HoloWidget implements HoloTextInput
     private float hoverMargin = 24f;
     private boolean hovered;
     private int age;
-    private int background = 0x60101828;
-    private int editingBackground = 0xA0101828;
-    private int border = 0xFF808060;
-    private int editingBorder = 0xFFFFE060;
+    private static final HoloColor HOVER = HoloColor.special(0x10);
+    private static final HoloColor PLACEHOLDER = HoloColor.special(0xFF).darker(0.43f);
+    private static final HoloColor TEXT = HoloColor.special(0xFF);
+
+    private HoloColor background = HoloColor.secondary(0x60).darker(0.84f);
+    private HoloColor editingBackground = HoloColor.secondary(0xA0).darker(0.84f);
+    private HoloColor border = HoloColor.special(0xFF).darker(0.54f);
+    private HoloColor editingBorder = HoloColor.action(0xFF).lighter(0.18f);
 
     /**
      * @param maxLength caracteres au plus
@@ -88,6 +93,14 @@ public class HoloWidgetTextBox extends HoloWidget implements HoloTextInput
 
     public HoloWidgetTextBox setColors(int background, int editingBackground, int border, int editingBorder)
     {
+        return setColors(HoloColor.fixed(background), HoloColor.fixed(editingBackground), HoloColor.fixed(border),
+                HoloColor.fixed(editingBorder));
+    }
+
+    /** Fonds et bordures, au repos et en saisie (par defaut : secondaire sombre, gris, action). */
+    public HoloWidgetTextBox setColors(HoloColor background, HoloColor editingBackground, HoloColor border,
+                                       HoloColor editingBorder)
+    {
         this.background = background;
         this.editingBackground = editingBackground;
         this.border = border;
@@ -117,28 +130,29 @@ public class HoloWidgetTextBox extends HoloWidget implements HoloTextInput
     protected void draw(HoloCanvas canvas)
     {
         boolean editing = editing();
-        canvas.fill(0, 0, width(), height(), editing ? editingBackground : background);
-        if (hovered && !editing) canvas.fill(0, 0, width(), height(), 0x10FFFFFF);
-        canvas.outline(0, 0, width(), height(), 1f, editing ? editingBorder : border);
+        int accent = canvas.color(editingBorder);
+        canvas.fill(0, 0, width(), height(), canvas.color(editing ? editingBackground : background));
+        if (hovered && !editing) canvas.fill(0, 0, width(), height(), canvas.color(HOVER));
+        canvas.outline(0, 0, width(), height(), 1f, editing ? accent : canvas.color(border));
         if (!editing && buffer.isEmpty()) {
-            canvas.text(placeholder, PADDING, PADDING + 1f, 0xFF909090);
+            canvas.text(placeholder, PADDING, PADDING + 1f, canvas.color(PLACEHOLDER));
             return;
         }
         int first = buffer.firstLine();
         int last = Math.min(buffer.lineCount(), first + buffer.visibleLines());
         for (int i = first; i < last; i++) {
-            canvas.text(buffer.lineText(i), PADDING, PADDING + 1f + (i - first) * LINE_HEIGHT, 0xFFFFFFFF);
+            canvas.text(buffer.lineText(i), PADDING, PADDING + 1f + (i - first) * LINE_HEIGHT, canvas.color(TEXT));
         }
         if (buffer.lineCount() > buffer.visibleLines()) {
             // Barre de defilement.
             float track = height() - 4f;
             float barHeight = Math.max(4f, track * buffer.visibleLines() / buffer.lineCount());
             float barY = 2f + (track - barHeight) * first / (buffer.lineCount() - buffer.visibleLines());
-            canvas.fill(width() - 3f, barY, 1f, barHeight, editingBorder);
+            canvas.fill(width() - 3f, barY, 1f, barHeight, accent);
         }
         if (editing && (age / BLINK_TICKS) % 2 == 0) {
             canvas.fill(PADDING + buffer.cursorX(), PADDING + (buffer.cursorLine() - first) * LINE_HEIGHT, 1f,
-                    LINE_HEIGHT - 1f, editingBorder);
+                    LINE_HEIGHT - 1f, accent);
         }
     }
 }

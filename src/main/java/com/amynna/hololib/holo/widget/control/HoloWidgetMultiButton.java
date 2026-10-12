@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget.control;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.widget.HoloCanvas;
@@ -19,14 +20,14 @@ import java.util.function.Consumer;
  */
 public class HoloWidgetMultiButton extends HoloWidget implements HoloClickable, HoloHoverable
 {
-    protected static final int HOVER_OVERLAY = 0x30FFFFFF;
-    protected static final int PRESSED_OVERLAY = 0x60FFFFFF;
+    protected static final HoloColor HOVER_OVERLAY = HoloColor.special(0x30);
+    protected static final HoloColor PRESSED_OVERLAY = HoloColor.special(0x60);
 
     private final Map<HoloControl, Consumer<? super HoloWidgetMultiButton>> actions = new LinkedHashMap<>();
     private Component text;
-    private int background = 0x6020A0FF;
-    private int border = 0xFF40C0FF;
-    private int textColor = 0xFFFFFFFF;
+    private HoloColor background = HoloColor.secondary(0x60);
+    private HoloColor border = HoloColor.primary(0xFF);
+    private HoloColor textColor = HoloColor.special(0xFF);
     private boolean hovered;
     /** Boutons maintenus, un bit par bouton ({@link HoloControl#mouseButton()}). */
     private int pressed;
@@ -62,7 +63,14 @@ public class HoloWidgetMultiButton extends HoloWidget implements HoloClickable, 
         return this;
     }
 
+    /** Couleurs fixes {@code 0xAARRGGBB}. */
     public HoloWidgetMultiButton setColors(int background, int border, int textColor)
+    {
+        return setColors(HoloColor.fixed(background), HoloColor.fixed(border), HoloColor.fixed(textColor));
+    }
+
+    /** Fond, bordure et texte (par defaut : secondaire, principale, speciale). */
+    public HoloWidgetMultiButton setColors(HoloColor background, HoloColor border, HoloColor textColor)
     {
         this.background = background;
         this.border = border;
@@ -96,10 +104,12 @@ public class HoloWidgetMultiButton extends HoloWidget implements HoloClickable, 
     @Override
     protected void draw(HoloCanvas canvas)
     {
-        canvas.fill(0, 0, width(), height(), background);
-        if (pressed() || hovered) canvas.fill(0, 0, width(), height(), pressed() ? PRESSED_OVERLAY : HOVER_OVERLAY);
-        canvas.outline(0, 0, width(), height(), 1f, border);
+        canvas.fill(0, 0, width(), height(), canvas.color(background));
+        if (pressed() || hovered) {
+            canvas.fill(0, 0, width(), height(), canvas.color(pressed() ? PRESSED_OVERLAY : HOVER_OVERLAY));
+        }
+        canvas.outline(0, 0, width(), height(), 1f, canvas.color(border));
         canvas.text(text, (width() - canvas.textWidth(text)) / 2f, (height() - canvas.lineHeight()) / 2f + 1f,
-                textColor);
+                canvas.color(textColor));
     }
 }

@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.quickaction;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloWidget;
 import com.amynna.hololib.holo.widget.control.HoloWidgetDragRow;
@@ -15,7 +16,8 @@ import java.util.function.Consumer;
 final class QuickActionRow extends HoloWidgetDragRow
 {
     private static final float SWITCH_WIDTH = 28f;
-    private static final int GRIP = 0xFF80B0D0;
+    private static final HoloColor GRIP = HoloColor.primary(0xFF).lighter(0.3f);
+    private static final HoloColor TEXT = HoloColor.special(0xFF);
 
     private final QuickAction action;
     private final HoloWidgetSwitch toggle;
@@ -47,7 +49,7 @@ final class QuickActionRow extends HoloWidgetDragRow
     {
         super.draw(canvas);
         float mid = height() / 2f;
-        for (int i = -1; i <= 1; i++) canvas.fill(3f, mid + 3f * i - 0.5f, 6f, 1f, GRIP);
+        for (int i = -1; i <= 1; i++) canvas.fill(3f, mid + 3f * i - 0.5f, 6f, 1f, canvas.color(GRIP));
         float icon = height() - 4f;
         canvas.push(12f, 2f);
         try {
@@ -55,6 +57,6 @@ final class QuickActionRow extends HoloWidgetDragRow
         } finally {
             canvas.pop();
         }
-        canvas.text(action.name(), 16f + icon, (height() - canvas.lineHeight()) / 2f + 1f, 0xFFFFFFFF);
+        canvas.text(action.name(), 16f + icon, (height() - canvas.lineHeight()) / 2f + 1f, canvas.color(TEXT));
     }
 }

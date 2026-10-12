@@ -1,5 +1,8 @@
 package com.amynna.hololib.client.render.modules.monde.areadisplayer;
 
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloTheme;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.client.modules.monde.areadisplayer.AreaMesher;
 import com.amynna.hololib.client.modules.monde.areadisplayer.AreaTerrainClient;
@@ -10,7 +13,6 @@ import com.amynna.hololib.client.render.type.HoloRenderTypes;
 import com.amynna.hololib.holo.edit.HoloEditMath;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
-import com.amynna.hololib.modules.camera.config.ConfigWindow;
 import com.amynna.hololib.modules.monde.areadisplayer.AreaDisplayerCube;
 import com.amynna.hololib.modules.monde.areadisplayer.AreaDisplayerModule;
 import com.amynna.hololib.modules.monde.areadisplayer.AreaGrid;
@@ -54,20 +56,25 @@ public final class AreaDisplayerCubeRenderer implements HoloObjectRenderer<AreaD
 {
     /** Demi-epaisseur des aretes, en blocs (a l'echelle par defaut). */
     private static final float THICKNESS = 0.01f;
-    private static final int EDGE_COLOR = 0x90000000 | ConfigWindow.ACCENT & 0xFFFFFF;
-    /** Couleurs du terrain par code {@code direction + 6 * type} (voir {@link AreaMesher}). */
+    private static final HoloColor EDGE_COLOR = HoloColor.primary(0x90);
+    /**
+     * Couleurs du terrain par code {@code direction + 6 * type} (voir {@link AreaMesher}) : solide = couleur
+     * principale, fluide = secondaire ; recalculees quand le theme de l'objet change (fil de rendu).
+     */
     private static final int[] TERRAIN_COLORS = new int[12];
+    private static final HoloColor SOLID = HoloColor.primary(0xFF);
+    private static final HoloColor FLUID = HoloColor.secondary(0xFF).darker(0.1f);
+    private static HoloTheme terrainTheme;
     /** Ombrage par direction : +X, -X, +Y, -Y, +Z, -Z. */
     private static final float[] SHADE = {0.8f, 0.8f, 1f, 0.5f, 0.65f, 0.65f};
     private static final int SOLID_ALPHA = 0xB0;
     private static final int FLUID_ALPHA = 0x50;
-    private static final int FLUID_RGB = 0x3070FF;
 
     /** Rayon d'un point, en blocs (a l'echelle par defaut). */
     private static final float DOT_RADIUS = 0.035f;
-    private static final int PLAYER_COLOR = 0xFF50F070;
-    private static final int HOSTILE_COLOR = 0xFFFF5040;
-    private static final int OTHER_COLOR = 0xFFFFD040;
+    private static final HoloColor PLAYER_COLOR = HoloColor.selection(0xFF);
+    private static final HoloColor HOSTILE_COLOR = HoloColor.critical(0xFF).darker(0.01f);
+    private static final HoloColor OTHER_COLOR = HoloColor.action(0xFF);
     /** Demi-epaisseur des trainees, en blocs (a l'echelle par defaut). */
     private static final float TRAIL_THICKNESS = 0.006f;
     /** Opacite maximale d'une trainee (point le plus recent). */
@@ -78,8 +85,8 @@ public final class AreaDisplayerCubeRenderer implements HoloObjectRenderer<AreaD
     private static final float GAZE_TAN = (float) Math.tan(Math.toRadians(GAZE_DEGREES));
     private static final float TEXT_SCALE = 0.0125f;
     private static final float NAME_GAP = 0.015f;
-    private static final int NAME_COLOR = 0xFFFFFFFF;
-    private static final int STATUS_COLOR = 0xFF80E0FF;
+    private static final HoloColor NAME_COLOR = HoloColor.special(0xFF);
+    private static final HoloColor STATUS_COLOR = HoloColor.primary(0xFF).lighter(0.4f);
     private static final String NO_ZONE = "Aucune zone";
 
     private static final int SEGMENTS = 16;
@@ -89,16 +96,44 @@ public final class AreaDisplayerCubeRenderer implements HoloObjectRenderer<AreaD
     /** Sommet transforme (fil de rendu seulement). */
     private static final Vector3f VERTEX = new Vector3f();
 
+    // Couleurs du theme de la frame en cours (fil de rendu), posees par {@link #applyTheme}.
+    private static int edgeColor;
+    private static int playerColor;
+    private static int hostileColor;
+    private static int otherColor;
+    private static int nameColor;
+    private static int statusColor;
+
+    /** Resout les couleurs dans le theme de l'objet (debut de frame). */
+    private static void applyTheme(HoloTheme theme)
+    {
+        edgeColor = EDGE_COLOR.resolve(theme);
+        playerColor = PLAYER_COLOR.resolve(theme);
+        hostileColor = HOSTILE_COLOR.resolve(theme);
+        otherColor = OTHER_COLOR.resolve(theme);
+        nameColor = NAME_COLOR.resolve(theme);
+        statusColor = STATUS_COLOR.resolve(theme);
+    }
+
     static {
         for (int i = 0; i <= SEGMENTS; i++) {
             double a = 2.0 * Math.PI * i / SEGMENTS;
             COS[i] = (float) Math.cos(a);
             SIN[i] = (float) Math.sin(a);
         }
+    }
+
+    /** Table {@link #TERRAIN_COLORS} pour le theme, si elle a ete calculee pour un autre. */
+    private static void terrainColors(HoloTheme theme)
+    {
+        if (theme == terrainTheme) return;
+        terrainTheme = theme;
+        int solid = SOLID.rgb(theme);
+        int fluidRgb = FLUID.rgb(theme);
         for (int code = 0; code < 12; code++) {
             int direction = code % 6;
             boolean fluid = code >= 6;
-            int rgb = fluid ? FLUID_RGB : ConfigWindow.ACCENT & 0xFFFFFF;
+            int rgb = fluid ? fluidRgb : solid;
             float shade = SHADE[direction];
             int r = (int) ((rgb >> 16 & 0xFF) * shade);
             int g = (int) ((rgb >> 8 & 0xFF) * shade);
@@ -134,6 +169,9 @@ public final class AreaDisplayerCubeRenderer implements HoloObjectRenderer<AreaD
     public void render(AreaDisplayerCube cube, PoseStack pose, MultiBufferSource buffers, int packedLight,
                        HoloDrawContext ctx)
     {
+        HoloTheme theme = HoloThemes.resolve(cube);
+        applyTheme(theme);
+        terrainColors(theme);
         AreaDisplayerModule module = cube.displayer();
         if (module == null) return;
         HoloTransform t = cube.transform();
@@ -227,7 +265,7 @@ public final class AreaDisplayerCubeRenderer implements HoloObjectRenderer<AreaD
         if (!world) return;
         if (gazed != null) {
             placeBillboard(matrix, gazedX, gazedY, gazedZ);
-            label(gazed.name(), billboard, radius + NAME_GAP * size, NAME_COLOR, buffers, packedLight);
+            label(gazed.name(), billboard, radius + NAME_GAP * size, nameColor, buffers, packedLight);
         }
         if (module.progress() != AreaDisplayerModule.NO_SCAN) {
             status(statusText(module), matrix, buffers, packedLight);
@@ -236,8 +274,8 @@ public final class AreaDisplayerCubeRenderer implements HoloObjectRenderer<AreaD
 
     private static int color(int kind)
     {
-        return kind == AreaTerrainPackets.KIND_PLAYER ? PLAYER_COLOR
-                : kind == AreaTerrainPackets.KIND_HOSTILE ? HOSTILE_COLOR : OTHER_COLOR;
+        return kind == AreaTerrainPackets.KIND_PLAYER ? playerColor
+                : kind == AreaTerrainPackets.KIND_HOSTILE ? hostileColor : otherColor;
     }
 
     private String statusText(AreaDisplayerModule module)
@@ -355,9 +393,9 @@ public final class AreaDisplayerCubeRenderer implements HoloObjectRenderer<AreaD
                     float dy = axis == 1 ? 2f * half[1] : 0f;
                     float dz = axis == 2 ? 2f * half[2] : 0f;
                     band(consumer, matrix, start[0], start[1], start[2], dx, dy, dz, ua == 0 ? t : 0f,
-                            ua == 1 ? t : 0f, ua == 2 ? t : 0f, EDGE_COLOR, light);
+                            ua == 1 ? t : 0f, ua == 2 ? t : 0f, edgeColor, light);
                     band(consumer, matrix, start[0], start[1], start[2], dx, dy, dz, va == 0 ? t : 0f,
-                            va == 1 ? t : 0f, va == 2 ? t : 0f, EDGE_COLOR, light);
+                            va == 1 ? t : 0f, va == 2 ? t : 0f, edgeColor, light);
                 }
             }
         }
@@ -375,7 +413,7 @@ public final class AreaDisplayerCubeRenderer implements HoloObjectRenderer<AreaD
         float y = billboard.m31();
         float z = billboard.m32();
         if (x * x + y * y + z * z > distance * distance) return;
-        label(text, billboard, NAME_GAP * size, STATUS_COLOR, buffers, light);
+        label(text, billboard, NAME_GAP * size, statusColor, buffers, light);
     }
 
     /** Texte centre au-dessus du billboard {@code m}, a {@code lift} blocs. */

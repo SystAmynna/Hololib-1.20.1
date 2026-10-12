@@ -1,5 +1,7 @@
 package com.amynna.hololib.client.render.modules.dimension.space;
 
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.modules.dimension.space.math.SpaceSkyFrame;
 import com.amynna.hololib.modules.dimension.space.model.SpaceBody;
@@ -43,21 +45,21 @@ public final class SpaceOverlay
     /** Segments d'un anneau de corps. */
     public static final int BODY_RING_SEGMENTS = 64;
 
-    // ---------------------------------------------------------------- couleurs (RGB, D18)
+    // ---------------------------------------------------------------- couleurs (roles du theme, D18)
 
-    /** Planetes et objets mineurs : bleu. Anneau, orbite, nom, lien. */
-    public static final int PLANET_COLOR = 0x4FA8FF;
-    /** Etoiles du systeme courant (principale et compagnes) : jaune. */
-    public static final int STAR_COLOR = 0xFFD84A;
-    /** Lunes : gris clair. */
-    public static final int MOON_COLOR = 0xB8B8B8;
-    /** Etoiles de fond (autres systemes) : double cercle et nom blancs. */
-    public static final int DISTANT_STAR_COLOR = 0xFFFFFF;
+    /** Planetes et objets mineurs : couleur principale (bleu). Anneau, orbite, nom, lien. */
+    public static final HoloColor PLANET_COLOR = HoloColor.primary(0xFF).darker(0.03f);
+    /** Etoiles du systeme courant (principale et compagnes) : couleur d'action (jaune). */
+    public static final HoloColor STAR_COLOR = HoloColor.action(0xFF);
+    /** Lunes : speciale assombrie (gris clair). */
+    public static final HoloColor MOON_COLOR = HoloColor.special(0xFF).darker(0.28f);
+    /** Etoiles de fond (autres systemes) : double cercle et nom, couleur speciale (blanc). */
+    public static final HoloColor DISTANT_STAR_COLOR = HoloColor.special(0xFF);
     /**
-     * Cible du vaisseau (T43, D33, C125) : anneau et fleche de Space Pilot ; meme vert que le libelle « DECIBLER » de
-     * la Space Map ({@code SpaceMapWindow.TARGET_COLOR}).
+     * Cible du vaisseau (T43, D33, C125) : anneau et fleche de Space Pilot ; meme role (selection, vert) que le libelle
+     * « DECIBLER » de la Space Map ({@code SpaceMapWindow.TARGET_COLOR}).
      */
-    public static final int TARGET_COLOR = 0x40FF40;
+    public static final HoloColor TARGET_COLOR = HoloColor.selection(0xFF);
 
     private SpaceOverlay() {}
 
@@ -93,17 +95,21 @@ public final class SpaceOverlay
     }
 
     /**
-     * Couleur de reperage d'un corps du systeme courant selon son type (anneau, orbite, nom, lien) : etoile jaune, lune
-     * grise, planete et objet mineur bleus.
+     * Couleur RGB de reperage d'un corps du systeme courant selon son type (anneau, orbite, nom, lien), dans le theme
+     * standard du joueur local : etoile = action, lune = speciale assombrie, planete et objet mineur = principale.
      */
     public static int kindColor(SpaceBodyKind kind)
     {
-        return switch (kind) {
+        HoloColor color = switch (kind) {
             case STAR -> STAR_COLOR;
             case MOON -> MOON_COLOR;
             case PLANET, MINOR -> PLANET_COLOR;
         };
+        return rgb(color);
     }
+
+    /** Couleur RGB d'un role des surcouches dans le theme standard du joueur local. */
+    public static int rgb(HoloColor color) { return color.rgb(HoloThemes.clientStandard()); }
 
     public static float red(int argb) { return (argb >> 16 & 0xFF) / 255f; }
 

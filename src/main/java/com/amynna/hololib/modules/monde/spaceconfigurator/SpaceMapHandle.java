@@ -1,5 +1,7 @@
 package com.amynna.hololib.modules.monde.spaceconfigurator;
 
+import com.amynna.hololib.holo.theme.HoloThemed;
+import com.amynna.hololib.holo.theme.HoloThemeSource;
 import com.amynna.hololib.holo.edit.HoloEditTranslation;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloObject;
@@ -18,7 +20,7 @@ import com.amynna.hololib.holo.object.HoloVisibility;
  * derniere qu'il a ecrite et en deduit le deplacement du systeme ({@code docs/space/04-mathematiques.md} par. 7).
  * Rotation et echelle restent neutres (le renderer dessine un petit marqueur de taille fixe).
  */
-public final class SpaceMapHandle extends HoloObject implements HoloEditTranslation
+public final class SpaceMapHandle extends HoloObject implements HoloEditTranslation, HoloThemed
 {
     /** Cle de l'objet dans le module. */
     public static final String KEY = "handle";
@@ -48,4 +50,11 @@ public final class SpaceMapHandle extends HoloObject implements HoloEditTranslat
     /** Dessinee seulement chez un operateur (backend client du module). */
     @Override
     public boolean shown() { return SpaceConfiguratorModule.localOp(); }
+
+    /** Theme du serveur (objet partage), jeu staff (reserve aux ops). */
+    @Override
+    public HoloThemeSource themeSource() { return HoloThemeSource.SERVER; }
+
+    @Override
+    public boolean staffTheme() { return true; }
 }

@@ -20,7 +20,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
  */
 public final class HoloNetwork
 {
-    private static final String PROTOCOL = "8";
+    private static final String PROTOCOL = "9";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             ResourceLocation.fromNamespaceAndPath(HoloLib.MODID, "main"), () -> PROTOCOL, PROTOCOL::equals,
@@ -59,6 +59,9 @@ public final class HoloNetwork
         CHANNEL.messageBuilder(HoloOpenObjectPacket.class, id++, NetworkDirection.PLAY_TO_SERVER)
                 .encoder(HoloOpenObjectPacket::encode).decoder(HoloOpenObjectPacket::decode)
                 .consumerMainThread(HoloOpenObjectPacket::handle).add();
+        CHANNEL.messageBuilder(HoloThemesPacket.class, id++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(HoloThemesPacket::encode).decoder(HoloThemesPacket::decode)
+                .consumerMainThread(HoloThemesPacket::handle).add();
     }
 
     public static void send(ServerPlayer player, Object packet)
@@ -76,6 +79,12 @@ public final class HoloNetwork
     public static void sendToTracking(LevelChunk chunk, Object packet)
     {
         CHANNEL.send(PacketDistributor.TRACKING_CHUNK.with(() -> chunk), packet);
+    }
+
+    /** Envoie a tous les joueurs connectes. */
+    public static void sendToAll(Object packet)
+    {
+        CHANNEL.send(PacketDistributor.ALL.noArg(), packet);
     }
 
     /** Envoie a tous les joueurs de la dimension. */

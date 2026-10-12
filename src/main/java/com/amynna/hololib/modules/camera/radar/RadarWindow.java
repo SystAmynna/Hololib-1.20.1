@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.radar;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.edit.HoloEditRotation;
 import com.amynna.hololib.holo.edit.HoloEditScale;
@@ -28,7 +29,7 @@ final class RadarWindow extends HoloWindow implements HoloEditTranslation, HoloE
 
     private static final int WIDTH = 140;
     private static final int HEIGHT = 62;
-    private static final int ACCENT = 0xFF40C0FF;
+    private static final HoloColor ACCENT = HoloColor.primary(0xFF);
     private static final String IDLE = "Radar : inactif";
 
     private final RadarModule module;
@@ -44,7 +45,7 @@ final class RadarWindow extends HoloWindow implements HoloEditTranslation, HoloE
         // Le fond prend les clics : viser la fenetre ne casse jamais le bloc derriere.
         setInterceptedInputs(HoloControl.LEFT_CLICK, HoloControl.RIGHT_CLICK, HoloControl.MIDDLE_CLICK);
         HoloPanel root = root();
-        root.setBackground(0x8010304A).setBorder(ACCENT, 1f);
+        root.setPattern(0x80).setBorder(ACCENT, 1f);
         root.add(new HoloLabel(4, 3, WIDTH - 8, 14, Component.literal("Radar"))
                 .setAlign(HoloLabel.Align.CENTER).setColor(ACCENT));
         root.add(new HoloWidgetButton(6, 20, 62, 20, Component.literal("Activer"),
@@ -52,7 +53,7 @@ final class RadarWindow extends HoloWindow implements HoloEditTranslation, HoloE
         root.add(new HoloWidgetButton(WIDTH - 68, 20, 62, 20, Component.literal("Desactiver"),
                 button -> module.requestDeactivate()));
         status = root.add(new HoloLabel(4, 44, WIDTH - 8, 14, Component.literal(IDLE))
-                .setAlign(HoloLabel.Align.CENTER).setColor(0xFFC0D0E0));
+                .setAlign(HoloLabel.Align.CENTER).setColor(HoloColor.special(0xFF).darker(0.18f)));
     }
 
     /** Ligne d'etat (client du proprietaire) ; le composant n'est recree que si le texte change. */

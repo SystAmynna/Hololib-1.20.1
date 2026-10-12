@@ -16,6 +16,8 @@
  *     {@code keyseditor} : edition des cles (Config : soi-meme, ou joueur cible pour les ops).</li>
  *     <li>{@code attackguard} : pas d'attaque sur un joueur qui possede une cle de la whitelist (Config), croix
  *     rouge a la place du reticule.</li>
+ *     <li>{@code themeconfigurator} : themes du joueur ({@code theme_configurator}) et du serveur
+ *     ({@code admin_theme_configurator}, ops), fenetre de Config et apercu.</li>
  * </ul>
  * Focus et edition ne sont jamais ouverts ensemble. Leur logique client (touches, conditions de sortie, repere de
  * l'editeur) vit dans {@code com.amynna.hololib.client.modules.camera}.

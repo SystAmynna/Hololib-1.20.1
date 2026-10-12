@@ -1,5 +1,6 @@
 package com.amynna.hololib.demo;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
@@ -19,7 +20,7 @@ public final class DemoDimensionModule extends HoloModule
     {
         DemoEditableWindow window = addObject(DemoWindows.labeled("sky", new HoloAnchor.Sky(false),
                 new HoloTransform().setLookingAtOrigin(0f, -35f, SKY_DISTANCE).setScale(20f), 1f / 100f,
-                "Holo Lib", "Memoire de dimension", 0xFFFFC040));
+                "Holo Lib", "Memoire de dimension", HoloColor.action(0xFF)));
         window.setEditRules(false, true);
         window.setVisibility(HoloVisibility.PUBLIC);
     }

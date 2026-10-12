@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.spaceknowledge;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.object.HoloTransform;
@@ -80,9 +81,11 @@ final class SpaceKnowledgeConfigWindow extends ConfigWindow
     private static final class AngleBar extends HoloWidgetValueBar
     {
         private static final int SPAN = SpaceKnowledgeModule.MAX_NAME_ANGLE - SpaceKnowledgeModule.MIN_NAME_ANGLE;
-        private static final int FILL = 0xC040A0FF;
-        private static final int TRACK = 0x60202040;
-        private static final int BORDER = 0xFF40C0FF;
+        private static final HoloColor FILL = HoloColor.secondary(0xC0).lighter(0.12f);
+        private static final HoloColor TRACK = HoloColor.secondary(0x60).darker(0.75f);
+        private static final HoloColor BORDER = HoloColor.primary(0xFF);
+        private static final HoloColor HOVER = HoloColor.special(0x20);
+        private static final HoloColor TEXT = HoloColor.special(0xFF);
 
         private final Component label;
         private boolean dragging;
@@ -137,12 +140,12 @@ final class SpaceKnowledgeConfigWindow extends ConfigWindow
                 shown = degrees;
                 display = Component.empty().append(label).append(" : " + degrees + "°");
             }
-            canvas.fill(0, 0, width(), height(), TRACK);
-            canvas.fill(0, 0, width() * value(), height(), FILL);
-            if (hovered() || dragging) canvas.fill(0, 0, width(), height(), 0x20FFFFFF);
-            canvas.outline(0, 0, width(), height(), 1f, BORDER);
+            canvas.fill(0, 0, width(), height(), canvas.color(TRACK));
+            canvas.fill(0, 0, width() * value(), height(), canvas.color(FILL));
+            if (hovered() || dragging) canvas.fill(0, 0, width(), height(), canvas.color(HOVER));
+            canvas.outline(0, 0, width(), height(), 1f, canvas.color(BORDER));
             canvas.text(display, (width() - canvas.textWidth(display)) / 2f, (height() - canvas.lineHeight()) / 2f + 1f,
-                    0xFFFFFFFF);
+                    canvas.color(TEXT));
         }
     }
 }

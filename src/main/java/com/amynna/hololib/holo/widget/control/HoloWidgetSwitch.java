@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget.control;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloWidget;
@@ -23,9 +24,11 @@ public class HoloWidgetSwitch extends HoloWidget implements HoloToggleable, Holo
     private boolean predictive = true;
     private boolean on;
     private boolean hovered;
-    private int onColor = 0xFF40C060;
-    private int offColor = 0xFF606060;
-    private int textColor = 0xFFFFFFFF;
+    private HoloColor onColor = HoloColor.selection(0xFF).darker(0.19f);
+    private HoloColor offColor = HoloColor.special(0xFF).darker(0.62f);
+    private HoloColor textColor = HoloColor.special(0xFF);
+    private static final HoloColor HOVER = HoloColor.special(0x20);
+    private static final HoloColor KNOB = HoloColor.special(0xFF);
 
     public HoloWidgetSwitch(float x, float y, float width, float height, Component label,
                             BiConsumer<? super HoloWidgetSwitch, Boolean> onToggle)
@@ -49,6 +52,12 @@ public class HoloWidgetSwitch extends HoloWidget implements HoloToggleable, Holo
     }
 
     public HoloWidgetSwitch setColors(int onColor, int offColor, int textColor)
+    {
+        return setColors(HoloColor.fixed(onColor), HoloColor.fixed(offColor), HoloColor.fixed(textColor));
+    }
+
+    /** Piste allumee, piste eteinte, libelle (par defaut : selection, gris, speciale). */
+    public HoloWidgetSwitch setColors(HoloColor onColor, HoloColor offColor, HoloColor textColor)
     {
         this.onColor = onColor;
         this.offColor = offColor;
@@ -78,12 +87,12 @@ public class HoloWidgetSwitch extends HoloWidget implements HoloToggleable, Holo
     @Override
     protected void draw(HoloCanvas canvas)
     {
-        if (hovered) canvas.fill(0, 0, width(), height(), 0x20FFFFFF);
-        canvas.text(label, 2f, (height() - canvas.lineHeight()) / 2f + 1f, textColor);
+        if (hovered) canvas.fill(0, 0, width(), height(), canvas.color(HOVER));
+        canvas.text(label, 2f, (height() - canvas.lineHeight()) / 2f + 1f, canvas.color(textColor));
         float trackX = width() - TRACK_WIDTH - 2f;
         float trackY = (height() - TRACK_HEIGHT) / 2f;
-        canvas.fill(trackX, trackY, TRACK_WIDTH, TRACK_HEIGHT, on ? onColor : offColor);
+        canvas.fill(trackX, trackY, TRACK_WIDTH, TRACK_HEIGHT, canvas.color(on ? onColor : offColor));
         float knob = TRACK_HEIGHT - 2f;
-        canvas.fill(on ? trackX + TRACK_WIDTH - knob - 1f : trackX + 1f, trackY + 1f, knob, knob, 0xFFFFFFFF);
+        canvas.fill(on ? trackX + TRACK_WIDTH - knob - 1f : trackX + 1f, trackY + 1f, knob, knob, canvas.color(KNOB));
     }
 }

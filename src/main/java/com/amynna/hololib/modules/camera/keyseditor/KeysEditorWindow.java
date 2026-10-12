@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.keyseditor;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.object.HoloTransform;
 import com.amynna.hololib.holo.widget.HoloLabel;
 import com.amynna.hololib.holo.widget.control.HoloWidgetButton;
@@ -20,8 +21,11 @@ final class KeysEditorWindow extends ConfigWindow
     private static final int TAB_HEIGHT = 16;
     private static final int STATUS_HEIGHT = 12;
     private static final int EDITOR_HEIGHT = 120;
-    private static final int TAB_ON = 0xA040C0FF;
-    private static final int TAB_OFF = 0x4020A0FF;
+    private static final HoloColor TAB_ON = HoloColor.primary(0xA0);
+    private static final HoloColor TAB_OFF = HoloColor.secondary(0x40);
+    private static final HoloColor TEXT = HoloColor.special(0xFF);
+    private static final HoloColor STATUS_OK = HoloColor.selection(0xFF).lighter(0.39f);
+    private static final HoloColor STATUS_ERROR = HoloColor.critical(0xFF).lighter(0.37f);
 
     private final KeysEditorModule module;
     private final HoloWidgetButton self;
@@ -54,14 +58,14 @@ final class KeysEditorWindow extends ConfigWindow
     void refresh()
     {
         boolean selfMode = module.mode() == KeysEditorModule.SELF;
-        self.setColors(selfMode ? TAB_ON : TAB_OFF, ACCENT, 0xFFFFFFFF);
-        target.setColors(selfMode ? TAB_OFF : TAB_ON, ACCENT, 0xFFFFFFFF);
+        self.setColors(selfMode ? TAB_ON : TAB_OFF, ACCENT, TEXT);
+        target.setColors(selfMode ? TAB_OFF : TAB_ON, ACCENT, TEXT);
         KeysEditorModule.Status current = module.status();
         if (current != shownStatus || !module.subjectName().equals(shownName)) {
             shownStatus = current;
             shownName = module.subjectName();
             status.setText(Component.literal(text(current, shownName)));
-            status.setColor(current == KeysEditorModule.Status.OK ? 0xFFA0E0A0 : 0xFFFF9090);
+            status.setColor(current == KeysEditorModule.Status.OK ? STATUS_OK : STATUS_ERROR);
         }
         editor.setKeys(module.shown().keys());
         editor.setEditable(current == KeysEditorModule.Status.OK);

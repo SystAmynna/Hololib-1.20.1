@@ -1,5 +1,6 @@
 package com.amynna.hololib.demo;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.modules.camera.quickaction.QuickAction;
@@ -20,6 +21,12 @@ import java.util.List;
  */
 public final class DemoQuickActionsModule extends HoloModule implements QuickActionProvider
 {
+    private static final HoloColor FACE = HoloColor.action(0xFF);
+    private static final HoloColor FEATURES = HoloColor.action(0xFF).darker(0.82f);
+    private static final HoloColor PERSON = HoloColor.primary(0xFF).lighter(0.51f);
+    private static final HoloColor DOOR = HoloColor.action(0xFF).darker(0.3f);
+    private static final HoloColor ARROW = HoloColor.critical(0xFF).lighter(0.05f);
+
     private static final byte HELLO = 0;
     private static final byte TEST = 1;
     private static final byte BYE = 2;
@@ -68,30 +75,30 @@ public final class DemoQuickActionsModule extends HoloModule implements QuickAct
     private static void drawSmile(HoloCanvas canvas, float size)
     {
         float c = size / 2f;
-        disk(canvas, c, c, 0.48f * size, 0xFFFFD040);
-        canvas.fill(0.32f * size, 0.3f * size, 0.1f * size, 0.14f * size, 0xFF302010);
-        canvas.fill(0.58f * size, 0.3f * size, 0.1f * size, 0.14f * size, 0xFF302010);
-        arc(canvas, c, 0.5f * size, 0.22f * size, 0.3f * size, 0.15f * Mth.PI, 0.85f * Mth.PI, 0xFF302010);
+        disk(canvas, c, c, 0.48f * size, canvas.color(FACE));
+        canvas.fill(0.32f * size, 0.3f * size, 0.1f * size, 0.14f * size, canvas.color(FEATURES));
+        canvas.fill(0.58f * size, 0.3f * size, 0.1f * size, 0.14f * size, canvas.color(FEATURES));
+        arc(canvas, c, 0.5f * size, 0.22f * size, 0.3f * size, 0.15f * Mth.PI, 0.85f * Mth.PI, canvas.color(FEATURES));
     }
 
     /** Silhouette : tete et epaules. */
     private static void drawPerson(HoloCanvas canvas, float size)
     {
         float c = size / 2f;
-        disk(canvas, c, 0.3f * size, 0.2f * size, 0xFFA0E0FF);
-        arc(canvas, c, size, 0f, 0.42f * size, Mth.PI, Mth.TWO_PI, 0xFFA0E0FF);
+        disk(canvas, c, 0.3f * size, 0.2f * size, canvas.color(PERSON));
+        arc(canvas, c, size, 0f, 0.42f * size, Mth.PI, Mth.TWO_PI, canvas.color(PERSON));
     }
 
     /** Porte et fleche de sortie. */
     private static void drawExit(HoloCanvas canvas, float size)
     {
         canvas.outline(0.08f * size, 0.08f * size, 0.42f * size, 0.84f * size, Math.max(1f, 0.07f * size),
-                0xFFC08040);
+                canvas.color(DOOR));
         float y = size / 2f;
         float shaft = 0.08f * size;
-        canvas.fill(0.3f * size, y - shaft, 0.4f * size, 2f * shaft, 0xFFFF6050);
+        canvas.fill(0.3f * size, y - shaft, 0.4f * size, 2f * shaft, canvas.color(ARROW));
         canvas.quad(0.68f * size, y - 0.22f * size, 0.95f * size, y, 0.95f * size, y, 0.68f * size, y + 0.22f * size,
-                0xFFFF6050);
+                canvas.color(ARROW));
     }
 
     private static void disk(HoloCanvas canvas, float cx, float cy, float r, int color)

@@ -1,5 +1,6 @@
 package com.amynna.hololib.client.render.modules.camera.spacepilot;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.client.modules.camera.spacepilot.SpacePilotClient;
 import com.amynna.hololib.client.render.modules.dimension.space.SpaceOverlay;
 import com.amynna.hololib.client.render.modules.dimension.space.warp.SpaceWarpTimeline;
@@ -62,7 +63,7 @@ public final class SpaceJumpRenderer implements ViewRenderer
     static final float RADIUS = 1.5f;
 
     /** Couleur de selection des modules Space (RGB), comme la selection du Configurator. */
-    private static final int SELECTION = 0xFFE040;
+    private static final HoloColor SELECTION = HoloColor.action(0xFF).lighter(0.03f);
 
     /**
      * Double anneau de la cible : rayons interieur et exterieur (pixels de reference), memes que celui des etoiles de
@@ -93,16 +94,13 @@ public final class SpaceJumpRenderer implements ViewRenderer
      * Point d'interception de la croisiere (T39, C118) : couleur discrete (bleu pale, RGB), rayon de l'anneau et
      * epaisseur (pixels de reference), opacite.
      */
-    private static final int INTERCEPT_COLOR = 0x8FD8FF;
+    private static final HoloColor INTERCEPT_COLOR = HoloColor.primary(0xFF).lighter(0.41f);
     private static final double INTERCEPT_PX = 5.0;
     private static final double INTERCEPT_THICKNESS_PX = 1.5;
     private static final float INTERCEPT_ALPHA = 0.7f;
     private static final int INTERCEPT_SEGMENTS = 16;
 
     private static final int LIGHT = LightTexture.FULL_BRIGHT;
-    private static final float RED = (SELECTION >> 16 & 0xFF) / 255f;
-    private static final float GREEN = (SELECTION >> 8 & 0xFF) / 255f;
-    private static final float BLUE = (SELECTION & 0xFF) / 255f;
 
     // ---------------------------------------------------------------- etat de la frame (reutilise)
 
@@ -120,9 +118,9 @@ public final class SpaceJumpRenderer implements ViewRenderer
     /** Point d'interception de la croisiere, axes du systeme (lu dans le module du joueur local). */
     private final Vector3d intercept = new Vector3d();
     /** Couleur des anneaux en cours de dessin (selection par defaut). */
-    private float red = RED;
-    private float green = GREEN;
-    private float blue = BLUE;
+    private float red;
+    private float green;
+    private float blue;
     /** Tangente d'un pixel de reference au centre de l'ecran, pour la frame. */
     private double pixelTan;
 
@@ -257,8 +255,9 @@ public final class SpaceJumpRenderer implements ViewRenderer
     }
 
     /** Couleur RGB des anneaux suivants. */
-    private void color(int rgb)
+    private void color(HoloColor color)
     {
+        int rgb = SpaceOverlay.rgb(color);
         red = (rgb >> 16 & 0xFF) / 255f;
         green = (rgb >> 8 & 0xFF) / 255f;
         blue = (rgb & 0xFF) / 255f;

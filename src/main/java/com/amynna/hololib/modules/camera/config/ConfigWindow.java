@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.config;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.edit.HoloDisplay;
 import com.amynna.hololib.holo.edit.HoloEditRotation;
@@ -47,12 +48,14 @@ public class ConfigWindow extends HoloWindow implements HoloRelativeToOpen, Holo
         HoloEditScale
 {
     public static final int BAR_HEIGHT = 16;
-    public static final int BACKGROUND = 0xC0101828;
-    public static final int ACCENT = 0xFF40C0FF;
+    /** Opacite du fond des fenetres (motif du theme). */
+    public static final int BACKGROUND_ALPHA = 0xC0;
+    /** Bordure et titres des fenetres. */
+    public static final HoloColor ACCENT = HoloColor.primary(0xFF);
     /** Largeur de la bande du bord par laquelle on attrape la fenetre, en pixels. */
     public static final int FRAME = 3;
-    private static final int ACCENT_GRABBED = 0xFFA0E8FF;
-    private static final int BAR_BACKGROUND = 0x4040C0FF;
+    private static final HoloColor ACCENT_GRABBED = HoloColor.primary(0xFF).lighter(0.51f);
+    private static final HoloColor BAR_BACKGROUND = HoloColor.primary(0x40);
     private static final int BUTTON = 12;
     private static final int MARGIN = 2;
 
@@ -92,7 +95,7 @@ public class ConfigWindow extends HoloWindow implements HoloRelativeToOpen, Holo
         setVisibility(HoloVisibility.PUBLIC);
         setOpened(false);
         setInterceptedInputs(HoloControl.LEFT_CLICK, HoloControl.RIGHT_CLICK);
-        root().setBackground(BACKGROUND).setBorder(ACCENT, 1f);
+        root().setPattern(BACKGROUND_ALPHA).setBorder(ACCENT, 1f);
         root().add(new HoloPanel(0, 0, contentWidth, BAR_HEIGHT).setBackground(BAR_BACKGROUND));
         float buttonY = (BAR_HEIGHT - BUTTON) / 2f;
         float closeX = contentWidth - MARGIN - BUTTON;
@@ -224,6 +227,11 @@ public class ConfigWindow extends HoloWindow implements HoloRelativeToOpen, Holo
     /** Croix de fermeture : deux barres en diagonale. */
     private static final class CloseButton extends HoloWidgetButton
     {
+        private static final HoloColor PRESSED = HoloColor.critical(0x80);
+        private static final HoloColor HOVERED = HoloColor.critical(0x50);
+        private static final HoloColor CROSS = HoloColor.critical(0xFF).lighter(0.27f);
+        private static final HoloColor CROSS_HOVER = HoloColor.special(0xFF);
+
         private static final float BAR = 1.2f;
         private static final float INSET = 3f;
 
@@ -235,12 +243,14 @@ public class ConfigWindow extends HoloWindow implements HoloRelativeToOpen, Holo
         @Override
         protected void draw(HoloCanvas canvas)
         {
-            if (pressed() || hovered()) canvas.fill(0, 0, width(), height(), pressed() ? 0x80FF4040 : 0x50FF4040);
+            if (pressed() || hovered()) {
+                canvas.fill(0, 0, width(), height(), canvas.color(pressed() ? PRESSED : HOVERED));
+            }
             float x0 = INSET;
             float y0 = INSET;
             float x1 = width() - INSET;
             float y1 = height() - INSET;
-            int color = hovered() ? 0xFFFFFFFF : 0xFFFF8080;
+            int color = canvas.color(hovered() ? CROSS_HOVER : CROSS);
             canvas.quad(x0 - BAR, y0, x0, y0 - BAR, x1 + BAR, y1, x1, y1 + BAR, color);
             canvas.quad(x1, y0 - BAR, x1 + BAR, y0, x0, y1 + BAR, x0 - BAR, y1, color);
         }

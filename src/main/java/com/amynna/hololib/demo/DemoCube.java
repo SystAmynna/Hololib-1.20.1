@@ -1,5 +1,6 @@
 package com.amynna.hololib.demo;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.edit.HoloEditRotation;
 import com.amynna.hololib.holo.edit.HoloEditScale;
 import com.amynna.hololib.holo.edit.HoloEditTranslation;
@@ -22,7 +23,7 @@ public final class DemoCube extends HoloObject implements HoloEditTranslation, H
     private static final float SPEED = 4f;
 
     private final float size;
-    private final int color;
+    private final HoloColor color;
     private float spin;
     private float spinO;
     private boolean ownRequired = true;
@@ -31,9 +32,9 @@ public final class DemoCube extends HoloObject implements HoloEditTranslation, H
 
     /**
      * @param size  arete, en blocs
-     * @param color couleur {@code 0xAARRGGBB}
+     * @param color couleur (role du theme)
      */
-    public DemoCube(String key, HoloAnchor anchor, HoloTransform transform, float size, int color)
+    public DemoCube(String key, HoloAnchor anchor, HoloTransform transform, float size, HoloColor color)
     {
         super(key, anchor, transform);
         this.size = size;
@@ -63,7 +64,7 @@ public final class DemoCube extends HoloObject implements HoloEditTranslation, H
 
     public float size() { return size; }
 
-    public int color() { return color; }
+    public HoloColor color() { return color; }
 
     /** Angle de rotation interpole, en degres. */
     public float spin(float partialTick) { return Mth.lerp(partialTick, spinO, spin); }

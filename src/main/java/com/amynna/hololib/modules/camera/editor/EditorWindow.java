@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.editor;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.edit.HoloEditScale;
 import com.amynna.hololib.holo.edit.HoloEditTranslation;
 import com.amynna.hololib.holo.edit.HoloEditorModule;
@@ -28,9 +29,9 @@ public final class EditorWindow extends HoloWindow implements HoloEditorUi, Holo
     public EditorWindow(String key)
     {
         super(key, new HoloAnchor.Local(true), HoloTransform.translation(0f, 22f, 0.6f), WIDTH, HEIGHT, 1f / 400f);
-        root().setBackground(0xC0101828).setBorder(0xFF40C0FF, 1f);
+        root().setPattern(0xC0).setBorder(HoloColor.primary(0xFF), 1f);
         root().add(new HoloLabel(MARGIN, 4, WIDTH - 2 * MARGIN, 12, Component.literal("Editeur : HUD"))
-                .setAlign(HoloLabel.Align.CENTER).setColor(0xFF40C0FF));
+                .setAlign(HoloLabel.Align.CENTER).setColor(HoloColor.primary(0xFF)));
         frame = root().add(new EditorHudFrame(MARGIN, TOP, WIDTH - 2 * MARGIN, HEIGHT - TOP - MARGIN));
     }
 

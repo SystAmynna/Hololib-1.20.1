@@ -1,5 +1,6 @@
 package com.amynna.hololib.demo;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.module.HoloModule;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
@@ -41,10 +42,10 @@ public final class DemoConfigurableModule extends HoloModule implements Configur
     {
         DemoEditableWindow gauge = addObject(new DemoEditableWindow("gauge", new HoloAnchor.Hud(0f, 0f),
                 HoloTransform.translation(70f, 24f, 0f).setScale(160f), GAUGE_WIDTH, 30, 1f / 160f));
-        gauge.root().setBackground(0x8010304A).setBorder(0xFFFFC040, 1f);
+        gauge.root().setPattern(0x80).setBorder(HoloColor.action(0xFF), 1f);
         gaugeLabel = gauge.root().add(new HoloLabel(4, 3, GAUGE_WIDTH - 8, 12, Component.empty()));
-        gauge.root().add(new HoloPanel(4, 18, BAR_WIDTH, 7).setBackground(0x60202040));
-        gaugeFill = gauge.root().add(new HoloPanel(4, 18, 0, 7).setBackground(0xC0FFC040));
+        gauge.root().add(new HoloPanel(4, 18, BAR_WIDTH, 7).setBackground(HoloColor.secondary(0x60).darker(0.75f)));
+        gaugeFill = gauge.root().add(new HoloPanel(4, 18, 0, 7).setBackground(HoloColor.action(0xC0)));
 
         config = addObject(new ConfigWindow("config", Component.literal("Demo configurable"),
                 HoloTransform.translation(26f, 0f, 0.7f), CONFIG_WIDTH, 50, 1f / 400f));
@@ -81,7 +82,7 @@ public final class DemoConfigurableModule extends HoloModule implements Configur
         enabledSwitch.setOn(enabled);
         levelBar.setValue(level);
         gaugeLabel.setText(Component.literal(enabled ? "Niveau : " + Math.round(level * 100f) + " %" : "Desactivee"));
-        gaugeLabel.setColor(enabled ? 0xFFFFFFFF : 0xFF808080);
+        gaugeLabel.setColor(enabled ? HoloColor.special(0xFF) : HoloColor.special(0xFF).darker(0.5f));
         gaugeFill.setBounds(gaugeFill.x(), gaugeFill.y(), enabled ? BAR_WIDTH * level : 0f, gaugeFill.height());
     }
 

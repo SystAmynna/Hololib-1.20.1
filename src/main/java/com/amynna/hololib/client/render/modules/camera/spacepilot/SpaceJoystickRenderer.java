@@ -1,10 +1,12 @@
 package com.amynna.hololib.client.render.modules.camera.spacepilot;
 
+import com.amynna.hololib.holo.theme.HoloTheme;
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.client.render.holo.HoloDrawContext;
 import com.amynna.hololib.client.render.holo.HoloObjectRenderer;
 import com.amynna.hololib.client.render.type.HoloRenderTypes;
 import com.amynna.hololib.holo.object.HoloAnchor;
-import com.amynna.hololib.modules.camera.config.ConfigWindow;
 import com.amynna.hololib.modules.camera.spacepilot.SpaceJoystickAim;
 import com.amynna.hololib.modules.camera.spacepilot.SpaceJoystickForward;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -16,9 +18,9 @@ import org.joml.Vector3f;
 
 /**
  * Joystick de pilotage de Space Pilot (migre du Space Controller en T19, geometrie inchangee sauf le rayon du cercle
- * avant, C48) : anneaux plats translucides dans le plan local {@code z = 0}, couleur d'accent du mod
- * ({@link ConfigWindow#ACCENT}), en quads ({@link HoloRenderTypes#TRANSLUCENT_QUADS}, sans culling). Aucune allocation
- * par frame (cosinus precalcules, vecteurs et matrice reutilises), aucun etat GL modifie.
+ * avant, C48) : anneaux plats translucides dans le plan local {@code z = 0}, couleur principale du theme du joueur,
+ * en quads ({@link HoloRenderTypes#TRANSLUCENT_QUADS}, sans culling). Aucune allocation par frame (cosinus
+ * precalcules, vecteurs et matrice reutilises), aucun etat GL modifie.
  * <ul>
  *     <li>{@link Forward} : cercle avant (zone morte), plus clair quand l'ecart du regard la depasse (etat du pad lu
  *     par {@link SpaceJoystickForward#beyondDeadZone()}), et segment vers le centre de l'ecran en premiere
@@ -38,13 +40,12 @@ public final class SpaceJoystickRenderer
     static final float THICKNESS = 0.0035f;
     /** Espace laisse entre le segment et chaque anneau, en blocs. */
     private static final float GAP = 0.01f;
-    private static final int ACCENT_RGB = ConfigWindow.ACCENT & 0xFFFFFF;
-    private static final int FORWARD_COLOR = 0xB0000000 | ACCENT_RGB;
-    /** Accent eclairci (moitie vers le blanc), opaque : une rotation est commandee. */
-    private static final int FORWARD_ACTIVE_COLOR = 0xFF000000 | lighten(ACCENT_RGB);
-    private static final int SEGMENT_COLOR = 0x80000000 | ACCENT_RGB;
-    private static final int SEGMENT_ACTIVE_COLOR = 0xC0000000 | lighten(ACCENT_RGB);
-    private static final int AIM_COLOR = 0xD0000000 | ACCENT_RGB;
+    private static final HoloColor FORWARD_COLOR = HoloColor.primary(0xB0);
+    /** Couleur principale eclaircie (moitie vers le blanc), opaque : une rotation est commandee. */
+    private static final HoloColor FORWARD_ACTIVE_COLOR = HoloColor.primary(0xFF).lighter(0.5f);
+    private static final HoloColor SEGMENT_COLOR = HoloColor.primary(0x80);
+    private static final HoloColor SEGMENT_ACTIVE_COLOR = HoloColor.primary(0xC0).lighter(0.5f);
+    private static final HoloColor AIM_COLOR = HoloColor.primary(0xD0);
     private static final float[] COS = new float[SEGMENTS + 1];
     private static final float[] SIN = new float[SEGMENTS + 1];
     /** Sommet transforme (fil de rendu seulement) : {@code VertexConsumer.vertex(Matrix4f, ...)} alloue un vecteur par sommet. */
@@ -87,10 +88,11 @@ public final class SpaceJoystickRenderer
             VertexConsumer consumer = buffers.getBuffer(HoloRenderTypes.TRANSLUCENT_QUADS);
             Matrix4f matrix = pose.last().pose();
             boolean active = object.beyondDeadZone();
-            ring(consumer, matrix, SpaceJoystickForward.RADIUS, active ? FORWARD_ACTIVE_COLOR : FORWARD_COLOR,
-                    packedLight);
+            HoloTheme theme = HoloThemes.resolve(object);
+            ring(consumer, matrix, SpaceJoystickForward.RADIUS,
+                    (active ? FORWARD_ACTIVE_COLOR : FORWARD_COLOR).resolve(theme), packedLight);
             if (ctx.family() == HoloAnchor.Family.VIEW) {
-                segment(consumer, matrix, active ? SEGMENT_ACTIVE_COLOR : SEGMENT_COLOR, packedLight);
+                segment(consumer, matrix, (active ? SEGMENT_ACTIVE_COLOR : SEGMENT_COLOR).resolve(theme), packedLight);
             }
         }
 
@@ -132,7 +134,7 @@ public final class SpaceJoystickRenderer
                            HoloDrawContext ctx)
         {
             ring(buffers.getBuffer(HoloRenderTypes.TRANSLUCENT_QUADS), pose.last().pose(), SpaceJoystickAim.RADIUS,
-                    AIM_COLOR, packedLight);
+                    AIM_COLOR.resolve(HoloThemes.resolve(object)), packedLight);
         }
     }
 
@@ -155,14 +157,5 @@ public final class SpaceJoystickRenderer
         matrix.transformPosition(x, y, z, VERTEX);
         consumer.vertex(VERTEX.x, VERTEX.y, VERTEX.z)
                 .color(color >> 16 & 0xFF, color >> 8 & 0xFF, color & 0xFF, color >>> 24).uv2(light).endVertex();
-    }
-
-    /** Couleur RGB rapprochee de moitie du blanc. */
-    private static int lighten(int rgb)
-    {
-        int r = (rgb >> 16 & 0xFF) + 0xFF >> 1;
-        int g = (rgb >> 8 & 0xFF) + 0xFF >> 1;
-        int b = (rgb & 0xFF) + 0xFF >> 1;
-        return r << 16 | g << 8 | b;
     }
 }

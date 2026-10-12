@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget.control;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloPanel;
@@ -21,8 +22,12 @@ public class HoloWidgetDraggable extends HoloWidget implements HoloDraggable, Ho
     private Consumer<? super HoloWidgetDraggable> onDrop = widget -> {};
     private Component text;
     private boolean hovered;
-    private int color = 0xC0A060FF;
-    private int border = 0xFFD0A0FF;
+    private static final HoloColor DRAG_OVERLAY = HoloColor.special(0x50);
+    private static final HoloColor HOVER_OVERLAY = HoloColor.special(0x28);
+    private static final HoloColor TEXT = HoloColor.special(0xFF);
+
+    private HoloColor color = HoloColor.secondary(0xC0).lighter(0.41f);
+    private HoloColor border = HoloColor.secondary(0xFF).lighter(0.66f);
 
     public HoloWidgetDraggable(float x, float y, float width, float height, Component text)
     {
@@ -43,6 +48,12 @@ public class HoloWidgetDraggable extends HoloWidget implements HoloDraggable, Ho
     }
 
     public HoloWidgetDraggable setColors(int color, int border)
+    {
+        return setColors(HoloColor.fixed(color), HoloColor.fixed(border));
+    }
+
+    /** Fond et bordure (par defaut : secondaire eclaircie). */
+    public HoloWidgetDraggable setColors(HoloColor color, HoloColor border)
     {
         this.color = color;
         this.border = border;
@@ -82,10 +93,12 @@ public class HoloWidgetDraggable extends HoloWidget implements HoloDraggable, Ho
     @Override
     protected void draw(HoloCanvas canvas)
     {
-        canvas.fill(0, 0, width(), height(), color);
-        if (hovered || dragging()) canvas.fill(0, 0, width(), height(), dragging() ? 0x50FFFFFF : 0x28FFFFFF);
-        canvas.outline(0, 0, width(), height(), 1f, border);
+        canvas.fill(0, 0, width(), height(), canvas.color(color));
+        if (hovered || dragging()) {
+            canvas.fill(0, 0, width(), height(), canvas.color(dragging() ? DRAG_OVERLAY : HOVER_OVERLAY));
+        }
+        canvas.outline(0, 0, width(), height(), 1f, canvas.color(border));
         canvas.text(text, (width() - canvas.textWidth(text)) / 2f, (height() - canvas.lineHeight()) / 2f + 1f,
-                0xFFFFFFFF);
+                canvas.color(TEXT));
     }
 }

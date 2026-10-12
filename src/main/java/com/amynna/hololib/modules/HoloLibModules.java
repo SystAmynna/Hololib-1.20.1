@@ -22,6 +22,8 @@ import com.amynna.hololib.modules.camera.radar.RadarModule;
 import com.amynna.hololib.modules.camera.spaceknowledge.SpaceKnowledgeModule;
 import com.amynna.hololib.modules.camera.spacepilot.SpacePilotModule;
 import com.amynna.hololib.modules.camera.targeting.TargetingModule;
+import com.amynna.hololib.modules.camera.themeconfigurator.AdminThemeConfiguratorModule;
+import com.amynna.hololib.modules.camera.themeconfigurator.ThemeConfiguratorModule;
 import com.amynna.hololib.modules.dimension.planet1.Planet1Module;
 import com.amynna.hololib.modules.dimension.skycancel.SkyCancelModule;
 import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
@@ -91,6 +93,11 @@ public final class HoloLibModules
             "keys", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, KeysModule::new));
     public static final RegistryObject<HoloModuleType<KeysEditorModule>> KEYS_EDITOR = REGISTER.register(
             "keys_editor", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, KeysEditorModule::new));
+    public static final RegistryObject<HoloModuleType<ThemeConfiguratorModule>> THEME_CONFIGURATOR = REGISTER.register(
+            "theme_configurator", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, ThemeConfiguratorModule::new));
+    public static final RegistryObject<HoloModuleType<AdminThemeConfiguratorModule>> ADMIN_THEME_CONFIGURATOR =
+            REGISTER.register("admin_theme_configurator",
+                    () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, AdminThemeConfiguratorModule::new));
     public static final RegistryObject<HoloModuleType<AttackGuardModule>> ATTACK_GUARD = REGISTER.register(
             "attack_guard", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, AttackGuardModule::new));
 

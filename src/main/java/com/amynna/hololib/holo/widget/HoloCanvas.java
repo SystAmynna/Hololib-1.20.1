@@ -1,5 +1,7 @@
 package com.amynna.hololib.holo.widget;
 
+import com.amynna.hololib.holo.theme.HoloColor;
+import com.amynna.hololib.holo.theme.HoloTheme;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 
@@ -11,11 +13,20 @@ import net.minecraft.resources.ResourceLocation;
  * Chaque appel est dessine legerement devant le precedent : dessiner du fond vers l'avant. Une forme faite de
  * plusieurs quadrilateres (anneau, couronne, icone) se dessine dans une couche ({@link #beginLayer()} /
  * {@link #endLayer()}) : sinon chaque morceau est un peu plus pres de l'oeil et la forme se deforme en perspective.
+ * <p>
+ * Le canvas porte le {@linkplain #theme() theme} de l'objet dessine : un widget resout ses {@link HoloColor} par
+ * {@link #color(HoloColor)} au moment du dessin.
  */
 public interface HoloCanvas
 {
     /** Fraction du tick client ecoulee (0..1), pour interpoler les animations tenues par {@code tick()}. */
     float partialTick();
+
+    /** Theme de l'objet en cours de dessin ({@code HoloTheme.DEFAULT} par defaut). */
+    default HoloTheme theme() { return HoloTheme.DEFAULT; }
+
+    /** Couleur {@code 0xAARRGGBB} dans le theme courant. */
+    default int color(HoloColor color) { return color.resolve(theme()); }
 
     /** Decale l'origine ; a equilibrer par {@link #pop()}. */
     void push(float dx, float dy);
@@ -40,6 +51,17 @@ public interface HoloCanvas
         fill(x, y + height - thickness, width, thickness, argb);
         fill(x, y + thickness, thickness, height - 2f * thickness, argb);
         fill(x + width - thickness, y + thickness, thickness, height - 2f * thickness, argb);
+    }
+
+    /**
+     * Rectangle en degrade : une couleur par coin (haut gauche, haut droit, bas droit, bas gauche), interpolee. Par
+     * defaut (canvas sans couleurs par sommet) : la couleur moyenne.
+     */
+    default void gradient(float x, float y, float width, float height, int topLeft, int topRight, int bottomRight,
+                          int bottomLeft)
+    {
+        fill(x, y, width, height, HoloColor.lerp(HoloColor.lerp(topLeft, topRight, 0.5f),
+                HoloColor.lerp(bottomLeft, bottomRight, 0.5f), 0.5f));
     }
 
     /**

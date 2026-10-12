@@ -1,5 +1,7 @@
 package com.amynna.hololib.client.render.modules.camera.targeting;
 
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.client.modules.camera.targeting.TargetingClient;
 import com.amynna.hololib.client.render.outline.HoloOutlineMask;
@@ -32,7 +34,7 @@ import java.util.List;
  */
 final class TargetOutlineRenderer extends WorldRenderer<TargetOutlineRenderer.Target>
 {
-    private static final int COLOR = 0x40FF60;
+    private static final HoloColor COLOR = HoloColor.selection(0xFF);
     private static final float ALPHA = 1f;
 
     private final Target target = new Target();
@@ -80,7 +82,7 @@ final class TargetOutlineRenderer extends WorldRenderer<TargetOutlineRenderer.Ta
                 shape.forAllBoxes(boxes);
                 mask.endBatch();
             }
-            HoloOutlineShader.compose(mask, COLOR, ALPHA);
+            HoloOutlineShader.compose(mask, COLOR.rgb(HoloThemes.clientStandard()), ALPHA);
         }
         catch (RuntimeException e)
         {

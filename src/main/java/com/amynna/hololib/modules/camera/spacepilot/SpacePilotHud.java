@@ -1,5 +1,9 @@
 package com.amynna.hololib.modules.camera.spacepilot;
 
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloThemeColor;
+import com.amynna.hololib.holo.theme.HoloTheme;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.edit.HoloEditTranslation;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
@@ -66,7 +70,7 @@ public final class SpacePilotHud extends HoloWindow implements HoloEditTranslati
     private static final float MARGIN = 4f;
     private static final int PADDING = 5;
     private static final int LINE_HEIGHT = 11;
-    private static final int TEXT = 0xFFE0F0FF;
+    private static final HoloColor TEXT = HoloColor.primary(0xFF).lighter(0.84f);
     private static final String SPEED = "Vitesse : ";
     private static final String SEPARATOR = " - ";
     /** Fleche haut (U+2191) : accelerer. Glyphe de {@code nonlatin_european.png}, 5 px + 1. */
@@ -84,18 +88,14 @@ public final class SpacePilotHud extends HoloWindow implements HoloEditTranslati
     private static final Component NO_REFERENCE = Component.literal(REFERENCE + "aucune");
     private static final Component NO_DISTANCE = Component.literal(DISTANCE + "-");
     private static final Component NO_TARGET = Component.literal(TARGET + "aucune");
-    /** Couleur de l'indication proche de la consigne ({@code |v - v*| <= 10 %}). */
-    private static final int GREEN = 0x55FF55;
-    /** Couleur de l'indication loin de la consigne ({@code |v - v*| >= 30 %}). */
-    private static final int RED = 0xFF5555;
-    /** Paliers du degrade vert -> rouge (le texte n'est reconstruit qu'au changement de palier). */
+    /** Paliers du degrade selection -> critique (le texte n'est reconstruit qu'au changement de palier). */
     private static final int COLOR_STEPS = 8;
-    /** Styles du degrade, palier 0 (vert) a {@link #COLOR_STEPS} (rouge) : crees une fois. */
-    private static final Style[] STYLES = new Style[COLOR_STEPS + 1];
-
-    static {
-        for (int i = 0; i <= COLOR_STEPS; i++) STYLES[i] = Style.EMPTY.withColor(mix(GREEN, RED, i / (float) COLOR_STEPS));
-    }
+    /**
+     * Styles du degrade, palier 0 (couleur de selection : proche de la consigne, {@code |v - v*| <= 10 %}) a
+     * {@link #COLOR_STEPS} (couleur critique : loin, {@code >= 30 %}) ; recalcules quand le theme change.
+     */
+    private final Style[] styles = new Style[COLOR_STEPS + 1];
+    private int stylesRevision = Integer.MIN_VALUE;
 
     private final HoloLabel speedLine;
     private final HoloLabel referenceLine;
@@ -122,7 +122,7 @@ public final class SpacePilotHud extends HoloWindow implements HoloEditTranslati
                 HoloTransform.translation(MARGIN + 0.5f * WIDTH, MARGIN + 0.5f * HEIGHT, 0f).setScale(1f / PIXEL_SCALE),
                 WIDTH, HEIGHT, PIXEL_SCALE);
         setVisibility(HoloVisibility.PRIVATE);
-        root().setBackground(ConfigWindow.BACKGROUND).setBorder(ConfigWindow.ACCENT, 1f);
+        root().setPattern(ConfigWindow.BACKGROUND_ALPHA).setBorder(ConfigWindow.ACCENT, 1f);
         int width = WIDTH - 2 * PADDING;
         speedLine = root().add(new HoloLabel(PADDING, 3, width, LINE_HEIGHT, Component.literal(SPEED + "-"))
                 .setColor(TEXT));
@@ -166,6 +166,7 @@ public final class SpacePilotHud extends HoloWindow implements HoloEditTranslati
      */
     void showSpeed(double speed, double target, String targetName)
     {
+        refreshStyles();
         boolean hasTarget = cruise && !Double.isNaN(target);
         double value = hasTarget ? target : Double.NaN;
         if (Double.compare(speed, shownSpeed) != 0 || Double.compare(value, shownTarget) != 0) {
@@ -187,13 +188,13 @@ public final class SpacePilotHud extends HoloWindow implements HoloEditTranslati
      * {@code v < v*} (ou {@code v = v* > 0}), bas sinon ; fleche et {@code v*} dans la couleur du palier de
      * {@link SpaceCruise#redness}.
      */
-    private static Component cruiseText(double speed, double target)
+    private Component cruiseText(double speed, double target)
     {
         boolean au = SpaceFormat.speedInAu(Math.max(Math.abs(speed), target));
         boolean up = speed < target || speed == target && target > 0.0;
         int step = Math.round((float) SpaceCruise.redness(speed, target) * COLOR_STEPS);
         return Component.literal(SPEED + SpaceFormat.speed(speed, au) + SEPARATOR)
-                .append(Component.literal((up ? UP : DOWN) + SpaceFormat.speed(target, au)).withStyle(STYLES[step]));
+                .append(Component.literal((up ? UP : DOWN) + SpaceFormat.speed(target, au)).withStyle(styles[step]));
     }
 
     /**
@@ -252,6 +253,21 @@ public final class SpacePilotHud extends HoloWindow implements HoloEditTranslati
             if (HoloTextMetrics.width(line) <= max) return line;
         }
         return prefix + ELLIPSIS + suffix;
+    }
+
+    /** Styles du degrade d'apres le theme de la fenetre ; texte reconstruit si le theme a change. */
+    private void refreshStyles()
+    {
+        int revision = HoloThemes.revision();
+        if (revision == stylesRevision) return;
+        stylesRevision = revision;
+        HoloTheme theme = HoloThemes.resolve(this);
+        int green = theme.rgb(HoloThemeColor.SELECTION);
+        int red = theme.rgb(HoloThemeColor.CRITICAL);
+        for (int i = 0; i <= COLOR_STEPS; i++) {
+            styles[i] = Style.EMPTY.withColor(mix(green, red, i / (float) COLOR_STEPS));
+        }
+        shownSpeed = Double.NEGATIVE_INFINITY;
     }
 
     /** Melange lineaire de deux couleurs RGB, {@code t} dans {@code [0, 1]}. */

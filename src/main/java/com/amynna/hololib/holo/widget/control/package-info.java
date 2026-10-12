@@ -29,7 +29,10 @@
  * {@code HoloWidgetButton}, {@code HoloWidgetMultiButton}, {@code HoloWidgetHoverZone}, {@code HoloWidgetScrollZone},
  * {@code HoloWidgetSwitch}, {@code HoloWidgetValueBar}, {@code HoloWidgetTextBox}, {@code HoloWidgetMouseBox},
  * {@code HoloWidgetDraggable}, {@code HoloWidgetKeyBox}, {@code HoloWidgetList} (liste encadree scrollable),
- * {@code HoloWidgetDragRow} (ligne d'une liste, reordonnee au glisser).
+ * {@code HoloWidgetDragRow} (ligne d'une liste, reordonnee au glisser), {@code HoloWidgetColorPicker} (couleur
+ * {@code 0xRRGGBB} : carre saturation / valeur, teinte, champ {@code #rrggbb}).
+ * Leurs couleurs par defaut sont des roles du theme ({@code HoloColor}) ; les setters acceptent un {@code HoloColor}
+ * (ou un {@code 0xAARRGGBB} fixe).
  * Leurs ecouteurs s'executent cote client : pour agir sur le
  * jeu, envoyer une action au module ({@code HoloModule.sendAction(source, ...)}), que le serveur valide, puis reposer
  * l'etat synchronise ({@code setValue}, {@code setOn}, {@code setText}...).

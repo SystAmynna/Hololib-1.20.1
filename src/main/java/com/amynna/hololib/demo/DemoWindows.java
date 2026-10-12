@@ -1,5 +1,6 @@
 package com.amynna.hololib.demo;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
 import com.amynna.hololib.holo.widget.HoloLabel;
@@ -13,7 +14,6 @@ final class DemoWindows
 {
     private static final int WIDTH = 160;
     private static final int HEIGHT = 48;
-    private static final int BACKGROUND = 0x8010304A;
 
     private DemoWindows() {}
 
@@ -23,21 +23,21 @@ final class DemoWindows
      * @param accent     couleur de la bordure et du titre
      */
     static DemoEditableWindow labeled(String key, HoloAnchor anchor, HoloTransform transform, float pixelScale,
-                                      String title, String text, int accent)
+                                      String title, String text, HoloColor accent)
     {
         return fill(new DemoEditableWindow(key, anchor, transform, WIDTH, HEIGHT, pixelScale), title, text, accent);
     }
 
     /** Fenetre replacee a chaque ouverture du focus ({@link DemoRelativeWindow}), ancree {@code Local} fixe. */
     static DemoRelativeWindow relative(String key, HoloTransform transform, float pixelScale, String title,
-                                       String text, int accent)
+                                       String text, HoloColor accent)
     {
         return fill(new DemoRelativeWindow(key, transform, WIDTH, HEIGHT, pixelScale), title, text, accent);
     }
 
-    private static <W extends DemoEditableWindow> W fill(W window, String title, String text, int accent)
+    private static <W extends DemoEditableWindow> W fill(W window, String title, String text, HoloColor accent)
     {
-        window.root().setBackground(BACKGROUND).setBorder(accent, 1f);
+        window.root().setPattern(0x80).setBorder(accent, 1f);
         window.root().add(new HoloLabel(4, 6, WIDTH - 8, 14, Component.literal(title))
                 .setAlign(HoloLabel.Align.CENTER).setColor(accent));
         window.root().add(new HoloLabel(4, 26, WIDTH - 8, 14, Component.literal(text))

@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget.control;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import net.minecraft.network.chat.Component;
 
@@ -19,7 +20,8 @@ public class HoloWidgetScrollZone extends HoloWidgetHoverZone implements HoloScr
     {
         super(x, y, width, height, idleText, hoverText);
         this.onScroll = Objects.requireNonNull(onScroll);
-        setColors(0x40A040, 0xFF60E060, 0xFFA0FFA0);
+        setColors(HoloColor.selection(0xFF).darker(0.35f), HoloColor.selection(0xFF).darker(0.05f),
+                HoloColor.selection(0xFF).lighter(0.4f));
     }
 
     public HoloWidgetScrollZone setOnScroll(ObjIntConsumer<? super HoloWidgetScrollZone> onScroll)

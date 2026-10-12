@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.config;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.control.HoloWidgetButton;
 import net.minecraft.network.chat.Component;
@@ -19,11 +20,11 @@ public class ConfigNutButton extends HoloWidgetButton
     /** Rotation d'un appui ; multiple de 60 degres (symetrie de l'ecrou), pour revenir a l'angle 0 au repos. */
     private static final float SPIN = Mth.TWO_PI / 3f;
     private static final int SPIN_TICKS = 12;
-    private static final int DISK = 0xC0101828;
-    private static final int DISK_HOVER = 0xD0203850;
-    private static final int RIM = 0xFF40C0FF;
-    private static final int NUT = 0xFF40C0FF;
-    private static final int NUT_HOVER = 0xFFA0E8FF;
+    private static final HoloColor DISK = HoloColor.secondary(0xC0).darker(0.84f);
+    private static final HoloColor DISK_HOVER = HoloColor.secondary(0xD0).darker(0.68f);
+    private static final HoloColor RIM = HoloColor.primary(0xFF);
+    private static final HoloColor NUT = HoloColor.primary(0xFF);
+    private static final HoloColor NUT_HOVER = HoloColor.primary(0xFF).lighter(0.51f);
 
     private float angle;
     private float prevAngle;
@@ -73,6 +74,8 @@ public class ConfigNutButton extends HoloWidgetButton
         float r = radius();
         float c = r;
         boolean lit = hovered() || pressed();
+        int disk = canvas.color(lit ? DISK_HOVER : DISK);
+        int rimColor = canvas.color(RIM);
         // Disque en eventail puis bordure, dans une couche (a plat) ; l'ecrou dans une autre, devant.
         canvas.beginLayer();
         for (int i = 0; i < SEGMENTS; i++) {
@@ -82,21 +85,22 @@ public class ConfigNutButton extends HoloWidgetButton
             float y0 = c + r * Mth.sin(a0);
             float x1 = c + r * Mth.cos(a1);
             float y1 = c + r * Mth.sin(a1);
-            canvas.quad(c, c, x0, y0, x1, y1, x1, y1, lit ? DISK_HOVER : DISK);
+            canvas.quad(c, c, x0, y0, x1, y1, x1, y1, disk);
         }
         float rim = r - 1.2f;
         for (int i = 0; i < SEGMENTS; i++) {
             float a0 = i * Mth.TWO_PI / SEGMENTS;
             float a1 = (i + 1) * Mth.TWO_PI / SEGMENTS;
             canvas.quad(c + r * Mth.cos(a0), c + r * Mth.sin(a0), c + r * Mth.cos(a1), c + r * Mth.sin(a1),
-                    c + rim * Mth.cos(a1), c + rim * Mth.sin(a1), c + rim * Mth.cos(a0), c + rim * Mth.sin(a0), RIM);
+                    c + rim * Mth.cos(a1), c + rim * Mth.sin(a1), c + rim * Mth.cos(a0), c + rim * Mth.sin(a0),
+                    rimColor);
         }
         canvas.endLayer();
         // Ecrou : chaque cote de l'hexagone, decoupe en bandes jusqu'au trou rond.
         float turn = Mth.lerp(canvas.partialTick(), prevAngle, angle);
         float hex = 0.62f * r;
         float hole = 0.28f * r;
-        int color = lit ? NUT_HOVER : NUT;
+        int color = canvas.color(lit ? NUT_HOVER : NUT);
         canvas.beginLayer();
         for (int side = 0; side < 6; side++) {
             float a = turn + side * SIXTH;

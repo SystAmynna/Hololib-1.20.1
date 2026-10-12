@@ -5,10 +5,13 @@ import com.amynna.hololib.holo.interact.HoloInteractible;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloObject;
 import com.amynna.hololib.holo.object.HoloTransform;
+import com.amynna.hololib.holo.theme.HoloThemeSource;
+import com.amynna.hololib.holo.theme.HoloThemed;
 import com.amynna.hololib.holo.widget.HoloPanel;
 import com.amynna.hololib.holo.widget.HoloWidget;
 
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -19,14 +22,20 @@ import java.util.Set;
  * La fenetre est interactible : elle arrete le regard sur toute sa surface (vue de face) et y cherche le widget
  * {@link HoloInteractible} le plus profond ; les controles qu'aucun widget n'intercepte remontent a la fenetre, qui
  * n'en intercepte aucun par defaut ({@link #setInterceptedInputs}). Son droit d'usage est {@code access()}.
+ * <p>
+ * Toute fenetre prend un theme ({@link HoloThemed}) : le module choisit sa source ({@link #setThemeSource},
+ * {@code CLIENT} par defaut) et le jeu staff pour une fenetre reservee aux ops ({@link #setStaffTheme}) ; le fond de la
+ * racine est typiquement le motif du theme ({@code root().setPattern(alpha)}).
  */
-public class HoloWindow extends HoloObject implements HoloInteractible
+public class HoloWindow extends HoloObject implements HoloInteractible, HoloThemed
 {
     private final HoloPanel root;
     private final int width;
     private final int height;
     private final float pixelScale;
     private final Set<HoloControl> intercepted = new HashSet<>();
+    private HoloThemeSource themeSource = HoloThemeSource.CLIENT;
+    private boolean staffTheme;
 
     /**
      * @param transform  placement initial dans le repere de l'ancrage (copie)
@@ -52,6 +61,26 @@ public class HoloWindow extends HoloObject implements HoloInteractible
     public final int height() { return height; }
 
     public final float pixelScale() { return pixelScale; }
+
+    @Override
+    public HoloThemeSource themeSource() { return themeSource; }
+
+    @Override
+    public boolean staffTheme() { return staffTheme; }
+
+    /** Theme du serveur ou du client qui regarde ; choix du module, le meme des deux cotes (non synchronise). */
+    public HoloWindow setThemeSource(HoloThemeSource source)
+    {
+        this.themeSource = Objects.requireNonNull(source);
+        return this;
+    }
+
+    /** Vrai pour une fenetre reservee aux ops : theme staff de sa source. */
+    public HoloWindow setStaffTheme(boolean staff)
+    {
+        this.staffTheme = staff;
+        return this;
+    }
 
     /** Widget le plus en avant sous le point (pixels de la fenetre), ou {@code null} hors de la fenetre. */
     public HoloWidget widgetAt(float px, float py) { return root.widgetAt(px, py); }

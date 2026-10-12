@@ -1,5 +1,8 @@
 package com.amynna.hololib.client.render.modules.monde.spaceconfigurator;
 
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloTheme;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.client.render.holo.HoloDrawContext;
 import com.amynna.hololib.client.render.holo.HoloObjectRenderer;
 import com.amynna.hololib.client.render.type.HoloRenderTypes;
@@ -29,23 +32,39 @@ public final class SpaceHandleRenderer implements HoloObjectRenderer<SpaceMapHan
     private static final float THICKNESS = 0.005f;
     /** Rayon de l'octaedre central, en blocs. */
     private static final float CORE = 0.018f;
-    private static final int COLOR = 0xE0FFE040;
-    private static final int CORE_COLOR = 0xFFFFF0A0;
-    private static final int OUTSIDE_COLOR = 0xE0FF8040;
-    private static final int OUTSIDE_CORE_COLOR = 0xFFFFC090;
+    private static final HoloColor COLOR = HoloColor.action(0xE0).lighter(0.03f);
+    private static final HoloColor CORE_COLOR = HoloColor.action(0xFF).lighter(0.55f);
+    private static final HoloColor OUTSIDE_COLOR = HoloColor.action(0xE0).darker(0.35f);
+    private static final HoloColor OUTSIDE_CORE_COLOR = HoloColor.action(0xFF).lighter(0.3f);
     /** Axes unitaires X, Y, Z. */
     private static final float[][] AXES = {{1f, 0f, 0f}, {0f, 1f, 0f}, {0f, 0f, 1f}};
     /** Sommet transforme (fil de rendu seulement) : {@code VertexConsumer.vertex(Matrix4f, ...)} alloue un vecteur par sommet. */
     private static final Vector3f VERTEX = new Vector3f();
 
+    // Couleurs du theme de la frame en cours (fil de rendu), posees par {@link #applyTheme}.
+    private static int insideColor;
+    private static int insideCoreColor;
+    private static int outsideColor;
+    private static int outsideCoreColor;
+
+    /** Resout les couleurs dans le theme de l'objet (debut de frame). */
+    private static void applyTheme(HoloTheme theme)
+    {
+        insideColor = COLOR.resolve(theme);
+        insideCoreColor = CORE_COLOR.resolve(theme);
+        outsideColor = OUTSIDE_COLOR.resolve(theme);
+        outsideCoreColor = OUTSIDE_CORE_COLOR.resolve(theme);
+    }
+
     @Override
     public void render(SpaceMapHandle handle, PoseStack pose, MultiBufferSource buffers, int packedLight,
                        HoloDrawContext ctx)
     {
+        applyTheme(HoloThemes.resolve(handle));
         SpaceConfiguratorModule module = handle.configurator();
         boolean outside = module != null && module.selectedOutsideFrame();
-        int color = outside ? OUTSIDE_COLOR : COLOR;
-        int core = outside ? OUTSIDE_CORE_COLOR : CORE_COLOR;
+        int color = outside ? outsideColor : insideColor;
+        int core = outside ? outsideCoreColor : insideCoreColor;
         Matrix4f matrix = pose.last().pose();
         VertexConsumer consumer = buffers.getBuffer(HoloRenderTypes.TRANSLUCENT_QUADS);
         for (int i = 0; i < 3; i++) {

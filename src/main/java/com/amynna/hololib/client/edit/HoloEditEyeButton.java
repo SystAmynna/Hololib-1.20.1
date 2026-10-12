@@ -1,5 +1,6 @@
 package com.amynna.hololib.client.edit;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.edit.HoloDisplay;
 import com.amynna.hololib.holo.object.HoloObject;
@@ -13,6 +14,12 @@ import net.minecraft.network.chat.Component;
  */
 final class HoloEditEyeButton extends HoloWidgetMultiButton
 {
+    private static final HoloColor BACKGROUND = HoloColor.secondary(0xA0).darker(0.84f);
+    private static final HoloColor EYE_OFF = HoloColor.special(0xFF).darker(0.43f);
+    private static final HoloColor EYE_FOCUS = HoloColor.action(0xFF);
+    private static final HoloColor EYE_ON = HoloColor.special(0xFF);
+    private static final HoloColor STRIKE = HoloColor.critical(0xFF);
+
     static final int WIDTH = 28;
     static final int HEIGHT = 20;
     /** Le dessin est decrit dans un repere 20 x 14, mis a l'echelle du bouton. */
@@ -33,13 +40,15 @@ final class HoloEditEyeButton extends HoloWidgetMultiButton
     protected void draw(HoloCanvas canvas)
     {
         HoloDisplay display = object.display();
-        canvas.fill(0, 0, width(), height(), 0xA0101828);
-        if (pressed() || hovered()) canvas.fill(0, 0, width(), height(), pressed() ? PRESSED_OVERLAY : HOVER_OVERLAY);
-        int color = switch (display) {
-            case OFF -> 0xFF909090;
-            case FOCUS -> 0xFFFFC040;
-            case ON -> 0xFFFFFFFF;
-        };
+        canvas.fill(0, 0, width(), height(), canvas.color(BACKGROUND));
+        if (pressed() || hovered()) {
+            canvas.fill(0, 0, width(), height(), canvas.color(pressed() ? PRESSED_OVERLAY : HOVER_OVERLAY));
+        }
+        int color = canvas.color(switch (display) {
+            case OFF -> EYE_OFF;
+            case FOCUS -> EYE_FOCUS;
+            case ON -> EYE_ON;
+        });
         canvas.outline(0, 0, width(), height(), 1f, color);
         // Paupieres puis pupille.
         fill(canvas, 7, 3, 6, 1, color);
@@ -52,7 +61,7 @@ final class HoloEditEyeButton extends HoloWidgetMultiButton
         fill(canvas, 7, 10, 6, 1, color);
         fill(canvas, 8, 5, 4, 4, color);
         if (display == HoloDisplay.OFF) {
-            for (int i = 0; i < 10; i++) fill(canvas, 4f + i * 1.2f, 2f + i, 1.5f, 1f, 0xFFFF5050);
+            for (int i = 0; i < 10; i++) fill(canvas, 4f + i * 1.2f, 2f + i, 1.5f, 1f, canvas.color(STRIKE));
         }
     }
 

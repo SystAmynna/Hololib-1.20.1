@@ -1,5 +1,6 @@
 package com.amynna.hololib.client.edit;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.edit.HoloEditRotation;
 import com.amynna.hololib.holo.edit.HoloEditScale;
@@ -45,10 +46,12 @@ final class HoloEditPanel extends HoloWindow
     private static final int AXIS_STEP = AXIS_WIDTH + 4;
     private static final int SWITCH_WIDTH = 130;
 
-    private static final int IDLE_BACKGROUND = 0x6020A0FF;
-    private static final int IDLE_BORDER = 0xFF40C0FF;
-    private static final int ACTIVE_BACKGROUND = 0xA040A040;
-    private static final int ACTIVE_BORDER = 0xFF80FF80;
+    private static final HoloColor IDLE_BACKGROUND = HoloColor.secondary(0x60);
+    private static final HoloColor IDLE_BORDER = HoloColor.primary(0xFF);
+    private static final HoloColor ACTIVE_BACKGROUND = HoloColor.selection(0xA0).darker(0.35f);
+    private static final HoloColor ACTIVE_BORDER = HoloColor.selection(0xFF).lighter(0.2f);
+    private static final HoloColor TEXT = HoloColor.special(0xFF);
+    private static final HoloColor RESET = HoloColor.action(0xFF).darker(0.09f);
 
     private final HoloEditTarget target;
     private final Row translation;
@@ -66,7 +69,7 @@ final class HoloEditPanel extends HoloWindow
                 height(target, fixOrDynamic), 1f);
         this.target = target;
         HoloObject object = target.object();
-        root().setBackground(0xB0101828).setBorder(0xFF406080, 1f);
+        root().setPattern(0xB0).setBorder(HoloColor.secondary(0xFF).darker(0.46f), 1f);
         int y = PAD;
         translation = object instanceof HoloEditTranslation ? new Row(y, HoloEditTool.TRANSLATE) : null;
         if (translation != null) y += ROW;
@@ -165,7 +168,7 @@ final class HoloEditPanel extends HoloWindow
 
     private static void highlight(HoloWidgetMultiButton button, boolean on)
     {
-        button.setColors(on ? ACTIVE_BACKGROUND : IDLE_BACKGROUND, on ? ACTIVE_BORDER : IDLE_BORDER, 0xFFFFFFFF);
+        button.setColors(on ? ACTIVE_BACKGROUND : IDLE_BACKGROUND, on ? ACTIVE_BORDER : IDLE_BORDER, TEXT);
     }
 
     private static String format(float value) { return String.format(Locale.ROOT, "%.2f", value); }
@@ -212,7 +215,7 @@ final class HoloEditPanel extends HoloWindow
                         .setOnSubmit((box, text) -> HoloEditSession.submit(object, tool, index, text));
             }
             reset = count > 0 ? root().add(new HoloLabel(x + count * BOX_STEP, y, RESET_WIDTH, ITEM,
-                    Component.literal("RESET")).setAlign(HoloLabel.Align.CENTER).setColor(0xFFFFA040)) : null;
+                    Component.literal("RESET")).setAlign(HoloLabel.Align.CENTER).setColor(RESET)) : null;
         }
 
         /** Valeurs des cases (les suivantes ignorees s'il y en a moins de trois). */

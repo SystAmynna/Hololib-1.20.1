@@ -1,5 +1,7 @@
 package com.amynna.hololib.modules.monde.spaceconfigurator;
 
+import com.amynna.hololib.holo.theme.HoloThemeSource;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.edit.HoloEditRotation;
 import com.amynna.hololib.holo.edit.HoloEditTranslation;
@@ -115,18 +117,18 @@ public final class SpaceConfiguratorWindow extends HoloWindow
     /** Delai de confirmation de « Retirer », en ticks. */
     public static final int CONFIRM_TICKS = 60;
 
-    private static final int TEXT = 0xFFE0F0FF;
-    private static final int MISSING = 0xFFFF8060;
-    private static final int MUTED = 0xFF90A0B0;
-    private static final int BUTTON_BACKGROUND = 0x6020A0FF;
-    private static final int BUTTON_TEXT = 0xFFFFFFFF;
-    private static final int DISABLED_BACKGROUND = 0x40404850;
-    private static final int DISABLED_BORDER = 0xFF586070;
-    private static final int DISABLED_TEXT = 0xFF808890;
-    private static final int CONFIRM_BACKGROUND = 0x80C03020;
-    private static final int CONFIRM_BORDER = 0xFFFF6040;
+    private static final HoloColor TEXT = HoloColor.primary(0xFF).lighter(0.84f);
+    private static final HoloColor MISSING = HoloColor.critical(0xFF).lighter(0.18f);
+    private static final HoloColor MUTED = HoloColor.special(0xFF).darker(0.37f);
+    private static final HoloColor BUTTON_BACKGROUND = HoloColor.secondary(0x60);
+    private static final HoloColor BUTTON_TEXT = HoloColor.special(0xFF);
+    private static final HoloColor DISABLED_BACKGROUND = HoloColor.special(0x40).darker(0.7f);
+    private static final HoloColor DISABLED_BORDER = HoloColor.special(0xFF).darker(0.6f);
+    private static final HoloColor DISABLED_TEXT = HoloColor.special(0xFF).darker(0.47f);
+    private static final HoloColor CONFIRM_BACKGROUND = HoloColor.critical(0x80).darker(0.29f);
+    private static final HoloColor CONFIRM_BORDER = HoloColor.critical(0xFF);
     /** Systeme courant du monde (couleur de son anneau dans la Map). */
-    private static final int CURRENT_TEXT = SpaceMapCube.WORLD_COLOR;
+    private static final HoloColor CURRENT_TEXT = SpaceMapCube.WORLD_COLOR;
     private static final int MARGIN = 6;
     private static final int GAP = 4;
     private static final int BUTTON_HEIGHT = 14;
@@ -137,12 +139,20 @@ public final class SpaceConfiguratorWindow extends HoloWindow
     private static final int FIELD_LABEL_WIDTH = 44;
     private static final int SWATCH_HEIGHT = 12;
     private static final int SWATCH_GAP = 2;
-    private static final int SWATCH_BORDER = 0xFF404850;
-    private static final int SWATCH_SELECTED_BORDER = 0xFFFFFFFF;
+    private static final HoloColor SWATCH_BORDER = HoloColor.special(0xFF).darker(0.72f);
+    private static final HoloColor SWATCH_SELECTED_BORDER = HoloColor.special(0xFF);
+    /** Texte des pastilles (sur la couleur du corps, toujours noir). */
+    private static final HoloColor SWATCH_TEXT = HoloColor.fixed(0xFF000000);
     /** Palette des corps : etoiles (bleutee, blanche, jaune, orangee, rouge), planetes et lunes. */
     private static final int[] PALETTE = {
             0xFFCAD8FF, 0xFFFFF4E8, 0xFFFFE07A, 0xFFFFB46A, 0xFFFF7448,
             0xFF3A6FD8, 0xFF4CA050, 0xFFC1440E, 0xFFD8A06A, 0xFFB4B4B4};
+    /** {@link #PALETTE} en couleurs fixes (donnees des corps, pas un role du theme). */
+    private static final HoloColor[] PALETTE_COLORS = new HoloColor[PALETTE.length];
+
+    static {
+        for (int i = 0; i < PALETTE.length; i++) PALETTE_COLORS[i] = HoloColor.fixed(PALETTE[i]);
+    }
     /** Longueur maximale d'un champ numerique, en caracteres. */
     private static final int NUMBER_LENGTH = 16;
     /** Largeur des libelles « Temps (s/tick) » et « Distorsion (al/s) », en pixels. */
@@ -163,8 +173,8 @@ public final class SpaceConfiguratorWindow extends HoloWindow
     private static final int TAB_ROW = FIELD_HEIGHT + GAP + BUTTON_HEIGHT + GAP;
     /** Ordonnee du contenu des onglets dans le panneau de la vue systeme, en pixels. */
     private static final int TAB_CONTENT = TAB_ROW + BUTTON_HEIGHT + GAP;
-    private static final int TAB_ACTIVE_BACKGROUND = 0xC02080C0;
-    private static final int TAB_ACTIVE_BORDER = 0xFFFFFFFF;
+    private static final HoloColor TAB_ACTIVE_BACKGROUND = HoloColor.secondary(0xC0).darker(0.23f);
+    private static final HoloColor TAB_ACTIVE_BORDER = HoloColor.special(0xFF);
     /** Largeur des libelles de l'onglet « Rotation », en pixels. */
     private static final int ROTATION_LABEL_WIDTH = 64;
     /** Hauteur d'une ligne de la liste des textures, en pixels. */
@@ -178,8 +188,8 @@ public final class SpaceConfiguratorWindow extends HoloWindow
     /** Taille de l'apercu, en pixels (image equirectangulaire entiere, 2:1). */
     public static final int PREVIEW_WIDTH = 48;
     public static final int PREVIEW_HEIGHT = 24;
-    private static final int ROW_SELECTED_BACKGROUND = 0xA0208040;
-    private static final int ROW_SELECTED_BORDER = 0xFF60FF80;
+    private static final HoloColor ROW_SELECTED_BACKGROUND = HoloColor.selection(0xA0).darker(0.47f);
+    private static final HoloColor ROW_SELECTED_BORDER = HoloColor.selection(0xFF).lighter(0.1f);
 
     private static final Component NO_MAP = Component.literal("Space Map requise sur ce marker");
     private static final Component NO_ENVIRONMENT = Component.literal("Aucun Space Environment ici");
@@ -294,8 +304,9 @@ public final class SpaceConfiguratorWindow extends HoloWindow
         super(key, new HoloAnchor.World(), transform, WIDTH, HEIGHT, PIXEL_SCALE);
         this.module = Objects.requireNonNull(module);
         setVisibility(HoloVisibility.PUBLIC);
+        setThemeSource(HoloThemeSource.SERVER).setStaffTheme(true);
         setInterceptedInputs(HoloControl.LEFT_CLICK, HoloControl.RIGHT_CLICK);
-        root().setBackground(ConfigWindow.BACKGROUND).setBorder(ConfigWindow.ACCENT, 1f);
+        root().setPattern(ConfigWindow.BACKGROUND_ALPHA).setBorder(ConfigWindow.ACCENT, 1f);
         root().add(new HoloLabel(4, 3, WIDTH - 8, 11, Component.literal("Space Configurator"))
                 .setAlign(HoloLabel.Align.CENTER).setColor(ConfigWindow.ACCENT));
         infoLine = root().add(new HoloLabel(MARGIN, 14, WIDTH - 2 * MARGIN, 10, Component.empty()).setColor(MUTED));
@@ -1028,7 +1039,7 @@ public final class SpaceConfiguratorWindow extends HoloWindow
         for (int i = 0; i < swatches.length; i++) {
             swatches[i].setVisible(body != null);
             boolean on = body != null && body.color() == PALETTE[i];
-            swatches[i].setColors(PALETTE[i], on ? SWATCH_SELECTED_BORDER : SWATCH_BORDER, 0xFF000000)
+            swatches[i].setColors(PALETTE_COLORS[i], on ? SWATCH_SELECTED_BORDER : SWATCH_BORDER, SWATCH_TEXT)
                     .setText(on ? Component.literal("o") : Component.empty());
         }
         showTabs();

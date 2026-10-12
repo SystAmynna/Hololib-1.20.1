@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.quickaction;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.edit.HoloDisplay;
 import com.amynna.hololib.holo.edit.HoloRelativeToOpen;
@@ -135,9 +136,10 @@ public final class QuickActionWheelWindow extends HoloWindow implements HoloRela
     private final class Wheel extends HoloWidget
     {
         private static final int SEGMENTS = 48;
-        private static final int DISK = 0x60101828;
-        private static final int RING = 0x8040C0FF;
+        private static final HoloColor DISK = HoloColor.secondary(0x60).darker(0.84f);
+        private static final HoloColor RING = HoloColor.primary(0x80);
         private static final int LABEL = 0xC0000000;
+        private static final HoloColor TEXT = HoloColor.special(0xFF);
 
         Wheel() { super(0, 0, SIZE, SIZE); }
 
@@ -152,6 +154,8 @@ public final class QuickActionWheelWindow extends HoloWindow implements HoloRela
             canvas.beginLayer();
             if (r > 1f) {
                 float rim = r - 1f;
+                int disk = canvas.color(DISK);
+                int ring = canvas.color(RING);
                 for (int i = 0; i < SEGMENTS; i++) {
                     float a0 = i * Mth.TWO_PI / SEGMENTS;
                     float a1 = (i + 1) * Mth.TWO_PI / SEGMENTS;
@@ -160,9 +164,9 @@ public final class QuickActionWheelWindow extends HoloWindow implements HoloRela
                     float s1 = Mth.sin(a1);
                     float c1 = Mth.cos(a1);
                     canvas.quad(c, c, c + rim * s0, c - rim * c0, c + rim * s1, c - rim * c1, c + rim * s1,
-                            c - rim * c1, DISK);
+                            c - rim * c1, disk);
                     canvas.quad(c + rim * s0, c - rim * c0, c + r * s0, c - r * c0, c + r * s1, c - r * c1,
-                            c + rim * s1, c - rim * c1, RING);
+                            c + rim * s1, c - rim * c1, ring);
                 }
             }
             for (int i = 0; i < sectors.size(); i++) sectors.get(i).drawShape(canvas);
@@ -174,7 +178,7 @@ public final class QuickActionWheelWindow extends HoloWindow implements HoloRela
             float width = canvas.textWidth(name) + 6f;
             float height = canvas.lineHeight() + 4f;
             canvas.fill(c - width / 2f, c - height / 2f, width, height, LABEL);
-            canvas.text(name, c - width / 2f + 3f, c - height / 2f + 2f + 1f, 0xFFFFFFFF);
+            canvas.text(name, c - width / 2f + 3f, c - height / 2f + 2f + 1f, canvas.color(TEXT));
         }
     }
 }

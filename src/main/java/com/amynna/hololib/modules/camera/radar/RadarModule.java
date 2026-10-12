@@ -1,5 +1,6 @@
 package com.amynna.hololib.modules.camera.radar;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.memory.HoloContainers;
 import com.amynna.hololib.holo.memory.player.PlayerHoloContainer;
 import com.amynna.hololib.holo.module.HoloModule;
@@ -49,6 +50,10 @@ import java.util.Objects;
  */
 public final class RadarModule extends HoloModule implements Configurable, QuickActionProvider, TargetingThroughWalls
 {
+    private static final HoloColor ICON_ON = HoloColor.primary(0xFF);
+    private static final HoloColor ICON_OFF = HoloColor.special(0xFF).darker(0.5f);
+    private static final HoloColor ICON_STRIKE = HoloColor.critical(0xFF);
+
     /** Epaisseur de mur traversable maximale (blocs) ; au-dela, {@link #INFINITE_THICKNESS}. */
     public static final int MAX_THICKNESS = 16;
     /** Valeur « infinie » de l'epaisseur : aucun test de mur. */
@@ -323,11 +328,11 @@ public final class RadarModule extends HoloModule implements Configurable, Quick
         @Override
         public void drawIcon(HoloCanvas canvas, float size)
         {
-            RadarIcons.waves(canvas, size, activate ? 0xFF40C0FF : 0xFF708090, SEGMENTS);
+            RadarIcons.waves(canvas, size, canvas.color(activate ? ICON_ON : ICON_OFF), SEGMENTS);
             if (!activate) {
                 canvas.beginLayer();
                 canvas.line(0.15f * size, 0.85f * size, 0.85f * size, 0.15f * size, Math.max(1.5f, 0.1f * size),
-                        0xFFFF5050);
+                        canvas.color(ICON_STRIKE));
                 canvas.endLayer();
             }
         }

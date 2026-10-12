@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget.control;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.widget.HoloCanvas;
 import com.amynna.hololib.holo.widget.HoloPanel;
@@ -8,6 +9,7 @@ import com.amynna.hololib.holo.widget.HoloWidget;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Liste encadree d'elements empiles verticalement, de hauteur fixe, qui defile a la molette (un element par cran)
@@ -26,15 +28,15 @@ public class HoloWidgetList extends HoloPanel implements HoloScrollable
     private final List<HoloWidget> itemsView = Collections.unmodifiableList(items);
     private final float itemHeight;
     private int first;
-    private int barColor = 0xFF40C0FF;
+    private HoloColor barColor = HoloColor.primary(0xFF);
 
     /** @param itemHeight hauteur de chaque element, en pixels */
     public HoloWidgetList(float x, float y, float width, float height, float itemHeight)
     {
         super(x, y, width, height);
         this.itemHeight = itemHeight;
-        setBackground(0x60101828);
-        setBorder(0xFF406080, 1f);
+        setBackground(HoloColor.secondary(0x60).darker(0.84f));
+        setBorder(HoloColor.secondary(0xFF).darker(0.46f), 1f);
     }
 
     /** Ajoute un element a la fin ; renvoie l'element. */
@@ -63,9 +65,11 @@ public class HoloWidgetList extends HoloPanel implements HoloScrollable
     /** Elements, dans l'ordre (vue non modifiable). */
     public List<HoloWidget> items() { return itemsView; }
 
-    public HoloWidgetList setBarColor(int argb)
+    public HoloWidgetList setBarColor(int argb) { return setBarColor(HoloColor.fixed(argb)); }
+
+    public HoloWidgetList setBarColor(HoloColor color)
     {
-        this.barColor = argb;
+        this.barColor = Objects.requireNonNull(color);
         return this;
     }
 
@@ -144,6 +148,6 @@ public class HoloWidgetList extends HoloPanel implements HoloScrollable
         float track = height() - 2f * PAD;
         float bar = Math.max(4f, track * visibleCount() / items.size());
         float y = PAD + (track - bar) * first / (items.size() - visibleCount());
-        canvas.fill(width() - PAD - BAR_WIDTH, y, BAR_WIDTH, bar, barColor);
+        canvas.fill(width() - PAD - BAR_WIDTH, y, BAR_WIDTH, bar, canvas.color(barColor));
     }
 }

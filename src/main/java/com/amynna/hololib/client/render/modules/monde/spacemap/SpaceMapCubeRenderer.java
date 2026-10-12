@@ -1,5 +1,8 @@
 package com.amynna.hololib.client.render.modules.monde.spacemap;
 
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloTheme;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.client.render.holo.HoloDrawContext;
 import com.amynna.hololib.client.render.holo.HoloObjectRenderer;
@@ -8,7 +11,6 @@ import com.amynna.hololib.client.render.type.HoloRenderTypes;
 import com.amynna.hololib.holo.edit.HoloEditMath;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloTransform;
-import com.amynna.hololib.modules.camera.config.ConfigWindow;
 import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
 import com.amynna.hololib.modules.dimension.space.math.SpaceOrbits;
 import com.amynna.hololib.modules.dimension.space.math.SpacePose;
@@ -126,9 +128,9 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
 
     /** Demi-epaisseur des aretes et des traits, en blocs (a l'echelle par defaut). */
     private static final float THICKNESS = 0.01f;
-    private static final int EDGE_COLOR = 0x90000000 | ConfigWindow.ACCENT & 0xFFFFFF;
+    private static final HoloColor EDGE_COLOR = HoloColor.primary(0x90);
     /** Teinte des faces (alpha faible). */
-    private static final int FACE_COLOR = 0x14000000 | ConfigWindow.ACCENT & 0xFFFFFF;
+    private static final HoloColor FACE_COLOR = HoloColor.primary(0x14);
     /** Axes unitaires X, Y, Z. */
     private static final float[][] AXES = {{1f, 0f, 0f}, {0f, 1f, 0f}, {0f, 0f, 1f}};
     /** Signes des deux coordonnees fixes d'une arete (quatre aretes paralleles par axe). */
@@ -150,8 +152,8 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
     private static final float TICK_LABEL_GAP = 0.09f;
     /** Nombre maximal de graduations par regle (le pas {@code nice(H / 4)} en donne au plus 8). */
     private static final int MAX_TICKS = 16;
-    private static final int TICK_COLOR = 0xC0000000 | ConfigWindow.ACCENT & 0xFFFFFF;
-    private static final int TICK_LABEL_COLOR = 0xFF000000 | ConfigWindow.ACCENT & 0xFFFFFF;
+    private static final HoloColor TICK_COLOR = HoloColor.primary(0xC0);
+    private static final HoloColor TICK_LABEL_COLOR = HoloColor.primary(0xFF);
 
     // ---------------------------------------------------------------- etoiles
 
@@ -177,9 +179,9 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
     private static final float RING_THICKNESS = 0.004f;
     /** Systeme courant (monde) : double anneau vert, second anneau a cet ecart du premier, en blocs. */
     private static final float CURRENT_RING_GAP = 0.009f;
-    private static final int CURRENT_RING_COLOR = 0xE0000000 | SpaceMapCube.WORLD_COLOR & 0xFFFFFF;
-    private static final int CURRENT_NAME_COLOR = SpaceMapCube.WORLD_COLOR;
-    private static final int HIGHLIGHT = 0xFFFFE040;
+    private static final HoloColor CURRENT_RING_COLOR = HoloColor.selection(0xE0);
+    private static final HoloColor CURRENT_NAME_COLOR = SpaceMapCube.WORLD_COLOR;
+    private static final HoloColor HIGHLIGHT = HoloColor.action(0xFF).lighter(0.03f);
     /** Tolerance du test « dans le cube ». */
     private static final float INSIDE_EPSILON = 1e-4f;
     /** Segments des disques et anneaux (pair : le disque est dessine en quads de deux secteurs). */
@@ -188,6 +190,39 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
     private static final float[] SIN = new float[SEGMENTS + 1];
     /** Sommet transforme (fil de rendu seulement) : {@code VertexConsumer.vertex(Matrix4f, ...)} alloue un vecteur par sommet. */
     private static final Vector3f VERTEX = new Vector3f();
+
+    // Couleurs du theme de la frame en cours (fil de rendu), posees par {@link #applyTheme}.
+    private static int edgeColor;
+    private static int faceColor;
+    private static int tickColor;
+    private static int tickLabelColor;
+    private static int currentRingColor;
+    private static int currentNameColor;
+    private static int highlight;
+    private static int nameColor;
+    private static int shipRim;
+    private static int shipCore;
+    private static int shipSegmentColor;
+    private static int crossColor;
+    private static int crossLabelColor;
+
+    /** Resout les couleurs dans le theme de l'objet (debut de frame). */
+    private static void applyTheme(HoloTheme theme)
+    {
+        edgeColor = EDGE_COLOR.resolve(theme);
+        faceColor = FACE_COLOR.resolve(theme);
+        tickColor = TICK_COLOR.resolve(theme);
+        tickLabelColor = TICK_LABEL_COLOR.resolve(theme);
+        currentRingColor = CURRENT_RING_COLOR.resolve(theme);
+        currentNameColor = CURRENT_NAME_COLOR.resolve(theme);
+        highlight = HIGHLIGHT.resolve(theme);
+        nameColor = NAME_COLOR.resolve(theme);
+        shipRim = SHIP_RIM.resolve(theme);
+        shipCore = SHIP_CORE.resolve(theme);
+        shipSegmentColor = SHIP_SEGMENT_COLOR.resolve(theme);
+        crossColor = CROSS_COLOR.resolve(theme);
+        crossLabelColor = CROSS_LABEL_COLOR.resolve(theme);
+    }
 
     // ---------------------------------------------------------------- corps textures (T37)
 
@@ -225,7 +260,7 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
     private static final float LABEL_DISTANCE = 24f;
     /** Ecart entre le haut du coeur d'une etoile et le bas de son nom, en blocs. */
     private static final float NAME_GAP = 0.015f;
-    private static final int NAME_COLOR = 0xFFFFFFFF;
+    private static final HoloColor NAME_COLOR = HoloColor.special(0xFF);
 
     // ---------------------------------------------------------------- vue systeme
 
@@ -256,9 +291,9 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
     private static final float SHIP_SEGMENT = 0.12f;
     /** Demi-epaisseur du segment, en blocs. */
     private static final float SHIP_THICKNESS = 0.003f;
-    private static final int SHIP_RIM = SpaceMapCube.WORLD_COLOR;
-    private static final int SHIP_CORE = 0xFFC8FFD0;
-    private static final int SHIP_SEGMENT_COLOR = 0xE0000000 | SpaceMapCube.WORLD_COLOR & 0xFFFFFF;
+    private static final HoloColor SHIP_RIM = SpaceMapCube.WORLD_COLOR;
+    private static final HoloColor SHIP_CORE = HoloColor.selection(0xFF).lighter(0.6f);
+    private static final HoloColor SHIP_SEGMENT_COLOR = HoloColor.selection(0xE0);
     private static final String UNIT_LIGHT_YEAR = " al";
     private static final String UNIT_AU = " UA";
 
@@ -267,8 +302,8 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
     /** Demi-epaisseur des segments de la croix, en blocs (plus fins que les aretes). */
     private static final float CROSS_THICKNESS = 0.0025f;
     /** Couleur de la croix : celle de la selection, un peu transparente. */
-    private static final int CROSS_COLOR = 0xB0000000 | HIGHLIGHT & 0xFFFFFF;
-    private static final int CROSS_LABEL_COLOR = HIGHLIGHT;
+    private static final HoloColor CROSS_COLOR = HoloColor.action(0xB0).lighter(0.03f);
+    private static final HoloColor CROSS_LABEL_COLOR = HoloColor.action(0xFF).lighter(0.03f);
     /** Echelle du texte des coordonnees (comme les graduations). */
     private static final float CROSS_TEXT_SCALE = TICK_TEXT_SCALE;
     /** Ecart entre l'extremite d'un segment et le bord de son etiquette, en blocs. */
@@ -332,6 +367,7 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
     public void render(SpaceMapCube cube, PoseStack pose, MultiBufferSource buffers, int packedLight,
                        HoloDrawContext ctx)
     {
+        applyTheme(HoloThemes.resolve(cube));
         HoloTransform t = cube.transform();
         scale = Math.max(1e-3f, (t.scaleX() + t.scaleY() + t.scaleZ()) / 3f);
         size = scale / SpaceMapCube.DEFAULT_SCALE;
@@ -378,12 +414,12 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
             int id = layout.ids[i];
             if (id == current) {
                 float ringRadius = Math.max(RING_MIN * size, r * CURRENT_RING_FACTOR);
-                ring(solid, billboard, ringRadius, ringThickness, CURRENT_RING_COLOR, light);
-                ring(solid, billboard, ringRadius + CURRENT_RING_GAP * size, ringThickness, CURRENT_RING_COLOR,
+                ring(solid, billboard, ringRadius, ringThickness, currentRingColor, light);
+                ring(solid, billboard, ringRadius + CURRENT_RING_GAP * size, ringThickness, currentRingColor,
                         light);
             }
             if (id == selected) ring(solid, billboard, Math.max((RING_MIN + 0.02f) * size, r * SELECTED_RING_FACTOR),
-                    ringThickness, HIGHLIGHT, light);
+                    ringThickness, highlight, light);
         }
         int crossIndex = selectedStar(layout, selected);
         if (crossIndex >= 0) {
@@ -401,9 +437,9 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
                 if (!readable(billboard)) continue;
                 textMatrix.set(billboard).translate(0f, (layout.radius[i] + NAME_GAP) * size, 0f)
                         .scale(-textScale, -textScale, textScale);
-                int nameColor = layout.ids[i] == selected ? HIGHLIGHT
-                        : layout.ids[i] == current ? CURRENT_NAME_COLOR : NAME_COLOR;
-                font.drawInBatch(layout.names[i], -0.5f * layout.widths[i], -8f, nameColor, false, textMatrix,
+                int label = layout.ids[i] == selected ? highlight
+                        : layout.ids[i] == current ? currentNameColor : nameColor;
+                font.drawInBatch(layout.names[i], -0.5f * layout.widths[i], -8f, label, false, textMatrix,
                         buffers, Font.DisplayMode.NORMAL, 0, light);
             }
             tickLabels(font, matrix, layout, buffers, light);
@@ -486,7 +522,7 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
             float r = layout.bodyRadius[i] * scale;
             if (bodyTextures[i] == null) disc(solid, billboard, r, layout.bodyCore[i], layout.bodyColor[i], light);
             if (layout.bodyIds[i] == selected) {
-                ring(solid, billboard, r + SELECTED_RING_GAP * size, ringThickness, HIGHLIGHT, light);
+                ring(solid, billboard, r + SELECTED_RING_GAP * size, ringThickness, highlight, light);
             }
         }
         int crossIndex = selectedBody(layout, selected);
@@ -516,7 +552,7 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
                 textMatrix.set(billboard).translate(0f, layout.bodyRadius[i] * scale + NAME_GAP * size, 0f)
                         .scale(-textScale, -textScale, textScale);
                 font.drawInBatch(layout.bodyNames[i], -0.5f * layout.bodyWidths[i], -8f,
-                        layout.bodyIds[i] == selected ? HIGHLIGHT : NAME_COLOR, false, textMatrix, buffers,
+                        layout.bodyIds[i] == selected ? highlight : nameColor, false, textMatrix, buffers,
                         Font.DisplayMode.NORMAL, 0, light);
             }
             tickLabels(font, matrix, layout, buffers, light);
@@ -787,8 +823,8 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
             float dx = 2f * h * a[0];
             float dy = 2f * h * a[1];
             float dz = 2f * h * a[2];
-            band(consumer, matrix, sx, sy, sz, dx, dy, dz, t * u[0], t * u[1], t * u[2], CROSS_COLOR, light);
-            band(consumer, matrix, sx, sy, sz, dx, dy, dz, t * v[0], t * v[1], t * v[2], CROSS_COLOR, light);
+            band(consumer, matrix, sx, sy, sz, dx, dy, dz, t * u[0], t * u[1], t * u[2], crossColor, light);
+            band(consumer, matrix, sx, sy, sz, dx, dy, dz, t * v[0], t * v[1], t * v[2], crossColor, light);
         }
     }
 
@@ -840,7 +876,7 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
         float halfHeight = TEXT_HALF_HEIGHT * textScale;
         float d = CROSS_LABEL_GAP * size + Math.abs(dx) * halfWidth + Math.abs(dy) * halfHeight;
         textMatrix.set(billboard).translate(dx * d, dy * d, 0f).scale(-textScale, -textScale, textScale);
-        font.drawInBatch(coordinate, -0.5f * coordinate.width, -4f, CROSS_LABEL_COLOR, false, textMatrix, buffers,
+        font.drawInBatch(coordinate, -0.5f * coordinate.width, -4f, crossLabelColor, false, textMatrix, buffers,
                 Font.DisplayMode.NORMAL, 0, light);
     }
 
@@ -960,12 +996,12 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
         float vy = (fz * ux - fx * uz);
         float vz = (fx * uy - fy * ux);
         float d = SHIP_SEGMENT * SpaceMapCube.HALF_SIZE;
-        band(consumer, matrix, x, y, z, fx * d, fy * d, fz * d, ux, uy, uz, SHIP_SEGMENT_COLOR, light);
-        band(consumer, matrix, x, y, z, fx * d, fy * d, fz * d, vx, vy, vz, SHIP_SEGMENT_COLOR, light);
+        band(consumer, matrix, x, y, z, fx * d, fy * d, fz * d, ux, uy, uz, shipSegmentColor, light);
+        band(consumer, matrix, x, y, z, fx * d, fy * d, fz * d, vx, vy, vz, shipSegmentColor, light);
         placeBillboard(matrix, x, y, z);
         // Repere de la camera : +Z regarde vers la scene, -Z revient vers l'oeil.
         billboard.translate(0f, 0f, -SHIP_LIFT * size);
-        disc(consumer, billboard, SHIP_RADIUS * SpaceMapCube.HALF_SIZE * scale, SHIP_CORE, SHIP_RIM, light);
+        disc(consumer, billboard, SHIP_RADIUS * SpaceMapCube.HALF_SIZE * scale, shipCore, shipRim, light);
     }
 
     /**
@@ -1004,8 +1040,8 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
                 float x = start[0] * h + dir[0] * s;
                 float y = start[1] * h + dir[1] * s;
                 float z = start[2] * h + dir[2] * s;
-                band(consumer, matrix, x, y, z, ox, oy, oz, t * dir[0], t * dir[1], t * dir[2], TICK_COLOR, light);
-                band(consumer, matrix, x, y, z, ox, oy, oz, t * side[0], t * side[1], t * side[2], TICK_COLOR,
+                band(consumer, matrix, x, y, z, ox, oy, oz, t * dir[0], t * dir[1], t * dir[2], tickColor, light);
+                band(consumer, matrix, x, y, z, ox, oy, oz, t * side[0], t * side[1], t * side[2], tickColor,
                         light);
             }
         }
@@ -1027,7 +1063,7 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
                         start[1] * h + dir[1] * s + out[1] * offset, start[2] * h + dir[2] * s + out[2] * offset);
                 if (!readable(billboard)) continue;
                 textMatrix.set(billboard).scale(-textScale, -textScale, textScale);
-                font.drawInBatch(layout.tickLabels[k], -0.5f * layout.tickWidths[k], -4f, TICK_LABEL_COLOR, false,
+                font.drawInBatch(layout.tickLabels[k], -0.5f * layout.tickWidths[k], -4f, tickLabelColor, false,
                         textMatrix, buffers, Font.DisplayMode.NORMAL, 0, light);
             }
         }
@@ -1267,8 +1303,8 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
                 float dx = 2f * h * a[0];
                 float dy = 2f * h * a[1];
                 float dz = 2f * h * a[2];
-                band(consumer, matrix, x, y, z, dx, dy, dz, t * u[0], t * u[1], t * u[2], EDGE_COLOR, light);
-                band(consumer, matrix, x, y, z, dx, dy, dz, t * v[0], t * v[1], t * v[2], EDGE_COLOR, light);
+                band(consumer, matrix, x, y, z, dx, dy, dz, t * u[0], t * u[1], t * u[2], edgeColor, light);
+                band(consumer, matrix, x, y, z, dx, dy, dz, t * v[0], t * v[1], t * v[2], edgeColor, light);
             }
         }
     }
@@ -1286,13 +1322,13 @@ public final class SpaceMapCubeRenderer implements HoloObjectRenderer<SpaceMapCu
                 float cy = side * h * n[1];
                 float cz = side * h * n[2];
                 vertex(consumer, matrix, cx + h * (-u[0] - v[0]), cy + h * (-u[1] - v[1]), cz + h * (-u[2] - v[2]),
-                        FACE_COLOR, light);
+                        faceColor, light);
                 vertex(consumer, matrix, cx + h * (u[0] - v[0]), cy + h * (u[1] - v[1]), cz + h * (u[2] - v[2]),
-                        FACE_COLOR, light);
+                        faceColor, light);
                 vertex(consumer, matrix, cx + h * (u[0] + v[0]), cy + h * (u[1] + v[1]), cz + h * (u[2] + v[2]),
-                        FACE_COLOR, light);
+                        faceColor, light);
                 vertex(consumer, matrix, cx + h * (-u[0] + v[0]), cy + h * (-u[1] + v[1]), cz + h * (-u[2] + v[2]),
-                        FACE_COLOR, light);
+                        faceColor, light);
             }
         }
     }

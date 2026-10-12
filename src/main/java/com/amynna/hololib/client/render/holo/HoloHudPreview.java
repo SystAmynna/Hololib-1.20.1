@@ -1,5 +1,7 @@
 package com.amynna.hololib.client.render.holo;
 
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.client.render.type.HoloRenderTypes;
 import com.amynna.hololib.holo.object.HoloAnchor;
 import com.amynna.hololib.holo.object.HoloObject;
@@ -24,7 +26,7 @@ public final class HoloHudPreview
     private static final float Z_STEP = 0.5f;
     /** Ecrasement de la profondeur propre des objets (objets epais). */
     private static final float Z_SCALE = 0.01f;
-    private static final int HIGHLIGHT = 0x50FFE040;
+    private static final HoloColor HIGHLIGHT = HoloColor.action(0x50).lighter(0.03f);
 
     private static final HoloDrawContext DRAW = new HoloDrawContext();
     private static final Quaternionf ROTATION = new Quaternionf();
@@ -62,10 +64,11 @@ public final class HoloHudPreview
         Matrix4f matrix = pose.last().pose();
         float w = object.halfWidth() * 1.05f;
         float h = object.halfHeight() * 1.05f;
-        int r = HIGHLIGHT >> 16 & 0xFF;
-        int g = HIGHLIGHT >> 8 & 0xFF;
-        int b = HIGHLIGHT & 0xFF;
-        int a = HIGHLIGHT >>> 24;
+        int color = HIGHLIGHT.resolve(HoloThemes.resolve(object));
+        int r = color >> 16 & 0xFF;
+        int g = color >> 8 & 0xFF;
+        int b = color & 0xFF;
+        int a = color >>> 24;
         int light = LightTexture.FULL_BRIGHT;
         consumer.vertex(matrix, -w, -h, -0.01f).color(r, g, b, a).uv2(light).endVertex();
         consumer.vertex(matrix, w, -h, -0.01f).color(r, g, b, a).uv2(light).endVertex();

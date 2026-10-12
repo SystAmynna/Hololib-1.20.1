@@ -1,5 +1,6 @@
 package com.amynna.hololib.holo.widget.control;
 
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.interact.HoloInteraction;
 import com.amynna.hololib.holo.widget.HoloCanvas;
@@ -26,7 +27,10 @@ public class HoloWidgetDragRow extends HoloPanel implements HoloDraggable, HoloH
     private final HoloDragState dragState = new HoloDragState();
     private OnMove onMove = (row, from, to) -> {};
     private boolean hovered;
-    private int color = 0x6020A0FF;
+    private static final HoloColor DRAG_OVERLAY = HoloColor.special(0x40);
+    private static final HoloColor HOVER_OVERLAY = HoloColor.special(0x20);
+
+    private HoloColor color = HoloColor.secondary(0x60);
 
     public HoloWidgetDragRow(float x, float y, float width, float height)
     {
@@ -34,9 +38,12 @@ public class HoloWidgetDragRow extends HoloPanel implements HoloDraggable, HoloH
     }
 
     /** Couleur de la ligne, sous le surlignage et les enfants. */
-    public HoloWidgetDragRow setColor(int argb)
+    public HoloWidgetDragRow setColor(int argb) { return setColor(HoloColor.fixed(argb)); }
+
+    /** Couleur de la ligne (secondaire par defaut). */
+    public HoloWidgetDragRow setColor(HoloColor color)
     {
-        this.color = argb;
+        this.color = Objects.requireNonNull(color);
         return this;
     }
 
@@ -86,8 +93,10 @@ public class HoloWidgetDragRow extends HoloPanel implements HoloDraggable, HoloH
     @Override
     protected void draw(HoloCanvas canvas)
     {
-        canvas.fill(0, 0, width(), height(), color);
-        if (hovered || dragging()) canvas.fill(0, 0, width(), height(), dragging() ? 0x40FFFFFF : 0x20FFFFFF);
+        canvas.fill(0, 0, width(), height(), canvas.color(color));
+        if (hovered || dragging()) {
+            canvas.fill(0, 0, width(), height(), canvas.color(dragging() ? DRAG_OVERLAY : HOVER_OVERLAY));
+        }
         super.draw(canvas);
     }
 }

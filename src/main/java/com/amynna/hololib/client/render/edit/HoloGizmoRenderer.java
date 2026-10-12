@@ -1,5 +1,8 @@
 package com.amynna.hololib.client.render.edit;
 
+import com.amynna.hololib.holo.theme.HoloTheme;
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.client.edit.HoloEditTools;
 import com.amynna.hololib.client.render.holo.ResolvedHolo;
 import com.amynna.hololib.client.render.type.HoloRenderTypes;
@@ -24,8 +27,10 @@ public final class HoloGizmoRenderer extends WorldRenderer<ResolvedHolo>
 {
     private static final int SEGMENTS = 48;
     private static final float THICKNESS = 0.012f;
-    private static final int[] COLORS = {0xE0FF4040, 0xE040FF40, 0xE04080FF};
-    private static final int HIGHLIGHT = 0xFFFFE040;
+    /** Axes X, Y, Z : couleurs critique, selection et principale du theme. */
+    private static final HoloColor[] COLORS = {HoloColor.critical(0xE0), HoloColor.selection(0xE0),
+            HoloColor.primary(0xE0)};
+    private static final HoloColor HIGHLIGHT = HoloColor.action(0xFF).lighter(0.03f);
     /** Composantes des axes : X, Y, Z. */
     private static final float[][] AXES = {{1f, 0f, 0f}, {0f, 1f, 0f}, {0f, 0f, 1f}};
 
@@ -53,8 +58,9 @@ public final class HoloGizmoRenderer extends WorldRenderer<ResolvedHolo>
         float size = HoloEditTools.gizmoSize(object.object());
         int highlighted = HoloEditTools.highlightedAxis();
         boolean translate = HoloEditTools.gizmoTranslate();
+        HoloTheme theme = HoloThemes.resolve(object.object());
         for (int i = 0; i < 3; i++) {
-            int color = i == highlighted ? HIGHLIGHT : COLORS[i];
+            int color = (i == highlighted ? HIGHLIGHT : COLORS[i]).resolve(theme);
             float[] a = AXES[i];
             float[] u = AXES[(i + 1) % 3];
             float[] v = AXES[(i + 2) % 3];

@@ -1,5 +1,8 @@
 package com.amynna.hololib.modules.monde.spacemap;
 
+import com.amynna.hololib.holo.theme.HoloThemed;
+import com.amynna.hololib.holo.theme.HoloThemeSource;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.edit.HoloEditRotation;
 import com.amynna.hololib.holo.edit.HoloEditScale;
 import com.amynna.hololib.holo.edit.HoloEditTranslation;
@@ -29,7 +32,7 @@ import com.amynna.hololib.holo.widget.control.HoloScrollable;
  * son acces ({@code EVERYONE}, pose par la Space Map) decide qui peut le faire.
  */
 public final class SpaceMapCube extends HoloObject
-        implements HoloEditTranslation, HoloEditRotation, HoloEditScale, HoloScrollable
+        implements HoloEditTranslation, HoloEditRotation, HoloEditScale, HoloScrollable, HoloThemed
 {
     /** Demi-arete du cube dans son repere local. */
     public static final float HALF_SIZE = 1f;
@@ -41,7 +44,7 @@ public final class SpaceMapCube extends HoloObject
      * Couleur du monde (T25) : vaisseau de la vue systeme, anneau du systeme courant sur la carte galactique, systeme
      * courant dans les listes des fenetres (distincte du jaune de la selection).
      */
-    public static final int WORLD_COLOR = 0xFF50F070;
+    public static final HoloColor WORLD_COLOR = HoloColor.selection(0xFF);
     /** Rayon de la sphere englobante locale : demi-diagonale du cube. */
     private static final float BOUNDING_RADIUS = (float) Math.sqrt(3.0) * HALF_SIZE;
 
@@ -90,4 +93,8 @@ public final class SpaceMapCube extends HoloObject
         SpaceMapView view = view();
         if (view != null && view.zoomable()) view.requestZoom(this, steps);
     }
+
+    /** Theme du serveur (objet partage). */
+    @Override
+    public HoloThemeSource themeSource() { return HoloThemeSource.SERVER; }
 }

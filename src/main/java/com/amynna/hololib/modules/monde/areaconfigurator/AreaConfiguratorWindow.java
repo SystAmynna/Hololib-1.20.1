@@ -1,5 +1,7 @@
 package com.amynna.hololib.modules.monde.areaconfigurator;
 
+import com.amynna.hololib.holo.theme.HoloThemeSource;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.holo.capture.HoloControl;
 import com.amynna.hololib.holo.edit.HoloEditRotation;
 import com.amynna.hololib.holo.edit.HoloEditTranslation;
@@ -66,11 +68,11 @@ public final class AreaConfiguratorWindow extends HoloWindow implements HoloEdit
     private static final int REFRESH_ROW = ENTITIES_ROW + SWITCH_HEIGHT + 5;
     public static final int HEIGHT = REFRESH_ROW + BUTTON_HEIGHT + MARGIN;
 
-    private static final int TEXT = 0xFFE0F0FF;
-    private static final int MUTED = 0xFF90A0B0;
-    private static final int MISSING = 0xFFFF8060;
-    private static final int ON = 0xFF40C060;
-    private static final int OFF = 0xFF606060;
+    private static final HoloColor TEXT = HoloColor.primary(0xFF).lighter(0.84f);
+    private static final HoloColor MUTED = HoloColor.special(0xFF).darker(0.37f);
+    private static final HoloColor MISSING = HoloColor.critical(0xFF).lighter(0.18f);
+    private static final HoloColor ON = HoloColor.selection(0xFF).darker(0.19f);
+    private static final HoloColor OFF = HoloColor.special(0xFF).darker(0.62f);
     private static final int NUMBER_LENGTH = 9;
     private static final int LETTER_WIDTH = 10;
     private static final int HERE_WIDTH = 30;
@@ -106,8 +108,9 @@ public final class AreaConfiguratorWindow extends HoloWindow implements HoloEdit
         super(key, new HoloAnchor.World(), transform, WIDTH, HEIGHT, PIXEL_SCALE);
         this.module = Objects.requireNonNull(module);
         setVisibility(HoloVisibility.PUBLIC);
+        setThemeSource(HoloThemeSource.SERVER).setStaffTheme(true);
         setInterceptedInputs(HoloControl.LEFT_CLICK, HoloControl.RIGHT_CLICK);
-        root().setBackground(ConfigWindow.BACKGROUND).setBorder(ConfigWindow.ACCENT, 1f);
+        root().setPattern(ConfigWindow.BACKGROUND_ALPHA).setBorder(ConfigWindow.ACCENT, 1f);
         root().add(new HoloLabel(4, 3, WIDTH - 8, 11, Component.literal("Area Displayer Configurator"))
                 .setAlign(HoloLabel.Align.CENTER).setColor(ConfigWindow.ACCENT));
         int column = WIDTH - 2 * MARGIN;

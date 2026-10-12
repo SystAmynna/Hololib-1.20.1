@@ -1,5 +1,7 @@
 package com.amynna.hololib.client.render.modules.camera.radar;
 
+import com.amynna.hololib.holo.theme.HoloThemes;
+import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.client.modules.camera.radar.RadarClient;
 import com.amynna.hololib.client.modules.camera.radar.RadarScan;
@@ -49,23 +51,25 @@ final class RadarRenderer extends WorldRenderer<RadarScan>
     private static final List<RadarScan> ONE = List.of(RadarClient.scan());
     private static final List<RadarScan> NONE = List.of();
 
-    private static final float WAVE_R = 0.25f;
-    private static final float WAVE_G = 0.75f;
-    private static final float WAVE_B = 1f;
-    private static final float MARK_R = 0.2f;
-    private static final float MARK_G = 0.45f;
-    private static final float MARK_B = 1f;
+    /** Onde et sphere : couleur principale du theme standard du joueur ; entites reperees : secondaire. */
+    private static final HoloColor WAVE = HoloColor.primary(0xFF);
+    private static final HoloColor MARK = HoloColor.secondary(0xFF);
     private static final float FILL_ALPHA = 0.45f;
     /** Demi-largeur du trait de l'onde sur la scene, en blocs. */
     private static final float FRONT = 0.6f;
     /** Largeur des segments de la sphere au depart, en blocs ; nulle au rayon maximal. */
     private static final float EDGE_WIDTH = 0.4f;
-    private static final int SPHERE_RGB = 0x40C0FF;
     private static final int FACE_ALPHA = 0x14;
     private static final int EDGE_ALPHA = 0x60;
 
     private final HoloOutlineMask mask = new HoloOutlineMask();
     private final Matrix4f inverse = new Matrix4f();
+
+    private static float red(int rgb) { return (rgb >> 16 & 0xFF) / 255f; }
+
+    private static float green(int rgb) { return (rgb >> 8 & 0xFF) / 255f; }
+
+    private static float blue(int rgb) { return (rgb & 0xFF) / 255f; }
 
     @Override
     protected List<? extends RadarScan> instances() { return RadarClient.scan().active() ? ONE : NONE; }
@@ -96,8 +100,9 @@ final class RadarRenderer extends WorldRenderer<RadarScan>
         if (waveAlpha > 0f && radius > 0.5f) {
             // Segments amincis lineairement avec le rayon, faces estompees au meme rythme.
             float left = Math.max(0f, 1f - radius / Math.max(1, scan.maxRadius()));
-            int face = (int) (FACE_ALPHA * waveAlpha * left) << 24 | SPHERE_RGB;
-            int edge = (int) (EDGE_ALPHA * waveAlpha) << 24 | SPHERE_RGB;
+            int sphere = WAVE.rgb(HoloThemes.clientStandard());
+            int face = (int) (FACE_ALPHA * waveAlpha * left) << 24 | sphere;
+            int edge = (int) (EDGE_ALPHA * waveAlpha) << 24 | sphere;
             RadarSphere.draw(pose.last().pose(), buffers.getBuffer(Types.SPHERE), radius, EDGE_WIDTH * left, face,
                     edge);
         }
@@ -135,10 +140,12 @@ final class RadarRenderer extends WorldRenderer<RadarScan>
             shader.safeGetUniform("Radius").set(radius);
             shader.safeGetUniform("Front").set(FRONT);
             shader.safeGetUniform("WaveAlpha").set(waveAlpha);
-            shader.safeGetUniform("WaveColor").set(WAVE_R, WAVE_G, WAVE_B);
+            int wave = WAVE.rgb(HoloThemes.clientStandard());
+            shader.safeGetUniform("WaveColor").set(red(wave), green(wave), blue(wave));
             shader.safeGetUniform("HasMask").set(hasMask ? 1f : 0f);
             shader.safeGetUniform("FillAlpha").set(FILL_ALPHA);
-            shader.safeGetUniform("MarkColor").set(MARK_R, MARK_G, MARK_B);
+            int mark = MARK.rgb(HoloThemes.clientStandard());
+            shader.safeGetUniform("MarkColor").set(red(mark), green(mark), blue(mark));
 
             RenderSystem.setShader(RadarShaders::composite);
             RenderSystem.setShaderTexture(0, mask.sceneDepthTexture());
