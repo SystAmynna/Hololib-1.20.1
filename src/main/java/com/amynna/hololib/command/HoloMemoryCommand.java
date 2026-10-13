@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
  *     <li>{@code player <joueur> add <memoire> [copy <joueur> <current|memoire>]} : nouvelle memoire, vide ou copiee
  *     d'une memoire d'un joueur connecte.</li>
  *     <li>{@code player <joueur> remove <memoire>} : supprime une memoire inactive.</li>
+ *     <li>{@code player <joueur> switch <memoire>} : change la memoire active du joueur.</li>
  *     <li>{@code player <joueur> list} : memoires du joueur.</li>
  *     <li>{@code player <joueur> reset <current|memoire> [<module...>]} : sans module, tous ceux qui ont une
  *     sauvegarde.</li>
@@ -83,6 +84,12 @@ public final class HoloMemoryCommand
                                                         HoloModuleCommand.memoryNames(ctx, "player", false),
                                                         builder))
                                                 .executes(HoloMemoryCommand::remove)))
+                                .then(Commands.literal("switch")
+                                        .then(Commands.argument("memory", StringArgumentType.word())
+                                                .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
+                                                        HoloModuleCommand.memoryNames(ctx, "player", false),
+                                                        builder))
+                                                .executes(HoloMemoryCommand::switchMemory)))
                                 .then(Commands.literal("list").executes(HoloMemoryCommand::listMemories))
                                 .then(Commands.literal("reset")
                                         .then(Commands.argument("memory", StringArgumentType.word())
@@ -175,6 +182,26 @@ public final class HoloMemoryCommand
             return 0;
         }
         source.sendSuccess(() -> Component.literal("Memoire '" + name + "' de " + name(player) + " supprimee"), true);
+        return 1;
+    }
+
+    private static int switchMemory(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException
+    {
+        CommandSourceStack source = ctx.getSource();
+        ServerPlayer player = EntityArgument.getPlayer(ctx, "player");
+        String name = StringArgumentType.getString(ctx, "memory");
+        HoloMemoryBank bank = HoloMemoryBank.of(player);
+        HoloMemory memory = bank.find(name);
+        if (memory == null) throw HoloModuleCommand.UNKNOWN_MEMORY.create(name);
+        if (memory == bank.active()) {
+            source.sendFailure(Component.literal("Memoire '" + name + "' deja active pour " + name(player)));
+            return 0;
+        }
+        if (!HoloContainers.selectMemory(player, name)) {
+            source.sendFailure(Component.literal("Changement de memoire impossible pour " + name(player)));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.literal("Memoire active de " + name(player) + " : '" + name + "'"), true);
         return 1;
     }
 

@@ -177,7 +177,7 @@ com.amynna.hololib
   (`reset` : module equipe remplace par son etat initial, createur garde ; dormante effacee) precedee du hook serveur
   `HoloModule.onReset(level)` (donnees tenues hors de la memoire). Types inconnus (mod retire) conserves, jamais remis a
   zero. `/holo_memory` (op 2) : `dimension <here|dim>` / `world <marker>` `list | reset <module...>` ; `player <joueur>
-  add <memoire> [copy <joueur> <current|memoire>] | remove <memoire> | list | reset <current|memoire> [<module...>]`
+  add <memoire> [copy <joueur> <current|memoire>] | remove <memoire> | switch <memoire> | list | reset <current|memoire> [<module...>]`
   (sans module : tous ceux qui ont une sauvegarde) ; autocompletion limitee aux modules ayant une trace.
 - **Inspection** : par defaut personne ne voit les affichages d'un autre joueur. A voit B si A suit l'entite de B et
   que la memoire active de A l'autorise (`HoloInspection` : drapeau "tous", liste, exclusions). Serveur autoritaire
