@@ -1,5 +1,21 @@
 {
   "key.categories.hololib": "Holo Lib",
   "key.hololib.focus": "Focus mode",
-  "key.hololib.editor": "Hologram editor"
+  "key.hololib.editor": "Hologram editor",
+  "block.hololib.white_cosmic_pool": "White Cosmic Pool",
+  "block.hololib.orange_cosmic_pool": "Orange Cosmic Pool",
+  "block.hololib.magenta_cosmic_pool": "Magenta Cosmic Pool",
+  "block.hololib.light_blue_cosmic_pool": "Light Blue Cosmic Pool",
+  "block.hololib.yellow_cosmic_pool": "Yellow Cosmic Pool",
+  "block.hololib.lime_cosmic_pool": "Lime Cosmic Pool",
+  "block.hololib.pink_cosmic_pool": "Pink Cosmic Pool",
+  "block.hololib.gray_cosmic_pool": "Gray Cosmic Pool",
+  "block.hololib.light_gray_cosmic_pool": "Light Gray Cosmic Pool",
+  "block.hololib.cyan_cosmic_pool": "Cyan Cosmic Pool",
+  "block.hololib.purple_cosmic_pool": "Purple Cosmic Pool",
+  "block.hololib.blue_cosmic_pool": "Blue Cosmic Pool",
+  "block.hololib.brown_cosmic_pool": "Brown Cosmic Pool",
+  "block.hololib.green_cosmic_pool": "Green Cosmic Pool",
+  "block.hololib.red_cosmic_pool": "Red Cosmic Pool",
+  "block.hololib.black_cosmic_pool": "Black Cosmic Pool"
 }

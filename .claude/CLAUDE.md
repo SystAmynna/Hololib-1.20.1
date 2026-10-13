@@ -29,6 +29,8 @@ Pour verifier le comportement de Minecraft/Forge, lire les sources mappees pluto
 ```
 com.amynna.hololib
 ├── HoloLib.java                 classe @Mod (registres, capability, reseau)
+├── block/                       blocs (commun) : HoloLibBlocks (registres blocs / items / block entities),
+│                                CosmicPoolBlock + BlockEntity + Item (bassins cosmiques, 16 couleurs, rendu par shader)
 ├── holo/                        modele COMMUN, aucune classe client (voir holo/package-info.java)
 │   ├── object/                  HoloObject, HoloAnchor (Sky/World/Local/Hud), HoloTransform, HoloVisibility, HoloAccess
 │   ├── window/ widget/          HoloWindow ; HoloWidget, HoloPanel, HoloLabel, HoloCanvas, HoloTextMetrics
@@ -119,6 +121,9 @@ com.amynna.hololib
         ├── world/               WorldRenderer<T>, WorldRenderable, WorldRenderContext, WorldRenderPass
         ├── view/                ViewRenderer, ViewRenderContext, ViewRenderPass
         ├── hud/                 HudRenderer, HudRenderContext, HudRenderPass
+        ├── block/               renderers des blocs (BER vanilla, hors RenderDispatcher) : CosmicPoolShaders
+        │                        (shader + enregistrement du BER), CosmicPoolRenderType, CosmicPoolRenderer,
+        │                        CosmicPoolItemRenderer (item dessine avec le shader)
         ├── demo/                DemoCubeRenderer (objets des demos)
         ├── edit/                HoloGizmoRenderer (segments / cercles des objets World edites)
         ├── modules/             renderers des modules, meme arborescence que modules/ (ModuleRenderers au setup) ;
@@ -590,6 +595,35 @@ de la frame, objet reutilise, setters package-private) et `XxxRenderPass` (inter
 **Ajouter un renderer** : implementer `SkyRenderer` / `ViewRenderer` / `HudRenderer` ou etendre `WorldRenderer<T>`, puis
 `HoloRenderers.register(...)` sur le fil de rendu. Ne jamais abonner un renderer aux evenements Forge lui-meme.
 Un objet qui existe cote serveur doit plutot etre une vraie `Entity` + `EntityRenderer`.
+
+### Blocs (`block`, `client/render/block`)
+
+- `hololib:<couleur>_cosmic_pool` (Bassin cosmique, **16 couleurs** de `DyeColor`, sans recette ;
+  `HoloLibBlocks.COSMIC_POOLS` / `COSMIC_POOL_ITEMS`, un seul block entity `hololib:cosmic_pool`) : cube plein
+  `RenderShape.ENTITYBLOCK_ANIMATED` (aucun modele bake, comme le portail de l'End), faces visibles dessinees par
+  `CosmicPoolRenderer` (`BlockEntityRenderer`), item par `CosmicPoolItemRenderer` (modele `builtin/entity`). Shader
+  **`assets/hololib/shaders/core/cosmic_pool.fsh`** (reglages en `#define` en tete ; uniformes declares dans
+  `cosmic_pool.json` : `u_time` en secondes de jeu, `u_bob`). Effet de trou profond par **parallaxe** : le rayon du
+  regard de chaque fragment est prolonge sous la face (repere de la surface derive de `dFdx` / `dFdy` de la position
+  dans la vue et des coordonnees locales ; rayon = axe de la vue en orthographique) et traverse, du fond vers la
+  surface : fond etoile, plan de fluide bas (sombre, vide par endroits), plan de fluide haut (clair, transparent, en
+  relief), particules sur 7 niveaux du plan bas a la surface (celles sous le plan haut composees avant lui ; carres
+  de 1 a 3 texels a position continue, opacite et scintillement varies ; errance en sinusoides propres + de groupe,
+  vie en fondu, 2 x 2 cellules testees) ; chaque plan est pixelise dans son repere (16 texels / bloc a sa profondeur,
+  grilles qui glissent) ; fluides = bruit a deformation de domaine anime, posterise ; hash entier (PCG, stable en
+  grandes coordonnees). Bords lumineux la ou la surface s'arrete : lisere ondulant, lueur, ecume tramee (continus
+  entre blocs de la meme couleur ; deux couleurs voisines ont chacune leur bord). **Bobbing** : vanilla le met dans
+  la projection, l'interieur tremblerait avec la face ; `CosmicPoolShaders` recopie `GameRenderer.bobView` dans
+  `u_bob` et le shader vise depuis le point affiche (`u_bob * viewPos`) : interieur fixe a l'ecran, bord colle a la
+  face. Deux `RenderType` : `COSMIC_POOL` (monde, `u_bob` de la frame ; identite avec un shaderpack) et
+  `COSMIC_POOL_STILL` (item en GUI / premiere personne, identite). **Couleurs** : tables `DYE_DARK` / `DYE_BASE` du
+  shader (ombre teintee, couleur vive ; magenta = apparence d'origine), palette et teintes derivees par
+  `setupColors`. Donnees de sommet (`POSITION_COLOR_TEX_LIGHTMAP` detourne) : couleur = (masque des bords, masque des
+  coins, id de la couleur, 255), UV = coordonnees locales de la face (0..1, precises pour les derivees), UV2 = origine
+  entiere du bloc dans le plan de la face (16 bits signes : exacte de -32768 a 32767, sans replier en 0 qui
+  couperait le motif ; cesure seulement a +-32768) ; masques par face calcules par
+  `CosmicPoolBlockEntity.faceMask` (au plus une fois par tick). Limite : avec un shaderpack Oculus, probablement
+  invisible (shader non remplace par le pack, voir les pieges).
 
 ### Pieges connus (verifies dans les sources)
 

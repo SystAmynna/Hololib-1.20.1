@@ -1,5 +1,21 @@
 {
   "key.categories.hololib": "Holo Lib",
   "key.hololib.focus": "Mode focus",
-  "key.hololib.editor": "Éditeur d'hologrammes"
+  "key.hololib.editor": "Éditeur d'hologrammes",
+  "block.hololib.white_cosmic_pool": "Bassin cosmique blanc",
+  "block.hololib.orange_cosmic_pool": "Bassin cosmique orange",
+  "block.hololib.magenta_cosmic_pool": "Bassin cosmique magenta",
+  "block.hololib.light_blue_cosmic_pool": "Bassin cosmique bleu clair",
+  "block.hololib.yellow_cosmic_pool": "Bassin cosmique jaune",
+  "block.hololib.lime_cosmic_pool": "Bassin cosmique vert clair",
+  "block.hololib.pink_cosmic_pool": "Bassin cosmique rose",
+  "block.hololib.gray_cosmic_pool": "Bassin cosmique gris",
+  "block.hololib.light_gray_cosmic_pool": "Bassin cosmique gris clair",
+  "block.hololib.cyan_cosmic_pool": "Bassin cosmique cyan",
+  "block.hololib.purple_cosmic_pool": "Bassin cosmique violet",
+  "block.hololib.blue_cosmic_pool": "Bassin cosmique bleu",
+  "block.hololib.brown_cosmic_pool": "Bassin cosmique marron",
+  "block.hololib.green_cosmic_pool": "Bassin cosmique vert",
+  "block.hololib.red_cosmic_pool": "Bassin cosmique rouge",
+  "block.hololib.black_cosmic_pool": "Bassin cosmique noir"
 }

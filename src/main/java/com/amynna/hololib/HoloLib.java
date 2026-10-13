@@ -1,5 +1,6 @@
 package com.amynna.hololib;
 
+import com.amynna.hololib.block.HoloLibBlocks;
 import com.amynna.hololib.demo.DemoModules;
 import com.amynna.hololib.holo.memory.HoloContainers;
 import com.amynna.hololib.holo.module.HoloModuleTypes;
@@ -28,6 +29,7 @@ public class HoloLib
         HoloLibThemePatterns.REGISTER.register(modBus);
         DemoModules.REGISTER.register(modBus);
         HoloLibModules.REGISTER.register(modBus);
+        HoloLibBlocks.register(modBus);
         modBus.addListener(HoloContainers::registerCapabilities);
         modBus.addListener(HoloLib::onCommonSetup);
     }
