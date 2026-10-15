@@ -16,6 +16,7 @@ public abstract class HoloWidget
     private float width;
     private float height;
     private boolean visible = true;
+    private float depth;
 
     protected HoloWidget(float x, float y, float width, float height)
     {
@@ -44,6 +45,16 @@ public abstract class HoloWidget
     public HoloWidget setVisible(boolean visible)
     {
         this.visible = visible;
+        return this;
+    }
+
+    /** Decalage de profondeur propre au widget, en pixels (0 par defaut), herite par ses enfants. */
+    public final float depth() { return depth; }
+
+    /** Avance (positif) ou recule le widget et ses enfants par rapport a leur niveau normal, en pixels. */
+    public HoloWidget setDepth(float depth)
+    {
+        this.depth = depth;
         return this;
     }
 
@@ -86,9 +97,11 @@ public abstract class HoloWidget
     {
         if (!visible) return;
         canvas.push(x, y);
+        canvas.shiftDepth(depth);
         try {
             draw(canvas);
         } finally {
+            canvas.shiftDepth(-depth);
             canvas.pop();
         }
     }

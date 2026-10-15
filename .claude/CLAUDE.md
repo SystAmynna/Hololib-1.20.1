@@ -71,7 +71,7 @@ com.amynna.hololib
 │   │                            Aim), HUD de navigation et vitesse de croisiere (SpacePilotHud)
 │   ├── camera/spaceknowledge/   Space Knowledge (joueur) : reglages de la surcouche du ciel (Config, Quick Action)
 │   ├── monde/areadisplayer/     Area Displayer (marker, tous) : pave du terrain d'une zone A-B (AreaDisplayerCube),
-│   │                            AreaGrid (voxels, pas adaptatif), AreaScanner (scan serveur etale), AreaFeed (abonnes) ;
+│   │                            AreaGrid (pas strict, sections / tuiles), AreaVoxels (stockage creux), AreaScanner (scan serveur etale), AreaFeed (abonnes) ;
 │   │                            terrain/ : canal dedie hololib:area_terrain (AreaTerrainNetwork, AreaTerrainPackets)
 │   ├── monde/areaconfigurator/  Area Displayer Configurator (marker, ops) : fenetre des reglages du Displayer du marker
 │   ├── dimension/skycancel/     Sky Cancel (dimension) ; camera/crosshaircancel/ : Crosshair Cancel (joueur) : demos
@@ -214,6 +214,11 @@ com.amynna.hololib
   `HoloWidgetDraggable`, `HoloWidgetKeyBox`, `HoloWidgetList`, `HoloWidgetDragRow` : ligne d'une liste reordonnee au
   glisser, `HoloWidgetColorPicker` : carre saturation / valeur, teinte, champ `#rrggbb`), non finaux. Les demos les utilisent ; ne plus ecrire de widget ad hoc
   dans un module si un trait ou un widget existe.
+- **Relief** : chaque dessin avance `z` de `HoloWindow.depthStep()` (defaut 0,02 px, `setDepthStep`) ;
+  `HoloWidget.setDepth(dz)` decale un widget et ses enfants ; `HoloPanel.setFlatChildren(true)` (liste) : chaque enfant
+  repart du meme niveau que le panneau. **Clip** : `HoloCanvas.pushClip/popClip` (logiciel : `fill` / `gradient` /
+  `texture` rognes ; `quad` et `text` seulement s'ils tiennent, le texte en hauteur) ; `HoloWidgetList` affiche la
+  derniere ligne partielle rognee (`setPartialItems`).
 - Framework : `onDrag` (chaque frame, clic intercepte maintenu, regard projete par `HoloPicking.project`) et
   `hoverMargin()` (survol conserve sur le fond / hors fenetre dans la marge).
 - Sons (`client/interact/HoloSounds`, joues par `HoloInteractions`) : clic pris par un `HoloClickable` = son generique
@@ -462,31 +467,50 @@ ou synthetises) : toute ressource ajoutee y est creditee.
   uniforme, proportions = grille de la zone) qui montre en **monochrome cyan** le terrain entre les coins A et B, les
   joueurs (points verts) et les entites vivantes hors porte-armures (hostiles rouges, autres jaunes), leurs
   **trainees** (5 s) et le nom du point le plus proche du regard (cone de 1,5 degre, famille `WORLD`). Etat
-  (coins, options cadre / Auto Update / joueurs / trainees / entites / trainees, intervalle, generation, avancement)
+  (coins, options cadre / Auto Update / joueurs / trainees / entites / trainees / culling, intervalle, generation, avancement)
   sauvegarde et synchronise ; API serveur publique (`setCorner`, `setFlag`, `setInterval`, `refresh`) reservee au
   Configurator ; aucune action propre.
-- **Taille de zone illimitee, resolution reglable** : `AreaGrid` ; Auto = pas (blocs par voxel) le plus fin sous
-  `128^3` voxels ; palier choisi (`LEVELS` 1:1 bloc par bloc, 1:2 ... 1:32) releve au premier palier qui tient sous
-  `256^3` voxels (`raised()`, affiche « 1:1 -> 1:4 »). Changer de resolution = nouvelle grille, scan complet.
-  Sections de `16^3` voxels (2 bits : vide / solide / fluide). Voxel solide si un quart de ses echantillons (au plus 4 par
-  axe, 2 au-dela de 32 blocs) `blocksMotion`.
+- **Taille de zone illimitee, resolution stricte** : `AreaGrid` ; pas (blocs par voxel) = palier choisi (`LEVELS`
+  1:1 bloc par bloc, 1:2 ... 1:32, defaut 1:1), **jamais releve** (ni plafond de voxels, ni mode Auto : une ancienne
+  valeur Auto ou invalide devient 1:1). Changer de resolution = nouvelle grille, scan complet. Stockage **creux**
+  (`AreaVoxels`, serveur et client) : seules les sections de `16^3` voxels non vides sont gardees (cle `long`
+  `AreaGrid.sectionKey`, sections uniformes partagees), 2 bits : vide / solide / fluide ; la memoire suit les
+  sections non vides, pas la taille de la zone. Les sections sont groupees en **tuiles** de `4^3` sections (64 voxels
+  de cote = 4 x 4 x 4 chunks a 1:1), unite de culling et de dessin. Voxel solide si un quart de ses echantillons (au
+  plus 4 par axe, 2 au-dela de 32 blocs) `blocksMotion`.
 - **Scan** (`AreaScanner`, serveur, 3 ms par tick) par colonnes de sections : passage complet a la definition de la
   zone et sur « Actualiser » (chunk non charge : existence lue sur le disque, jamais genere, puis ticket temporaire
   `hololib_area`) ; **Auto Update = rescan periodique** (10 s a 10 min, defaut 60 s) des **seuls chunks charges**,
   jamais en temps reel (aucune ecoute des blocs : demande de l'utilisatrice, ressources). Sans Auto Update, terrain
-  fige jusqu'a « Actualiser », meme apres redemarrage (voxels deflates dans l'etat sauvegarde du module).
-- **Canal dedie** `hololib:area_terrain` (protocole "2" : `Header` porte la resolution demandee, exception validee comme D27 ; `HoloNetwork` inchange) : le
+  fige jusqu'a « Actualiser », meme apres redemarrage (sections non vides deflatees dans l'etat sauvegarde du module,
+  format creux `voxelsFormat` 2 ; un ancien format dense est ignore : rescan). Les echantillons des axes X / Z sont
+  calcules par colonne de sections (aucun tableau a la taille de la zone).
+- **Canal dedie** `hololib:area_terrain` (protocole "3" : `Header` porte la resolution, `Sections` des cles de section `varlong`, exception validee comme D27 ; `HoloNetwork` inchange) : le
   miroir client s'abonne a sa creation (backend) ; le serveur (`AreaFeed`) n'accepte que les joueurs qui suivent le
   chunk du marker (reverifie toutes les 20 ticks) : `Header` (grille), sections changees deflatees (64 Kio / tick /
   abonne), positions suivies toutes les 2 ticks (256 au plus, nom envoye une fois). Client : `AreaTerrainClient`
-  (remaillage glouton de 32 sections / tick, interpolation des positions), dessin `AreaDisplayerCubeRenderer`
-  (`RenderType` local : terrain translucide sans tri, faces arriere eliminees ; trainees sans ecriture de
-  profondeur).
+  (interpolation des positions), **maillage glouton par tuile** de 64 voxels (`AreaMesher` : copie de la tuile + couche
+  de voisines, fusion sur toute la tuile, coordonnees locales ; calcule par le fil `AreaMeshWorker`, resultats perimes
+  jetes par version) : une section recue ne salit que sa tuile (+ celles des voisines si elle est au bord de la
+  sienne), seules ces tuiles sont remaillees. Dessin `AreaDisplayerCubeRenderer` : **tout l'hologramme**, maillage de
+  chaque tuile garde sur le GPU (`AreaTileGpu` : deux `VertexBuffer` statiques solide / fluide, ombre par direction
+  cuite dans les sommets ; couleur du theme et transparence par `RenderSystem.setShaderColor`, `ColorModulator` de
+  `position_color_lightmap`), `endBatch()` du lot immediat avant, culling des tuiles hors du champ, uploads limites par
+  frame, `VertexBuffer.close()` obligatoire (`AreaView.setReleaser`, `AreaView.dispose`) ; trainees sans ecriture de
+  profondeur. ~80 octets de VRAM par quad, pas d'eviction ni de LOD. **Option Culling** (`FLAG_CULLING`, defaut actif,
+  interrupteur du Configurator) : **une seule couche** visible, pre-passe de profondeur (`Types.TERRAIN_DEPTH`) puis
+  couleur seulement sur la surface la plus proche (`Types.TERRAIN_COLOR`, `POLYGON_OFFSET_LAYERING`), solide puis
+  fluide, tuiles de la plus proche a la plus lointaine ; sans Culling : translucide (`Types.TERRAIN`), tuiles de la
+  plus lointaine a la plus proche. **Premier plan** : points, trainees et noms sont ramenes vers la camera le long de
+  leur rayon (`priorityLimit`, `clamp` dans `vertex()`), devant tout le terrain mais caches par un vrai bloc ; l'homothetie est centree sur l'**oeil reel** (`computeEye` : le balancement de la marche, la secousse et la nausee sont dans la matrice de projection, pas dans la pile) et non sur l'origine de la pile, sinon les points oscillent avec le bobbing ; rayon d'un point = grand de pres (0,035 x taille sous 2 blocs x taille), tres petit de loin (0,008 x taille au-dela de 16), borne entre 0,003 et 0,015 x distance a l'oeil (`dotRadius`) ; echelle du pseudo = 0,4 x rayon du point ; noms sur
+  fond sombre pour le point regarde (cone de 2,5 degres, hysteresis sur la piste deja regardee) et les joueurs proches (< 8 blocs x taille, 16 au plus) ; point fin (disque net + anneau sombre). Le serveur oublie le nom d'une piste absente d'un paquet pour le renvoyer a son retour.
 - `hololib:area_displayer_configurator` (marker, **ops** : `shown()` + `hasPermissions(2)` verifie en premier) :
   fenetre branchee sur l'Area Displayer **du meme marker** (`AreaDisplayerModule.of` ; sans lui : « Area Displayer
   requis sur ce marker ») : coins A / B (X Y Z en brouillons par axe, envoyes quand les trois ont une valeur ; « Ici »
-  = bloc du joueur), interrupteurs, resolution a paliers (clic gauche / droit), intervalle, « Actualiser » ; actions
-  0-5 relayees a l'API du Displayer ; fenetre relue quand `revision()` du Displayer change ; `HEIGHT` calcule depuis
+  = bloc du joueur), interrupteurs (dont Culling), resolution a paliers 1:1 ... 1:32 (clic gauche / droit), **transparence du terrain** (`HoloWidgetValueBar`, 0 a 100 %, defaut 31 % = apparence d'origine ; fluide proportionnellement plus transparent), intervalle, **liste noire
+  de blocs** (`BlockListEditor` : champ dont le texte devient rouge tant que l'id n'est pas un bloc connu, Entree ou
+  « Ajouter », croix par ligne ; le Displayer la sauvegarde / synchronise, 128 ids au plus, `AreaScanner` compte ces
+  blocs comme de l'air ; chaque changement = rescan complet), « Actualiser » ; actions 0-8 relayees a l'API du Displayer ; fenetre relue quand `revision()` du Displayer change ; `HEIGHT` calcule depuis
   la derniere ligne (un widget qui deborde n'est vise que sur sa partie interieure).
 
 ### Module Radar (`modules/camera/radar`, `client/modules/camera/radar`, `client/render/modules/camera/radar`)

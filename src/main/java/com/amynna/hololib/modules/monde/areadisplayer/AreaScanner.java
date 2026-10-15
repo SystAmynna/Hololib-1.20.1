@@ -5,6 +5,7 @@ import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -13,9 +14,10 @@ import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Set;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.IntConsumer;
+import java.util.function.LongConsumer;
 
 /**
  * Calcul des voxels d'une {@link AreaGrid} cote serveur, etale sur les ticks (budget de temps par tick). Aucune
@@ -28,7 +30,9 @@ import java.util.function.IntConsumer;
  * <p>
  * <b>Ordre</b> : par colonne de sections (16 x 16 voxels en X / Z, toute la hauteur) ; dans une colonne, chunk par
  * chunk des qu'il est disponible, comptes accumules, puis la colonne entiere est classee et comparee aux voxels
- * existants ; les sections changees sont signalees.
+ * existants ; les sections changees sont signalees (cle de section). Les echantillons des axes X et Z sont calcules
+ * colonne par colonne (taille fixe), jamais pour toute la zone : une zone immense ne coute pas de memoire de scan.
+ * Les blocs de la liste noire ({@code ignored}) sont comptes comme de l'air.
  * <p>
  * <b>Chunks</b> : {@link Mode#FULL} : un chunk non charge est d'abord cherche sur le disque ({@code ChunkMap.read},
  * asynchrone) ; jamais genere (absent, ou non termine) = vide, aucune generation forcee ; sinon charge par un ticket
@@ -63,28 +67,33 @@ public final class AreaScanner
     private static final int STATE_DONE = 3;
 
     private final AreaGrid grid;
-    private final byte[] voxels;
+    private final AreaVoxels voxels;
+    /** Blocs ignores (comptes comme de l'air) ; remplace en bloc, lu par le fil serveur seulement. */
+    private Set<Block> ignored;
 
-    /** Echantillons par axe : coordonnee de bloc et voxel, croissants ; nombre d'echantillons par voxel. */
-    private final int[] sampleX;
-    private final int[] voxelX;
-    private final int[] countX;
+    /** Echantillons par axe et par voxel (comme {@code min(step, m)}). */
+    private final int per;
+    /** Axe Y, pour toute la hauteur : coordonnee de bloc, voxel et comptes par voxel. */
     private final int[] sampleY;
     private final int[] voxelY;
     private final int[] countY;
+    private final int samplesY;
+    /** Axes X et Z de la colonne courante : coordonnee de bloc, voxel relatif a la colonne, comptes par voxel. */
+    private final int[] sampleX;
+    private final int[] voxelX;
+    private final int[] countX;
+    private int samplesX;
     private final int[] sampleZ;
     private final int[] voxelZ;
     private final int[] countZ;
-    /** Premier echantillon de chaque colonne de sections, par axe ({@code sections + 1} bornes). */
-    private final int[] startX;
-    private final int[] startZ;
+    private int samplesZ;
 
     // ---------------------------------------------------------------- passage en cours
 
     private Mode mode;
     private boolean running;
     /** Colonne de sections courante (indice {@code sz * sectionsX + sx}). */
-    private int column;
+    private long column;
     private boolean columnReady;
     private boolean columnAborted;
     /** Chunks de la colonne : coordonnees distinctes, etat et date d'attente. */
@@ -98,67 +107,61 @@ public final class AreaScanner
     /** Comptes de la colonne : solides, fluides ; indice {@code (vy * 16 + lz) * 16 + lx}. */
     private final byte[] solid;
     private final byte[] fluid;
-    private final boolean[] changedSections;
+    /** Voxels d'une section en cours de classement (reutilise). */
+    private final byte[] scratch = new byte[AreaGrid.SECTION_VOXELS];
 
-    /** @param voxels voxels de la grille, mis a jour sur place */
-    public AreaScanner(AreaGrid grid, byte[] voxels)
+    /**
+     * @param voxels  voxels de la grille, mis a jour sur place
+     * @param ignored blocs comptes comme de l'air (liste noire du Displayer)
+     */
+    public AreaScanner(AreaGrid grid, AreaVoxels voxels, Set<Block> ignored)
     {
         this.grid = grid;
         this.voxels = voxels;
+        this.ignored = ignored;
         int step = grid.step();
-        int per = step <= 4 ? step : step < 32 ? 4 : 2;
-        int[][] x = samples(grid.minX(), grid.blocksX(), grid.sizeX(), step, per);
-        int[][] y = samples(grid.minY(), grid.blocksY(), grid.sizeY(), step, per);
-        int[][] z = samples(grid.minZ(), grid.blocksZ(), grid.sizeZ(), step, per);
-        sampleX = x[0];
-        voxelX = x[1];
-        countX = x[2];
-        sampleY = y[0];
-        voxelY = y[1];
-        countY = y[2];
-        sampleZ = z[0];
-        voxelZ = z[1];
-        countZ = z[2];
-        startX = starts(voxelX, grid.sectionsX());
-        startZ = starts(voxelZ, grid.sectionsZ());
+        per = step <= 4 ? step : step < 32 ? 4 : 2;
+        sampleY = new int[grid.sizeY() * per];
+        voxelY = new int[sampleY.length];
+        countY = new int[grid.sizeY()];
+        samplesY = samples(grid.minY(), grid.blocksY(), step, per, 0, grid.sizeY(), sampleY, voxelY, countY);
+        sampleX = new int[AreaGrid.SECTION * per];
+        voxelX = new int[sampleX.length];
+        countX = new int[AreaGrid.SECTION];
+        sampleZ = new int[AreaGrid.SECTION * per];
+        voxelZ = new int[sampleZ.length];
+        countZ = new int[AreaGrid.SECTION];
         solid = new byte[AreaGrid.SECTION * AreaGrid.SECTION * grid.sizeY()];
         fluid = new byte[solid.length];
-        changedSections = new boolean[grid.sectionsY()];
     }
 
-    /** Echantillons d'un axe : {@code [blocs, voxels, comptes par voxel]}. */
-    private static int[][] samples(int min, int blocks, int size, int step, int per)
+    /**
+     * Echantillons des voxels {@code first} a {@code first + count - 1} d'un axe : coordonnee de bloc, voxel relatif a
+     * {@code first} et nombre d'echantillons par voxel relatif.
+     *
+     * @return le nombre d'echantillons ecrits
+     */
+    private static int samples(int min, int blocks, int step, int per, int first, int count, int[] coords,
+                               int[] owners, int[] counts)
     {
-        int[] coords = new int[size * per];
-        int[] owners = new int[size * per];
-        int[] counts = new int[size];
+        Arrays.fill(counts, 0, count, 0);
         int n = 0;
-        for (int v = 0; v < size; v++) {
+        for (int v = 0; v < count; v++) {
             for (int k = 0; k < per; k++) {
                 int offset = (int) ((k + 0.5) * step / per);
-                int block = v * step + offset;
+                long block = (long) (first + v) * step + offset;
                 if (block >= blocks) break;
-                coords[n] = min + block;
+                coords[n] = min + (int) block;
                 owners[n] = v;
                 counts[v]++;
                 n++;
             }
         }
-        return new int[][] {Arrays.copyOf(coords, n), Arrays.copyOf(owners, n), counts};
+        return n;
     }
 
-    /** Indice du premier echantillon de chaque section ({@code sections + 1} bornes). */
-    private static int[] starts(int[] owners, int sections)
-    {
-        int[] starts = new int[sections + 1];
-        int i = 0;
-        for (int s = 0; s <= sections; s++) {
-            int first = s * AreaGrid.SECTION;
-            while (i < owners.length && owners[i] < first) i++;
-            starts[s] = i;
-        }
-        return starts;
-    }
+    /** Nouveaux blocs ignores ; le prochain passage complet en tient compte. */
+    public void setIgnored(Set<Block> ignored) { this.ignored = ignored; }
 
     public AreaGrid grid() { return grid; }
 
@@ -170,8 +173,7 @@ public final class AreaScanner
     /** Avancement du passage en cours, de 0 a 1 ({@code 1} sans passage). */
     public float progress()
     {
-        int total = grid.sectionsX() * grid.sectionsZ();
-        return running ? (float) column / total : 1f;
+        return running ? (float) ((double) column / grid.columns()) : 1f;
     }
 
     /** Lance un passage (remplace celui en cours). */
@@ -193,15 +195,15 @@ public final class AreaScanner
     }
 
     /**
-     * Avance le passage dans la limite de {@code budgetNanos} ; {@code changed} recoit l'indice de chaque section dont
+     * Avance le passage dans la limite de {@code budgetNanos} ; {@code changed} recoit la cle de chaque section dont
      * les voxels ont change.
      */
-    public void tick(ServerLevel level, long budgetNanos, IntConsumer changed)
+    public void tick(ServerLevel level, long budgetNanos, LongConsumer changed)
     {
         if (!running) return;
         long deadline = System.nanoTime() + budgetNanos;
         int tick = level.getServer().getTickCount();
-        int columns = grid.sectionsX() * grid.sectionsZ();
+        long columns = grid.columns();
         while (running && System.nanoTime() < deadline) {
             if (column >= columns) {
                 running = false;
@@ -224,10 +226,17 @@ public final class AreaScanner
 
     private void prepareColumn()
     {
-        int sx = column % grid.sectionsX();
-        int sz = column / grid.sectionsX();
-        chunkXs = distinctChunks(sampleX, startX[sx], startX[sx + 1]);
-        chunkZs = distinctChunks(sampleZ, startZ[sz], startZ[sz + 1]);
+        int sx = (int) (column % grid.sectionsX());
+        int sz = (int) (column / grid.sectionsX());
+        int step = grid.step();
+        int firstX = sx * AreaGrid.SECTION;
+        int firstZ = sz * AreaGrid.SECTION;
+        samplesX = samples(grid.minX(), grid.blocksX(), step, per, firstX,
+                Math.min(AreaGrid.SECTION, grid.sizeX() - firstX), sampleX, voxelX, countX);
+        samplesZ = samples(grid.minZ(), grid.blocksZ(), step, per, firstZ,
+                Math.min(AreaGrid.SECTION, grid.sizeZ() - firstZ), sampleZ, voxelZ, countZ);
+        chunkXs = distinctChunks(sampleX, samplesX);
+        chunkZs = distinctChunks(sampleZ, samplesZ);
         int count = chunkXs.length * chunkZs.length;
         if (chunkState.length < count) {
             chunkState = new int[count];
@@ -245,11 +254,11 @@ public final class AreaScanner
         Arrays.fill(fluid, (byte) 0);
     }
 
-    private static int[] distinctChunks(int[] coords, int from, int to)
+    private static int[] distinctChunks(int[] coords, int count)
     {
-        int[] out = new int[Math.max(0, to - from)];
+        int[] out = new int[count];
         int n = 0;
-        for (int i = from; i < to; i++) {
+        for (int i = 0; i < count; i++) {
             int chunk = coords[i] >> 4;
             if (n == 0 || out[n - 1] != chunk) out[n++] = chunk;
         }
@@ -356,18 +365,10 @@ public final class AreaScanner
     /** Ajoute aux comptes de la colonne les echantillons du chunk {@code (cx, cz)}. */
     private void readChunk(LevelChunk chunk, int cx, int cz)
     {
-        int sx = column % grid.sectionsX();
-        int sz = column / grid.sectionsX();
-        int x0 = startX[sx];
-        int x1 = startX[sx + 1];
-        int z0 = startZ[sz];
-        int z1 = startZ[sz + 1];
-        int baseX = sx * AreaGrid.SECTION;
-        int baseZ = sz * AreaGrid.SECTION;
         LevelChunkSection[] sections = chunk.getSections();
         int lastIndex = Integer.MIN_VALUE;
         LevelChunkSection section = null;
-        for (int iy = 0; iy < sampleY.length; iy++) {
+        for (int iy = 0; iy < samplesY; iy++) {
             int by = sampleY[iy];
             int index = chunk.getSectionIndex(by);
             if (index != lastIndex) {
@@ -377,15 +378,15 @@ public final class AreaScanner
             }
             if (section == null) continue;
             int rowY = voxelY[iy] * AreaGrid.SECTION;
-            for (int iz = z0; iz < z1; iz++) {
+            for (int iz = 0; iz < samplesZ; iz++) {
                 int bz = sampleZ[iz];
                 if (bz >> 4 != cz) continue;
-                int row = (rowY + voxelZ[iz] - baseZ) * AreaGrid.SECTION - baseX;
-                for (int ix = x0; ix < x1; ix++) {
+                int row = (rowY + voxelZ[iz]) * AreaGrid.SECTION;
+                for (int ix = 0; ix < samplesX; ix++) {
                     int bx = sampleX[ix];
                     if (bx >> 4 != cx) continue;
                     BlockState state = section.getBlockState(bx & 15, by & 15, bz & 15);
-                    if (state.isAir()) continue;
+                    if (state.isAir() || !ignored.isEmpty() && ignored.contains(state.getBlock())) continue;
                     int at = row + voxelX[ix];
                     if (state.blocksMotion()) solid[at]++;
                     else if (!state.getFluidState().isEmpty()) fluid[at]++;
@@ -394,36 +395,34 @@ public final class AreaScanner
         }
     }
 
-    /** Classe les voxels de la colonne, ecrit ceux qui changent et signale leurs sections. */
-    private void finishColumn(IntConsumer changed)
+    /** Classe les voxels de la colonne, remplace ses sections et signale celles qui changent. */
+    private void finishColumn(LongConsumer changed)
     {
-        int sx = column % grid.sectionsX();
-        int sz = column / grid.sectionsX();
-        int baseX = sx * AreaGrid.SECTION;
-        int baseZ = sz * AreaGrid.SECTION;
-        int endX = Math.min(grid.sizeX(), baseX + AreaGrid.SECTION);
-        int endZ = Math.min(grid.sizeZ(), baseZ + AreaGrid.SECTION);
-        Arrays.fill(changedSections, false);
-        for (int vy = 0; vy < grid.sizeY(); vy++) {
-            for (int vz = baseZ; vz < endZ; vz++) {
-                int row = (vy * AreaGrid.SECTION + vz - baseZ) * AreaGrid.SECTION - baseX;
-                for (int vx = baseX; vx < endX; vx++) {
-                    int total = countX[vx] * countY[vy] * countZ[vz];
-                    int s = solid[row + vx];
-                    int f = fluid[row + vx];
-                    byte value = total == 0 ? AreaGrid.AIR
-                            : s * 4 >= total ? AreaGrid.SOLID
-                            : (s + f) * 4 >= total ? AreaGrid.FLUID : AreaGrid.AIR;
-                    int index = grid.index(vx, vy, vz);
-                    if (voxels[index] != value) {
-                        voxels[index] = value;
-                        changedSections[vy / AreaGrid.SECTION] = true;
+        int sx = (int) (column % grid.sectionsX());
+        int sz = (int) (column / grid.sectionsX());
+        int width = Math.min(AreaGrid.SECTION, grid.sizeX() - sx * AreaGrid.SECTION);
+        int depth = Math.min(AreaGrid.SECTION, grid.sizeZ() - sz * AreaGrid.SECTION);
+        for (int sy = 0; sy < grid.sectionsY(); sy++) {
+            Arrays.fill(scratch, (byte) 0);
+            int baseY = sy * AreaGrid.SECTION;
+            int height = Math.min(AreaGrid.SECTION, grid.sizeY() - baseY);
+            for (int ly = 0; ly < height; ly++) {
+                int vy = baseY + ly;
+                for (int lz = 0; lz < depth; lz++) {
+                    int row = (vy * AreaGrid.SECTION + lz) * AreaGrid.SECTION;
+                    for (int lx = 0; lx < width; lx++) {
+                        int total = countX[lx] * countY[vy] * countZ[lz];
+                        int s = solid[row + lx];
+                        int f = fluid[row + lx];
+                        byte value = total == 0 ? AreaGrid.AIR
+                                : s * 4 >= total ? AreaGrid.SOLID
+                                : (s + f) * 4 >= total ? AreaGrid.FLUID : AreaGrid.AIR;
+                        scratch[AreaGrid.localIndex(lx, ly, lz)] = value;
                     }
                 }
             }
-        }
-        for (int sy = 0; sy < changedSections.length; sy++) {
-            if (changedSections[sy]) changed.accept(grid.sectionIndex(sx, sy, sz));
+            long key = AreaGrid.sectionKey(sx, sy, sz);
+            if (voxels.put(key, scratch)) changed.accept(key);
         }
     }
 }

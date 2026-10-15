@@ -22,6 +22,7 @@ public class HoloPanel extends HoloWidget
     private float borderThickness = 1f;
     /** Alpha du motif du theme en fond, ou -1 : fond de couleur. */
     private int patternAlpha = -1;
+    private boolean flatChildren;
 
     public HoloPanel(float x, float y, float width, float height)
     {
@@ -75,6 +76,18 @@ public class HoloPanel extends HoloWidget
         return this;
     }
 
+    /**
+     * Si vrai, chaque enfant repart du meme niveau de profondeur (celui du panneau) au lieu de s'empiler derriere les
+     * precedents : a reserver aux enfants qui ne se recouvrent pas (liste). Faux par defaut.
+     */
+    public HoloPanel setFlatChildren(boolean flat)
+    {
+        this.flatChildren = flat;
+        return this;
+    }
+
+    public final boolean flatChildren() { return flatChildren; }
+
     /** Fenetre dont ce panneau est la racine, sinon {@code null}. */
     public final HoloWindow ownerWindow() { return ownerWindow; }
 
@@ -110,7 +123,24 @@ public class HoloPanel extends HoloWidget
             canvas.fill(0, 0, width(), height(), canvas.color(background));
         }
         if (!border.none()) canvas.outline(0, 0, width(), height(), borderThickness, canvas.color(border));
-        for (int i = 0; i < children.size(); i++) children.get(i).render(canvas);
+        drawChildren(canvas);
+    }
+
+    /** Dessine les enfants (profondeur : voir {@link #setFlatChildren}) ; surchargeable pour les encadrer (clip). */
+    protected void drawChildren(HoloCanvas canvas)
+    {
+        if (!flatChildren) {
+            for (int i = 0; i < children.size(); i++) children.get(i).render(canvas);
+            return;
+        }
+        float base = canvas.z();
+        float max = base;
+        for (int i = 0; i < children.size(); i++) {
+            canvas.z(base);
+            children.get(i).render(canvas);
+            max = Math.max(max, canvas.z());
+        }
+        canvas.z(max);
     }
 
     @Override

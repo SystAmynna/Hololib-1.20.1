@@ -104,6 +104,25 @@ public interface HoloCanvas
         endLayer();
     }
 
+    /** Profondeur courante (pixels) : a lire puis restaurer par {@link #z(float)} pour que des dessins repartent du meme niveau. */
+    default float z() { return 0f; }
+
+    /** Fixe la profondeur courante (voir {@link #z()}). */
+    default void z(float z) {}
+
+    /** Decale la profondeur de {@code dz} pixels (positif = vers le spectateur) ; rappeler avec {@code -dz} pour annuler. */
+    default void shiftDepth(float dz) {}
+
+    /**
+     * Restreint les dessins suivants au rectangle (repere courant), intersecte avec le clip deja actif ; a refermer par
+     * {@link #popClip()}. Rognage logiciel : {@code fill}, {@code gradient} et {@code texture} sont rognes ; {@code quad}
+     * et {@code text} ne sont dessines que s'ils tiennent entierement dans le rectangle (en hauteur pour le texte).
+     */
+    default void pushClip(float x, float y, float width, float height) {}
+
+    /** Retire le dernier clip ({@link #pushClip}). */
+    default void popClip() {}
+
     /** Texte sur une ligne, coin haut gauche en {@code (x, y)}. */
     void text(Component text, float x, float y, int argb);
 

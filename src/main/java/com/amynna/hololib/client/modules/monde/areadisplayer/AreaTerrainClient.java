@@ -23,20 +23,24 @@ import java.util.zip.Inflater;
  * Cote client du canal du terrain de l'Area Displayer ({@link AreaTerrainNetwork}), fil client : une {@link AreaView}
  * par miroir abonne (cle = marker), creee a l'abonnement ({@link #subscribe}) et oubliee au retrait du miroir ou a la
  * deconnexion. Handlers des paquets (generation verifiee : un paquet d'une ancienne grille est ignore), remaillage des
- * sections changees ({@value #MESH_PER_TICK} sections au plus par tick) et horloge des positions suivies (ticks
+ * tuiles changees (fil {@link AreaMeshWorker}, {@value #SUBMIT_PER_TICK} tuiles envoyees au plus par tick) et horloge des positions suivies (ticks
  * client).
  */
 @Mod.EventBusSubscriber(modid = HoloLib.MODID, value = Dist.CLIENT)
 public final class AreaTerrainClient
 {
-    /** Sections remaillees au plus par tick client. */
-    private static final int MESH_PER_TICK = 32;
+    /** Tuiles envoyees au maillage au plus par tick client (copie des voxels faite ici). */
+    private static final int SUBMIT_PER_TICK = 4;
+    /** Maillages termines repris au plus par tick client. */
+    private static final int APPLY_PER_TICK = 16;
     /** Distance (voxels) au-dela de laquelle une nouvelle position allonge la trainee. */
     private static final float TRAIL_STEP = 0.05f;
 
     private static final Map<String, AreaView> VIEWS = new HashMap<>();
     private static final Inflater INFLATER = new Inflater();
     private static final byte[] PACKED = new byte[AreaGrid.PACKED_BYTES];
+    /** Section decodee (reutilisee). */
+    private static final byte[] SECTION = new byte[AreaGrid.SECTION_VOXELS];
     private static final float[] LAST = new float[3];
     /** Horloge des positions suivies et des trainees. */
     private static int ticks;
@@ -53,7 +57,8 @@ public final class AreaTerrainClient
     static void subscribe(AreaDisplayerModule module)
     {
         String marker = module.markerId();
-        VIEWS.put(marker, new AreaView(marker, module.instanceId()));
+        AreaView old = VIEWS.put(marker, new AreaView(marker, module.instanceId()));
+        if (old != null) old.dispose();
         if (Minecraft.getInstance().getConnection() != null) {
             AreaTerrainNetwork.sendToServer(new AreaTerrainPackets.Subscribe(marker, module.instanceId()));
         }
@@ -66,6 +71,7 @@ public final class AreaTerrainClient
         AreaView view = VIEWS.get(marker);
         if (view == null || !view.instance.equals(module.instanceId())) return;
         VIEWS.remove(marker);
+        view.dispose();
         if (Minecraft.getInstance().getConnection() != null) {
             AreaTerrainNetwork.sendToServer(new AreaTerrainPackets.Unsubscribe(marker, module.instanceId()));
         }
@@ -79,7 +85,7 @@ public final class AreaTerrainClient
         if (view == null || !view.instance.equals(packet.instance())) return;
         view.generation = packet.generation();
         view.reset(packet.zone() ? new AreaGrid(packet.minX(), packet.minY(), packet.minZ(), packet.blocksX(),
-                packet.blocksY(), packet.blocksZ(), packet.requestedStep()) : null);
+                packet.blocksY(), packet.blocksZ(), packet.step()) : null);
     }
 
     public static void onSections(AreaTerrainPackets.Sections packet)
@@ -87,19 +93,19 @@ public final class AreaTerrainClient
         AreaView view = VIEWS.get(packet.marker());
         if (view == null || view.grid == null || view.generation != packet.generation()) return;
         AreaGrid grid = view.grid;
-        int[] indices = packet.indices();
-        for (int i = 0; i < indices.length; i++) {
-            int section = indices[i];
-            if (section < 0 || section >= grid.sections()) continue;
+        long[] keys = packet.keys();
+        for (int i = 0; i < keys.length; i++) {
+            long key = keys[i];
+            if (!grid.contains(key)) continue;
             int uniform = packet.uniform()[i];
             if (uniform >= 0) {
-                grid.unpack(null, uniform, section, view.voxels);
+                AreaGrid.unpack(null, uniform, SECTION);
             } else if (inflate(packet.data()[i])) {
-                grid.unpack(PACKED, 0, section, view.voxels);
+                AreaGrid.unpack(PACKED, 0, SECTION);
             } else {
                 continue;
             }
-            view.markDirty(section);
+            if (view.voxels.put(key, SECTION)) view.markDirty(key);
         }
     }
 
@@ -177,16 +183,11 @@ public final class AreaTerrainClient
     {
         if (event.phase != TickEvent.Phase.END) return;
         ticks++;
-        int budget = MESH_PER_TICK;
+        AreaMeshWorker.drain(APPLY_PER_TICK);
+        int budget = SUBMIT_PER_TICK;
         for (AreaView view : VIEWS.values()) {
-            if (view.dirtyCount == 0 || view.grid == null) continue;
-            for (int s = 0; s < view.dirty.length && budget > 0 && view.dirtyCount > 0; s++) {
-                if (!view.dirty[s]) continue;
-                view.dirty[s] = false;
-                view.dirtyCount--;
-                view.meshes[s] = AreaMesher.mesh(view.grid, view.voxels, s);
-                budget--;
-            }
+            if (view.grid == null || view.dirty.isEmpty()) continue;
+            budget = view.submitSome(budget);
             if (budget == 0) break;
         }
     }
@@ -194,6 +195,7 @@ public final class AreaTerrainClient
     @SubscribeEvent
     public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event)
     {
+        for (AreaView view : VIEWS.values()) view.dispose();
         VIEWS.clear();
     }
 }

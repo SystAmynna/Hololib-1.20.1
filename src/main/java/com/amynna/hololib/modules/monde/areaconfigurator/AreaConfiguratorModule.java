@@ -36,7 +36,10 @@ import java.util.function.Consumer;
  * 2 FLAG     + byte option + boolean       option du Displayer (AreaDisplayerModule.FLAG_*)
  * 3 INTERVAL + varint secondes             intervalle de l'Auto Update (borne)
  * 4 REFRESH                                « Actualiser » : nouveau scan complet
- * 5 RESOLUTION + varint pas               resolution demandee (0 = Auto, sinon un palier de AreaGrid.LEVELS)
+ * 5 RESOLUTION + varint pas               resolution (un palier de AreaGrid.LEVELS)
+ * 6 BLOCK_ADD + utf id                   ajoute un bloc a la liste noire (revalide ; rescan complet)
+ * 7 BLOCK_REMOVE + utf id                retire un bloc de la liste noire (rescan complet)
+ * 8 TRANSPARENCY + byte pourcent         transparence du terrain (0 opaque, 100 invisible)
  * </pre>
  * <b>Acces</b> de la fenetre : {@code HoloAccess.players(<operateurs connectes>)}, recalcule chaque tick serveur et
  * reaffecte seulement s'il change ; fenetre dessinee seulement chez un operateur ({@code shown()}, backend).
@@ -49,6 +52,9 @@ public final class AreaConfiguratorModule extends HoloModule
     public static final int ACTION_INTERVAL = 3;
     public static final int ACTION_REFRESH = 4;
     public static final int ACTION_RESOLUTION = 5;
+    public static final int ACTION_BLOCK_ADD = 6;
+    public static final int ACTION_BLOCK_REMOVE = 7;
+    public static final int ACTION_TRANSPARENCY = 8;
     /** Niveau de permission d'un operateur (comme les commandes du mod et l'edition). */
     public static final int OP_LEVEL = 2;
     /** Ecart entre le pave par defaut et la fenetre (placement par defaut), en blocs. */
@@ -158,6 +164,9 @@ public final class AreaConfiguratorModule extends HoloModule
             case ACTION_INTERVAL -> displayer.setInterval(buf.readVarInt());
             case ACTION_REFRESH -> displayer.refresh();
             case ACTION_RESOLUTION -> displayer.setResolution(buf.readVarInt());
+            case ACTION_BLOCK_ADD -> displayer.addBlocked(buf.readUtf(AreaDisplayerModule.MAX_BLOCK_ID));
+            case ACTION_BLOCK_REMOVE -> displayer.removeBlocked(buf.readUtf(AreaDisplayerModule.MAX_BLOCK_ID));
+            case ACTION_TRANSPARENCY -> displayer.setTransparency(buf.readUnsignedByte());
             default -> {
             }
         }
@@ -211,8 +220,20 @@ public final class AreaConfiguratorModule extends HoloModule
     /** Client : intervalle de l'Auto Update, en secondes. */
     void requestInterval(int seconds) { sendTyped(ACTION_INTERVAL, buf -> buf.writeVarInt(seconds)); }
 
-    /** Client : resolution demandee ({@code AreaGrid.AUTO} ou un palier). */
+    /** Client : resolution (un palier de {@code AreaGrid.LEVELS}). */
     void requestResolution(int step) { sendTyped(ACTION_RESOLUTION, buf -> buf.writeVarInt(step)); }
+
+    /** Client : ajoute un bloc a la liste noire. */
+    void requestBlockAdd(String id) { sendTyped(ACTION_BLOCK_ADD, buf -> buf.writeUtf(id, AreaDisplayerModule.MAX_BLOCK_ID)); }
+
+    /** Client : retire un bloc de la liste noire. */
+    void requestBlockRemove(String id)
+    {
+        sendTyped(ACTION_BLOCK_REMOVE, buf -> buf.writeUtf(id, AreaDisplayerModule.MAX_BLOCK_ID));
+    }
+
+    /** Client : transparence du terrain, en pour cent. */
+    void requestTransparency(int percent) { sendTyped(ACTION_TRANSPARENCY, buf -> buf.writeByte(percent)); }
 
     /** Client : « Actualiser ». */
     void requestRefresh() { sendTyped(ACTION_REFRESH, null); }

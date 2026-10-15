@@ -24,8 +24,8 @@ public final class AreaTerrainPackets
     static final int MAX_SECTIONS = 1 << 16;
     /** Taille maximale d'une section deflatee (2 bits par voxel, plus la marge de deflate). */
     static final int MAX_SECTION_BYTES = AreaGrid.PACKED_BYTES + 256;
-    /** Bornes de la taille d'une zone relue (le serveur envoie des zones valides). */
-    private static final int MAX_BLOCKS = 60_000_000;
+    /** Bornes de la taille d'une zone relue : deux coins a +-30 000 000 donnent 60 000 001 blocs. */
+    private static final int MAX_BLOCKS = 60_000_001;
 
     /** Genre d'une position suivie : joueur. */
     public static final int KIND_PLAYER = 0;
@@ -81,11 +81,11 @@ public final class AreaTerrainPackets
     /**
      * Serveur -> client : nouvelle grille (abonnement, zone changee) ; le client repart de voxels vides.
      *
-     * @param zone          faux : aucune zone definie (coordonnees ignorees)
-     * @param requestedStep resolution demandee ({@code AreaGrid.AUTO} ou un palier)
+     * @param zone faux : aucune zone definie (coordonnees ignorees)
+     * @param step resolution (un palier de {@link AreaGrid#LEVELS}, appliquee strictement)
      */
     public record Header(String marker, UUID instance, int generation, boolean zone, int minX, int minY, int minZ,
-                         int blocksX, int blocksY, int blocksZ, int requestedStep)
+                         int blocksX, int blocksY, int blocksZ, int step)
     {
         void encode(FriendlyByteBuf buf)
         {
@@ -100,7 +100,7 @@ public final class AreaTerrainPackets
             buf.writeVarInt(blocksX);
             buf.writeVarInt(blocksY);
             buf.writeVarInt(blocksZ);
-            buf.writeVarInt(requestedStep);
+            buf.writeVarInt(step);
         }
 
         static Header decode(FriendlyByteBuf buf)
@@ -109,7 +109,7 @@ public final class AreaTerrainPackets
             UUID instance = buf.readUUID();
             int generation = buf.readVarInt();
             if (!buf.readBoolean()) {
-                return new Header(marker, instance, generation, false, 0, 0, 0, 1, 1, 1, AreaGrid.AUTO);
+                return new Header(marker, instance, generation, false, 0, 0, 0, 1, 1, 1, AreaGrid.DEFAULT_STEP);
             }
             int minX = buf.readInt();
             int minY = buf.readInt();
@@ -119,7 +119,7 @@ public final class AreaTerrainPackets
             int blocksZ = size(buf.readVarInt());
             int step = buf.readVarInt();
             return new Header(marker, instance, generation, true, minX, minY, minZ, blocksX, blocksY, blocksZ,
-                    AreaGrid.isLevel(step) ? step : AreaGrid.AUTO);
+                    AreaGrid.isLevel(step) ? step : AreaGrid.DEFAULT_STEP);
         }
 
         private static int size(int value)
@@ -137,18 +137,19 @@ public final class AreaTerrainPackets
     /**
      * Serveur -> client : sections changees de la grille {@code generation}.
      *
+     * @param keys    cle de chaque section ({@link AreaGrid#sectionKey})
      * @param uniform valeur commune de chaque section, ou {@code -1} si ses octets sont dans {@code data}
      * @param data    octets deflates de la section empaquetee, {@code null} pour une section uniforme
      */
-    public record Sections(String marker, int generation, int[] indices, int[] uniform, byte[][] data)
+    public record Sections(String marker, int generation, long[] keys, int[] uniform, byte[][] data)
     {
         void encode(FriendlyByteBuf buf)
         {
             buf.writeUtf(marker, HoloScope.Position.MAX_ID_LENGTH);
             buf.writeVarInt(generation);
-            buf.writeVarInt(indices.length);
-            for (int i = 0; i < indices.length; i++) {
-                buf.writeVarInt(indices[i]);
+            buf.writeVarInt(keys.length);
+            for (int i = 0; i < keys.length; i++) {
+                buf.writeVarLong(keys[i]);
                 buf.writeByte(uniform[i]);
                 if (uniform[i] < 0) buf.writeByteArray(data[i]);
             }
@@ -160,15 +161,15 @@ public final class AreaTerrainPackets
             int generation = buf.readVarInt();
             int count = buf.readVarInt();
             if (count < 0 || count > MAX_SECTIONS) throw new IllegalArgumentException("Trop de sections");
-            int[] indices = new int[count];
+            long[] keys = new long[count];
             int[] uniform = new int[count];
             byte[][] data = new byte[count][];
             for (int i = 0; i < count; i++) {
-                indices[i] = buf.readVarInt();
+                keys[i] = buf.readVarLong();
                 uniform[i] = buf.readByte();
                 if (uniform[i] < 0) data[i] = buf.readByteArray(MAX_SECTION_BYTES);
             }
-            return new Sections(marker, generation, indices, uniform, data);
+            return new Sections(marker, generation, keys, uniform, data);
         }
 
         void handle(Supplier<NetworkEvent.Context> context)

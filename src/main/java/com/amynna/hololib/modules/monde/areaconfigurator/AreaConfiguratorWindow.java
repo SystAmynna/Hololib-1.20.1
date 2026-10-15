@@ -14,6 +14,7 @@ import com.amynna.hololib.holo.widget.control.HoloWidgetButton;
 import com.amynna.hololib.holo.widget.control.HoloWidgetMultiButton;
 import com.amynna.hololib.holo.widget.control.HoloWidgetSwitch;
 import com.amynna.hololib.holo.widget.control.HoloWidgetTextBox;
+import com.amynna.hololib.holo.widget.control.HoloWidgetValueBar;
 import com.amynna.hololib.holo.window.HoloWindow;
 import com.amynna.hololib.modules.camera.config.ConfigWindow;
 import com.amynna.hololib.modules.monde.areadisplayer.AreaDisplayerModule;
@@ -30,11 +31,13 @@ import java.util.Objects;
  * defaut a droite du pave par defaut.
  * <p>
  * Contenu (lignes en constantes, {@link #HEIGHT} calculee depuis la derniere : aucun widget ne deborde, sinon il ne
- * serait vise que sur sa partie interieure) : titre ; zone (taille en blocs et resolution effective {@code 1:pas}, ou
+ * serait vise que sur sa partie interieure) : titre ; zone (taille en blocs et resolution {@code 1:pas}, ou
  * « Aucune zone », ou « Area Displayer requis sur ce marker ») ; coins A et B (X, Y, Z, « Ici » = bloc du joueur) ;
- * etat du scan ; Cadre ; Resolution (clic gauche = palier suivant, droit = precedent : Auto, 1:1 bloc par bloc ...
- * 1:32 ; « 1:1 -> 1:4 » si la zone est trop grande pour le palier) ; Auto Update et intervalle en secondes ; Joueurs
- * et leurs trainees ; Entites et leurs trainees ; « Actualiser ». Interrupteurs non predictifs : ils montrent l'etat
+ * etat du scan ; Cadre et Culling (une seule couche visible) ; Resolution (clic gauche = palier suivant, droit = precedent : 1:1 bloc par bloc ... 1:32,
+ * appliquee strictement quelle que soit la taille de la zone) ; Transparence du terrain (barre, 0 a 100 %, molette = 5 %) ; Auto Update et intervalle en secondes ; Joueurs
+ * et leurs trainees ; Entites et leurs trainees ; liste noire de blocs ignores par le scan ({@link BlockListEditor} :
+ * champ rouge si l'id est invalide, Entree ou « Ajouter », croix par ligne ; chaque changement relance un scan complet) ;
+ * « Actualiser ». Interrupteurs non predictifs : ils montrent l'etat
  * recu du Displayer, relu par {@link #showState} a chaque changement (jamais par frame).
  * <p>
  * <b>Saisie des coins</b> : chaque champ valide (Entree ou Echap) devient un brouillon local de son axe ; des que les
@@ -62,10 +65,13 @@ public final class AreaConfiguratorWindow extends HoloWindow implements HoloEdit
     private static final int SCAN_ROW = CORNER_ROW + 2 * (FIELD_HEIGHT + GAP);
     private static final int FRAME_ROW = SCAN_ROW + LABEL_HEIGHT + 3;
     private static final int RESOLUTION_ROW = FRAME_ROW + SWITCH_HEIGHT + 3;
-    private static final int AUTO_ROW = RESOLUTION_ROW + BUTTON_HEIGHT + 3;
+    private static final int TRANSPARENCY_ROW = RESOLUTION_ROW + BUTTON_HEIGHT + 3;
+    private static final int AUTO_ROW = TRANSPARENCY_ROW + BUTTON_HEIGHT + 3;
     private static final int PLAYERS_ROW = AUTO_ROW + FIELD_HEIGHT + 3;
     private static final int ENTITIES_ROW = PLAYERS_ROW + SWITCH_HEIGHT + 3;
-    private static final int REFRESH_ROW = ENTITIES_ROW + SWITCH_HEIGHT + 5;
+    private static final int BLACKLIST_ROW = ENTITIES_ROW + SWITCH_HEIGHT + 5;
+    private static final int BLACKLIST_LIST = FIELD_HEIGHT + GAP + 3 * 12;
+    private static final int REFRESH_ROW = BLACKLIST_ROW + LABEL_HEIGHT + 1 + BLACKLIST_LIST + 5;
     public static final int HEIGHT = REFRESH_ROW + BUTTON_HEIGHT + MARGIN;
 
     private static final HoloColor TEXT = HoloColor.primary(0xFF).lighter(0.84f);
@@ -77,13 +83,8 @@ public final class AreaConfiguratorWindow extends HoloWindow implements HoloEdit
     private static final int LETTER_WIDTH = 10;
     private static final int HERE_WIDTH = 30;
     private static final int INTERVAL_LABEL_WIDTH = 62;
-    /** Ordre des resolutions du bouton : Auto puis les paliers. */
-    private static final int[] RESOLUTIONS = new int[AreaGrid.LEVELS.length + 1];
-
-    static {
-        RESOLUTIONS[0] = AreaGrid.AUTO;
-        System.arraycopy(AreaGrid.LEVELS, 0, RESOLUTIONS, 1, AreaGrid.LEVELS.length);
-    }
+    /** Ordre des resolutions du bouton : les paliers. */
+    private static final int[] RESOLUTIONS = AreaGrid.LEVELS;
 
     private final AreaConfiguratorModule module;
     private final HoloLabel zoneLine;
@@ -91,7 +92,9 @@ public final class AreaConfiguratorWindow extends HoloWindow implements HoloEdit
     private final HoloWidgetTextBox[][] corners = new HoloWidgetTextBox[2][3];
     private final HoloWidgetSwitch[] switches = new HoloWidgetSwitch[AreaDisplayerModule.FLAG_COUNT];
     private final HoloWidgetMultiButton resolutionButton;
+    private final HoloWidgetValueBar transparencyBar;
     private final HoloWidgetTextBox intervalBox;
+    private final BlockListEditor blacklistEditor;
 
     /** Brouillons des coins (client) : valeur et presence, par coin puis par axe. */
     private final int[][] draft = new int[2][3];
@@ -139,12 +142,18 @@ public final class AreaConfiguratorWindow extends HoloWindow implements HoloEdit
                 .setColor(MUTED));
 
         float half = (column - GAP) / 2f;
-        switches[AreaDisplayerModule.FLAG_FRAME] = toggle(MARGIN, FRAME_ROW, column, "Cadre",
+        switches[AreaDisplayerModule.FLAG_FRAME] = toggle(MARGIN, FRAME_ROW, half, "Cadre",
                 AreaDisplayerModule.FLAG_FRAME);
+        switches[AreaDisplayerModule.FLAG_CULLING] = toggle(MARGIN + half + GAP, FRAME_ROW, half, "Culling",
+                AreaDisplayerModule.FLAG_CULLING);
         resolutionButton = root().add(new HoloWidgetMultiButton(MARGIN, RESOLUTION_ROW, column, BUTTON_HEIGHT,
                 Component.literal("Resolution")));
         resolutionButton.on(HoloControl.LEFT_CLICK, b -> stepResolution(1))
                 .on(HoloControl.RIGHT_CLICK, b -> stepResolution(-1));
+        transparencyBar = root().add(new HoloWidgetValueBar(MARGIN, TRANSPARENCY_ROW, column, BUTTON_HEIGHT,
+                Component.literal("Transparence"),
+                (bar, value) -> module.requestTransparency(Math.round(value * 100f))));
+        transparencyBar.setStep(0.05f);
         switches[AreaDisplayerModule.FLAG_AUTO_UPDATE] = toggle(MARGIN, AUTO_ROW + 2, half, "Auto Update",
                 AreaDisplayerModule.FLAG_AUTO_UPDATE);
         root().add(new HoloLabel(MARGIN + half + GAP, AUTO_ROW + 4, INTERVAL_LABEL_WIDTH, LABEL_HEIGHT,
@@ -160,6 +169,10 @@ public final class AreaConfiguratorWindow extends HoloWindow implements HoloEdit
                 AreaDisplayerModule.FLAG_ENTITIES);
         switches[AreaDisplayerModule.FLAG_ENTITY_TRAILS] = toggle(MARGIN + half + GAP, ENTITIES_ROW, half, "Trainees",
                 AreaDisplayerModule.FLAG_ENTITY_TRAILS);
+        root().add(new HoloLabel(MARGIN, BLACKLIST_ROW, column, LABEL_HEIGHT,
+                Component.literal("Blocs ignores (scan)")).setColor(MUTED));
+        blacklistEditor = root().add(new BlockListEditor(MARGIN, BLACKLIST_ROW + LABEL_HEIGHT + 1, column,
+                BLACKLIST_LIST, module::requestBlockAdd, module::requestBlockRemove));
         root().add(new HoloWidgetButton(MARGIN, REFRESH_ROW, column, BUTTON_HEIGHT,
                 Component.literal("Actualiser"), b -> module.requestRefresh()));
     }
@@ -226,7 +239,7 @@ public final class AreaConfiguratorWindow extends HoloWindow implements HoloEdit
         }
     }
 
-    /** Palier suivant ({@code +1}) ou precedent ({@code -1}) de la resolution demandee, en boucle. */
+    /** Palier suivant ({@code +1}) ou precedent ({@code -1}) de la resolution, en boucle. */
     private void stepResolution(int direction)
     {
         if (displayer == null) return;
@@ -267,6 +280,8 @@ public final class AreaConfiguratorWindow extends HoloWindow implements HoloEdit
             scanLine.setText(Component.empty());
             for (HoloWidgetSwitch toggle : switches) toggle.setOn(false);
             resolutionButton.setText(Component.literal("Resolution"));
+            transparencyBar.setValue(0f);
+            blacklistEditor.setBlocks(java.util.Set.of());
             intervalBox.setText("");
             return;
         }
@@ -281,15 +296,15 @@ public final class AreaConfiguratorWindow extends HoloWindow implements HoloEdit
         scanLine.setText(Component.literal(grid == null ? ""
                 : progress == AreaDisplayerModule.NO_SCAN ? "Terrain a jour" : "Scan : " + progress + " %"));
         for (int flag = 0; flag < switches.length; flag++) switches[flag].setOn(displayer.flag(flag));
-        resolutionButton.setText(Component.literal(resolutionText(displayer.resolution(), grid)));
+        resolutionButton.setText(Component.literal(resolutionText(displayer.resolution())));
+        transparencyBar.setValue(displayer.transparency() / 100f);
         intervalBox.setText(Integer.toString(displayer.interval()));
+        blacklistEditor.setBlocks(displayer.blocked());
     }
 
-    /** « Resolution : Auto », « Resolution : 1:1 (bloc par bloc) », « Resolution : 1:1 -> 1:4 » (palier releve). */
-    private static String resolutionText(int requested, AreaGrid grid)
+    /** « Resolution : 1:1 (bloc par bloc) », « Resolution : 1:N ». */
+    private static String resolutionText(int step)
     {
-        if (requested == AreaGrid.AUTO) return "Resolution : Auto";
-        if (grid != null && grid.raised()) return "Resolution : 1:" + requested + " -> 1:" + grid.step();
-        return requested == 1 ? "Resolution : 1:1 (bloc par bloc)" : "Resolution : 1:" + requested;
+        return step == 1 ? "Resolution : 1:1 (bloc par bloc)" : "Resolution : 1:" + step;
     }
 }

@@ -3,6 +3,11 @@ package com.amynna.hololib.modules.monde.areadisplayer;
 import com.amynna.hololib.modules.monde.areadisplayer.terrain.AreaTerrainNetwork;
 import com.amynna.hololib.modules.monde.areadisplayer.terrain.AreaTerrainPackets;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongIterator;
+import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -15,7 +20,6 @@ import net.minecraft.world.phys.AABB;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.BitSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,14 +32,17 @@ import java.util.zip.Deflater;
  * {@link AreaTerrainNetwork}. Un abonne doit suivre le chunk du marker (il a alors le miroir du module) ; verifie a
  * l'abonnement puis toutes les {@value #PURGE_TICKS} ticks (deconnecte, autre dimension, hors de portee : oublie).
  * <p>
- * Terrain : a l'abonnement ou au changement de zone, un {@code Header} puis toutes les sections non vides ; ensuite
- * seules les sections changees. Sections empaquetees et deflatees une fois (cache par section), envoyees dans la
- * limite de {@link AreaTerrainNetwork#BYTES_PER_TICK} octets par tick et par abonne.
+ * Terrain : a l'abonnement ou au changement de zone, un {@code Header} puis toutes les sections non vides (cle de
+ * section, voir {@link AreaGrid#sectionKey}) ; ensuite seules les sections changees. Sections empaquetees et
+ * deflatees une fois (cache par cle), envoyees dans l'ordre du scan et dans la limite de
+ * {@link AreaTerrainNetwork#BYTES_PER_TICK} octets par tick et par abonne. Une section devenue vide est envoyee comme
+ * uniforme vide.
  * <p>
  * Positions suivies : toutes les {@value #TRACK_TICKS} ticks, si une option l'exige : joueurs de la zone (hors
  * spectateurs), puis entites vivantes de la zone hors joueurs et porte-armures (les block entities ne sont pas des
  * entites), {@link AreaTerrainNetwork#MAX_TRACKS} au plus ; le nom d'une entree n'est envoye qu'a l'abonne qui ne le
- * connait pas encore.
+ * connait pas encore ; l'abonne oublie les noms des entrees absentes d'un paquet (le client retire alors la
+ * piste), pour les renvoyer si elle revient.
  */
 final class AreaFeed
 {
@@ -47,20 +54,23 @@ final class AreaFeed
     private static final class Subscriber
     {
         boolean header = true;
-        final BitSet pending = new BitSet();
+        final LongLinkedOpenHashSet pending = new LongLinkedOpenHashSet();
         final Int2ObjectOpenHashMap<String> names = new Int2ObjectOpenHashMap<>();
+        /** Ids du dernier paquet de positions (reutilise : sert a oublier les noms des pistes disparues). */
+        final IntOpenHashSet present = new IntOpenHashSet();
     }
 
     private final AreaDisplayerModule module;
     private final Map<UUID, Subscriber> subscribers = new LinkedHashMap<>();
 
+    /** Section empaquetee : valeur uniforme ({@code -1} : octets deflates dans {@code data}). */
+    private record Packed(int uniform, byte[] data) {}
+
     private AreaGrid grid;
-    private byte[] voxels;
+    private AreaVoxels voxels;
     private int generation;
-    private final BitSet nonEmpty = new BitSet();
-    /** Cache des sections empaquetees : valeur uniforme ({@code -1} : octets dans {@link #compressed}), -2 = a faire. */
-    private int[] uniform = new int[0];
-    private byte[][] compressed = new byte[0][];
+    /** Cache des sections empaquetees, par cle de section. */
+    private final Long2ObjectOpenHashMap<Packed> cache = new Long2ObjectOpenHashMap<>();
     private final byte[] packed = new byte[AreaGrid.PACKED_BYTES];
     private final byte[] deflateBuffer = new byte[AreaGrid.PACKED_BYTES + 512];
     private final Deflater deflater = new Deflater(Deflater.BEST_SPEED);
@@ -77,17 +87,12 @@ final class AreaFeed
     boolean hasSubscribers() { return !subscribers.isEmpty(); }
 
     /** Nouvelle grille (ou aucune) : chaque abonne recoit un {@code Header} puis les sections non vides. */
-    void reset(AreaGrid grid, byte[] voxels, int generation)
+    void reset(AreaGrid grid, AreaVoxels voxels, int generation)
     {
         this.grid = grid;
         this.voxels = voxels;
         this.generation = generation;
-        int sections = grid != null ? grid.sections() : 0;
-        uniform = new int[sections];
-        Arrays.fill(uniform, -2);
-        compressed = new byte[sections][];
-        nonEmpty.clear();
-        for (int s = 0; s < sections; s++) if (!grid.sectionEmpty(voxels, s)) nonEmpty.set(s);
+        cache.clear();
         for (Subscriber subscriber : subscribers.values()) {
             subscriber.header = true;
             subscriber.pending.clear();
@@ -96,13 +101,11 @@ final class AreaFeed
     }
 
     /** Section changee : cache invalide, envoyee a tous les abonnes. */
-    void sectionChanged(int section)
+    void sectionChanged(long key)
     {
-        uniform[section] = -2;
-        compressed[section] = null;
-        nonEmpty.set(section, !grid.sectionEmpty(voxels, section));
+        cache.remove(key);
         for (Subscriber subscriber : subscribers.values()) {
-            if (!subscriber.header) subscriber.pending.set(section);
+            if (!subscriber.header) subscriber.pending.add(key);
         }
     }
 
@@ -154,14 +157,14 @@ final class AreaFeed
         String marker = module.markerId();
         if (grid == null) {
             AreaTerrainNetwork.send(player, new AreaTerrainPackets.Header(marker, module.instanceId(), generation,
-                    false, 0, 0, 0, 1, 1, 1, AreaGrid.AUTO));
+                    false, 0, 0, 0, 1, 1, 1, AreaGrid.DEFAULT_STEP));
             return;
         }
         AreaTerrainNetwork.send(player, new AreaTerrainPackets.Header(marker, module.instanceId(), generation, true,
                 grid.minX(), grid.minY(), grid.minZ(), grid.blocksX(), grid.blocksY(), grid.blocksZ(),
-                grid.requestedStep()));
+                grid.step()));
         subscriber.pending.clear();
-        subscriber.pending.or(nonEmpty);
+        subscriber.pending.addAll(voxels.keys());
     }
 
     private void sendSections(ServerPlayer player, Subscriber subscriber)
@@ -170,45 +173,50 @@ final class AreaFeed
             subscriber.pending.clear();
             return;
         }
-        List<Integer> indices = new ArrayList<>();
+        LongArrayList keys = new LongArrayList();
         int bytes = 0;
-        for (int s = subscriber.pending.nextSetBit(0); s >= 0; s = subscriber.pending.nextSetBit(s + 1)) {
-            ensurePacked(s);
-            int size = uniform[s] >= 0 ? 4 : compressed[s].length + 6;
-            if (!indices.isEmpty() && bytes + size > AreaTerrainNetwork.BYTES_PER_TICK) break;
-            indices.add(s);
+        for (LongIterator it = subscriber.pending.iterator(); it.hasNext(); ) {
+            long key = it.nextLong();
+            Packed packed = ensurePacked(key);
+            int size = packed.uniform >= 0 ? 12 : packed.data.length + 12;
+            if (!keys.isEmpty() && bytes + size > AreaTerrainNetwork.BYTES_PER_TICK) break;
+            keys.add(key);
             bytes += size;
         }
-        int n = indices.size();
-        int[] ids = new int[n];
+        int n = keys.size();
         int[] values = new int[n];
         byte[][] data = new byte[n][];
         for (int i = 0; i < n; i++) {
-            int s = indices.get(i);
-            ids[i] = s;
-            values[i] = uniform[s];
-            data[i] = compressed[s];
-            subscriber.pending.clear(s);
+            Packed packed = cache.get(keys.getLong(i));
+            values[i] = packed.uniform;
+            data[i] = packed.data;
+            subscriber.pending.remove(keys.getLong(i));
         }
-        AreaTerrainNetwork.send(player, new AreaTerrainPackets.Sections(module.markerId(), generation, ids, values,
-                data));
+        AreaTerrainNetwork.send(player, new AreaTerrainPackets.Sections(module.markerId(), generation,
+                keys.toLongArray(), values, data));
     }
 
-    /** Empaquette et deflate la section si son cache est vide. */
-    private void ensurePacked(int section)
+    /** Section empaquetee et deflatee (cache). */
+    private Packed ensurePacked(long key)
     {
-        if (uniform[section] != -2) return;
-        int value = grid.pack(voxels, section, packed);
-        uniform[section] = value;
-        if (value >= 0) return;
-        deflater.reset();
-        deflater.setInput(packed);
-        deflater.finish();
-        int length = 0;
-        while (!deflater.finished() && length < deflateBuffer.length) {
-            length += deflater.deflate(deflateBuffer, length, deflateBuffer.length - length);
+        Packed cached = cache.get(key);
+        if (cached != null) return cached;
+        int value = AreaGrid.pack(voxels.section(key), packed);
+        Packed result;
+        if (value >= 0) {
+            result = new Packed(value, null);
+        } else {
+            deflater.reset();
+            deflater.setInput(packed);
+            deflater.finish();
+            int length = 0;
+            while (!deflater.finished() && length < deflateBuffer.length) {
+                length += deflater.deflate(deflateBuffer, length, deflateBuffer.length - length);
+            }
+            result = new Packed(-1, Arrays.copyOf(deflateBuffer, length));
         }
-        compressed[section] = Arrays.copyOf(deflateBuffer, length);
+        cache.put(key, result);
+        return result;
     }
 
     private void collectTracks(ServerLevel level, boolean players, boolean entities)
@@ -266,10 +274,10 @@ final class AreaFeed
                 names[i] = name;
             }
         }
-        if (subscriber.names.size() > 4 * AreaTerrainNetwork.MAX_TRACKS) {
-            // Noms d'entites disparues : on repart de zero (renvoyes au prochain envoi).
-            subscriber.names.clear();
-        }
+        // Le client retire une piste absente d'un paquet : son nom doit etre renvoye si elle revient.
+        subscriber.present.clear();
+        for (int i = 0; i < n; i++) subscriber.present.add(ids[i]);
+        subscriber.names.keySet().removeIf(id -> !subscriber.present.contains(id));
         AreaTerrainNetwork.send(player, new AreaTerrainPackets.Tracks(module.markerId(), generation, ids, kinds, xyz,
                 names));
     }

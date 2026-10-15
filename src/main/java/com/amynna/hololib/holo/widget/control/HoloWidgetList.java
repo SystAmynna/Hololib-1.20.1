@@ -15,7 +15,7 @@ import java.util.Objects;
  * Liste encadree d'elements empiles verticalement, de hauteur fixe, qui defile a la molette (un element par cran)
  * quand ils ne tiennent pas tous ({@link HoloScrollable}). Les elements sont des widgets quelconques (ligne avec
  * interrupteur, bouton...) : la liste gere leurs bornes (pleine largeur, barre de defilement deduite) et leur
- * visibilite ; seuls les elements entierement visibles sont affiches et interactifs. Une molette sur un element qui
+ * visibilite ; le dernier element peut etre affiche en partie, rogne au cadre ({@link #setPartialItems}). Une molette sur un element qui
  * ne la prend pas remonte a la liste.
  */
 public class HoloWidgetList extends HoloPanel implements HoloScrollable
@@ -28,6 +28,7 @@ public class HoloWidgetList extends HoloPanel implements HoloScrollable
     private final List<HoloWidget> itemsView = Collections.unmodifiableList(items);
     private final float itemHeight;
     private int first;
+    private boolean partialItems = true;
     private HoloColor barColor = HoloColor.primary(0xFF);
 
     /** @param itemHeight hauteur de chaque element, en pixels */
@@ -35,6 +36,7 @@ public class HoloWidgetList extends HoloPanel implements HoloScrollable
     {
         super(x, y, width, height);
         this.itemHeight = itemHeight;
+        setFlatChildren(true);
         setBackground(HoloColor.secondary(0x60).darker(0.84f));
         setBorder(HoloColor.secondary(0xFF).darker(0.46f), 1f);
     }
@@ -73,7 +75,23 @@ public class HoloWidgetList extends HoloPanel implements HoloScrollable
         return this;
     }
 
-    /** Nombre d'elements affiches a la fois. */
+    /** Affiche aussi le dernier element en partie, rogne au cadre (vrai par defaut) ; sinon seuls les entiers. */
+    public HoloWidgetList setPartialItems(boolean partial)
+    {
+        this.partialItems = partial;
+        layout();
+        return this;
+    }
+
+    /** Nombre de lignes affichees, partielle comprise ({@link #visibleCount()} : entieres seulement). */
+    private int shownCount()
+    {
+        if (!partialItems) return visibleCount();
+        float room = height() - 2f * PAD + SPACING;
+        return Math.max(1, (int) Math.ceil(room / (itemHeight + SPACING) - 1e-4f));
+    }
+
+    /** Nombre d'elements affiches entierement a la fois. */
     public int visibleCount()
     {
         return Math.max(1, (int) ((height() - 2f * PAD + SPACING) / (itemHeight + SPACING)));
@@ -97,7 +115,7 @@ public class HoloWidgetList extends HoloPanel implements HoloScrollable
     {
         if (items.isEmpty()) return -1;
         int row = (int) Math.floor((y - PAD + SPACING / 2f) / (itemHeight + SPACING));
-        int last = Math.min(first + visibleCount(), items.size()) - 1;
+        int last = Math.min(first + shownCount(), items.size()) - 1;
         return Math.max(first, Math.min(first + row, last));
     }
 
@@ -129,7 +147,7 @@ public class HoloWidgetList extends HoloPanel implements HoloScrollable
     /** Bornes et visibilite des elements selon le defilement. */
     private void layout()
     {
-        int visible = visibleCount();
+        int visible = shownCount();
         float width = width() - 2f * PAD - (overflows() ? BAR_WIDTH + SPACING : 0f);
         for (int i = 0; i < items.size(); i++) {
             HoloWidget item = items.get(i);
@@ -137,6 +155,18 @@ public class HoloWidgetList extends HoloPanel implements HoloScrollable
             boolean shown = row >= 0 && row < visible;
             item.setVisible(shown);
             if (shown) item.setBounds(PAD, PAD + row * (itemHeight + SPACING), width, itemHeight);
+        }
+    }
+
+    @Override
+    protected void drawChildren(HoloCanvas canvas)
+    {
+        // Rognage au cadre interieur : un element partiel est coupe au lieu d'apparaitre / disparaitre.
+        canvas.pushClip(PAD, PAD, width() - 2f * PAD, height() - 2f * PAD);
+        try {
+            super.drawChildren(canvas);
+        } finally {
+            canvas.popClip();
         }
     }
 

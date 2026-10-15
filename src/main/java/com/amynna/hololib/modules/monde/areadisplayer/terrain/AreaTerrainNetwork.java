@@ -30,9 +30,9 @@ import net.minecraftforge.network.simple.SimpleChannel;
  *   1 Unsubscribe (utf marker, uuid instance)            miroir retire
  * serveur -> client
  *   2 Header      (utf marker, uuid instance, varint generation, boolean zone [+ 3 int coin min, 3 varint taille,
- *                 varint resolution demandee])
+ *                 varint resolution])
  *                                                        nouvelle grille (abonnement, zone changee) : voxels vides
- *   3 Sections    (utf marker, varint generation, varint n, n x (varint section, byte uniforme ou -1
+ *   3 Sections    (utf marker, varint generation, varint n, n x (varlong cle de section, byte uniforme ou -1
  *                 [+ octets deflates]))                  sections changees, 2 bits par voxel
  *   4 Tracks      (utf marker, varint generation, varint n, n x (varint id, byte genre, 3 float relatifs au coin
  *                 min en blocs, boolean nom [+ utf nom]))
@@ -46,7 +46,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
 public final class AreaTerrainNetwork
 {
     /** Protocole du canal (distinct de celui de {@code HoloNetwork}). */
-    public static final String PROTOCOL = "2";
+    public static final String PROTOCOL = "3";
     /** Octets compresses envoyes au plus par tick et par abonne (paquet de sections). */
     public static final int BYTES_PER_TICK = 64 * 1024;
     /** Entrees au plus par paquet de positions suivies. */

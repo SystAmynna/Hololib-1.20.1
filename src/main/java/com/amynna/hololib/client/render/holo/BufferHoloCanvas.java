@@ -24,12 +24,19 @@ import java.util.Arrays;
  */
 final class BufferHoloCanvas implements HoloCanvas
 {
-    /** Ecart en profondeur entre deux dessins successifs, en pixels. */
-    private static final float Z_STEP = 0.1f;
+    /** Ecart en profondeur entre deux dessins successifs, en pixels (regle par la fenetre). */
+    private float zStep = 0.02f;
 
     private final Matrix4f textMatrix = new Matrix4f();
     private float[] offsets = new float[32];
     private int depth;
+    /** Pile des clips (4 flottants chacun, avant le clip courant) ; {@code clipDepth} = nombre de clips ouverts. */
+    private float[] clips = new float[16];
+    private int clipDepth;
+    private float cx0;
+    private float cy0;
+    private float cx1;
+    private float cy1;
     /** Couches ouvertes : tant qu'il y en a, {@code z} n'avance pas. */
     private int layers;
     private PoseStack.Pose pose;
@@ -42,8 +49,11 @@ final class BufferHoloCanvas implements HoloCanvas
     private float oy;
     private float z;
 
-    void begin(PoseStack.Pose pose, MultiBufferSource buffers, int light, float partialTick, HoloTheme theme)
+    void begin(PoseStack.Pose pose, MultiBufferSource buffers, int light, float partialTick, HoloTheme theme,
+               float zStep)
     {
+        this.zStep = zStep;
+        clipDepth = 0;
         this.pose = pose;
         this.theme = theme;
         this.partialTick = partialTick;
@@ -90,19 +100,60 @@ final class BufferHoloCanvas implements HoloCanvas
     }
 
     @Override
+    public float z() { return z; }
+
+    @Override
+    public void z(float z) { this.z = z; }
+
+    @Override
+    public void shiftDepth(float dz) { z += dz; }
+
+    @Override
+    public void pushClip(float x, float y, float width, float height)
+    {
+        if (4 * clipDepth + 3 >= clips.length) clips = Arrays.copyOf(clips, clips.length * 2);
+        if (clipDepth == 0) {
+            cx0 = Float.NEGATIVE_INFINITY;
+            cy0 = Float.NEGATIVE_INFINITY;
+            cx1 = Float.POSITIVE_INFINITY;
+            cy1 = Float.POSITIVE_INFINITY;
+        }
+        clips[4 * clipDepth] = cx0;
+        clips[4 * clipDepth + 1] = cy0;
+        clips[4 * clipDepth + 2] = cx1;
+        clips[4 * clipDepth + 3] = cy1;
+        clipDepth++;
+        cx0 = Math.max(cx0, ox + x);
+        cy0 = Math.max(cy0, oy + y);
+        cx1 = Math.min(cx1, ox + x + width);
+        cy1 = Math.min(cy1, oy + y + height);
+    }
+
+    @Override
+    public void popClip()
+    {
+        if (clipDepth == 0) throw new IllegalStateException("HoloCanvas.popClip sans pushClip");
+        clipDepth--;
+        cx0 = clips[4 * clipDepth];
+        cy0 = clips[4 * clipDepth + 1];
+        cx1 = clips[4 * clipDepth + 2];
+        cy1 = clips[4 * clipDepth + 3];
+    }
+
+    @Override
     public void beginLayer() { layers++; }
 
     @Override
     public void endLayer()
     {
         if (layers == 0) throw new IllegalStateException("HoloCanvas.endLayer sans beginLayer");
-        if (--layers == 0) z += Z_STEP;
+        if (--layers == 0) z += zStep;
     }
 
     /** Pas en profondeur apres un dessin, sauf dans une couche. */
     private void advance()
     {
-        if (layers == 0) z += Z_STEP;
+        if (layers == 0) z += zStep;
     }
 
     @Override
@@ -113,6 +164,13 @@ final class BufferHoloCanvas implements HoloCanvas
         float y0 = oy + y;
         float x1 = x0 + width;
         float y1 = y0 + height;
+        if (clipDepth > 0) {
+            x0 = Math.max(x0, cx0);
+            y0 = Math.max(y0, cy0);
+            x1 = Math.min(x1, cx1);
+            y1 = Math.min(y1, cy1);
+            if (x1 <= x0 || y1 <= y0) return;
+        }
         int a = argb >>> 24;
         int r = argb >> 16 & 0xFF;
         int g = argb >> 8 & 0xFF;
@@ -135,6 +193,29 @@ final class BufferHoloCanvas implements HoloCanvas
         float y0 = oy + y;
         float x1 = x0 + width;
         float y1 = y0 + height;
+        if (clipDepth > 0) {
+            float nx0 = Math.max(x0, cx0);
+            float ny0 = Math.max(y0, cy0);
+            float nx1 = Math.min(x1, cx1);
+            float ny1 = Math.min(y1, cy1);
+            if (nx1 <= nx0 || ny1 <= ny0) return;
+            float u0 = (nx0 - x0) / width;
+            float u1 = (nx1 - x0) / width;
+            float v0 = (ny0 - y0) / height;
+            float v1 = (ny1 - y0) / height;
+            int tl = bilerp(topLeft, topRight, bottomRight, bottomLeft, u0, v0);
+            int tr = bilerp(topLeft, topRight, bottomRight, bottomLeft, u1, v0);
+            int br = bilerp(topLeft, topRight, bottomRight, bottomLeft, u1, v1);
+            int bl = bilerp(topLeft, topRight, bottomRight, bottomLeft, u0, v1);
+            topLeft = tl;
+            topRight = tr;
+            bottomRight = br;
+            bottomLeft = bl;
+            x0 = nx0;
+            y0 = ny0;
+            x1 = nx1;
+            y1 = ny1;
+        }
         Matrix4f m = pose.pose();
         VertexConsumer vc = buffers.getBuffer(HoloRenderTypes.TRANSLUCENT_QUADS);
         vertex(vc, m, x0, y0, topLeft);
@@ -142,6 +223,18 @@ final class BufferHoloCanvas implements HoloCanvas
         vertex(vc, m, x1, y1, bottomRight);
         vertex(vc, m, x1, y0, topRight);
         advance();
+    }
+
+    /** Couleur interpolee bilineairement dans le rectangle ({@code u}, {@code v} dans 0..1), par canal. */
+    private static int bilerp(int tl, int tr, int br, int bl, float u, float v)
+    {
+        int out = 0;
+        for (int shift = 0; shift <= 24; shift += 8) {
+            float top = (tl >>> shift & 0xFF) * (1f - u) + (tr >>> shift & 0xFF) * u;
+            float bottom = (bl >>> shift & 0xFF) * (1f - u) + (br >>> shift & 0xFF) * u;
+            out |= Math.round(top * (1f - v) + bottom * v) << shift;
+        }
+        return out;
     }
 
     private void vertex(VertexConsumer vc, Matrix4f m, float x, float y, int argb)
@@ -153,6 +246,13 @@ final class BufferHoloCanvas implements HoloCanvas
     @Override
     public void quad(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3, int argb)
     {
+        if (clipDepth > 0) {
+            float minX = Math.min(Math.min(x0, x1), Math.min(x2, x3)) + ox;
+            float maxX = Math.max(Math.max(x0, x1), Math.max(x2, x3)) + ox;
+            float minY = Math.min(Math.min(y0, y1), Math.min(y2, y3)) + oy;
+            float maxY = Math.max(Math.max(y0, y1), Math.max(y2, y3)) + oy;
+            if (minX < cx0 || maxX > cx1 || minY < cy0 || maxY > cy1) return;
+        }
         int a = argb >>> 24;
         int r = argb >> 16 & 0xFF;
         int g = argb >> 8 & 0xFF;
@@ -169,6 +269,7 @@ final class BufferHoloCanvas implements HoloCanvas
     @Override
     public void text(Component text, float x, float y, int argb)
     {
+        if (clipDepth > 0 && (ox + x < cx0 || ox + x > cx1 || oy + y < cy0 || oy + y + font.lineHeight > cy1)) return;
         textMatrix.set(pose.pose()).translate(0f, 0f, z);
         font.drawInBatch(text, ox + x, oy + y, argb, false, textMatrix, buffers, Font.DisplayMode.NORMAL, 0, light);
         advance();
@@ -189,6 +290,27 @@ final class BufferHoloCanvas implements HoloCanvas
         float y0 = oy + y;
         float x1 = x0 + width;
         float y1 = y0 + height;
+        if (clipDepth > 0) {
+            float nx0 = Math.max(x0, cx0);
+            float ny0 = Math.max(y0, cy0);
+            float nx1 = Math.min(x1, cx1);
+            float ny1 = Math.min(y1, cy1);
+            if (nx1 <= nx0 || ny1 <= ny0) return;
+            float du = u1 - u0;
+            float dv = v1 - v0;
+            float nu0 = u0 + du * (nx0 - x0) / width;
+            float nu1 = u0 + du * (nx1 - x0) / width;
+            float nv0 = v0 + dv * (ny0 - y0) / height;
+            float nv1 = v0 + dv * (ny1 - y0) / height;
+            u0 = nu0;
+            u1 = nu1;
+            v0 = nv0;
+            v1 = nv1;
+            x0 = nx0;
+            y0 = ny0;
+            x1 = nx1;
+            y1 = ny1;
+        }
         int a = argb >>> 24;
         int r = argb >> 16 & 0xFF;
         int g = argb >> 8 & 0xFF;

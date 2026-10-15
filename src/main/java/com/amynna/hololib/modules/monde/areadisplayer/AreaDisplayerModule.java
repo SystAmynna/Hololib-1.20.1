@@ -9,22 +9,34 @@ import com.amynna.hololib.holo.module.HoloModuleHost;
 import com.amynna.hololib.holo.object.HoloTransform;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraftforge.registries.ForgeRegistries;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.zip.DataFormatException;
-import java.util.zip.Deflater;
-import java.util.zip.Inflater;
+import java.util.zip.DeflaterOutputStream;
+import java.util.zip.InflaterInputStream;
 
 /**
  * Module {@code hololib:area_displayer} (memoire de position, marker) : un pave droit holographique
@@ -33,27 +45,28 @@ import java.util.zip.Inflater;
  * <p>
  * <b>Etat</b> (sauvegarde et synchronise) : coins A et B (zone definie si les deux le sont, hauteur bornee a celle du
  * monde), options ({@link #FLAG_FRAME} cadre, {@link #FLAG_AUTO_UPDATE}, {@link #FLAG_PLAYERS},
- * {@link #FLAG_PLAYER_TRAILS}, {@link #FLAG_ENTITIES}, {@link #FLAG_ENTITY_TRAILS}), intervalle de l'Auto Update,
+ * {@link #FLAG_PLAYER_TRAILS}, {@link #FLAG_ENTITIES}, {@link #FLAG_ENTITY_TRAILS}, {@link #FLAG_CULLING}), intervalle de l'Auto Update, transparence du terrain,
  * generation de la grille (changee avec la zone) et avancement du scan. Les reglages ne sont modifies que par l'API
- * serveur publique ({@link #setCorner}, {@link #setFlag}, {@link #setInterval}, {@link #setResolution},
+ * serveur publique ({@link #setCorner}, {@link #setFlag}, {@link #setInterval}, {@link #setResolution}, {@link #setTransparency},
  * {@link #refresh}), appelee par l'Area
- * Displayer Configurator du meme marker (operateurs) ; le module n'a aucune action.
+ * Displayer Configurator du meme marker (operateurs) ; le module n'a aucune action. {@link #addBlocked} /
+ * {@link #removeBlocked} : <b>liste noire</b> de blocs que le scan compte comme de l'air (chaque changement relance un
+ * scan complet).
  * <p>
- * <b>Terrain</b> (serveur) : grille de voxels ({@link AreaGrid}, resolution Auto ou palier choisi, relevee si la zone
- * est trop grande, taille de zone illimitee)
- * calculee par {@link AreaScanner} avec un budget de {@value #SCAN_BUDGET_NANOS} ns par tick : passage complet a la
+ * <b>Terrain</b> (serveur) : grille de voxels ({@link AreaGrid}, resolution = palier choisi, appliquee strictement,
+ * taille de zone illimitee) tenue en stockage creux par section ({@link AreaVoxels}), calculee par {@link AreaScanner} avec un budget de {@value #SCAN_BUDGET_NANOS} ns par tick : passage complet a la
  * definition de la zone et sur « Actualiser » ; <b>Auto Update</b> = nouveau passage toutes les {@code interval}
  * secondes sur les seuls chunks charges (jamais en temps reel : aucune ecoute des blocs). Sans Auto Update, le
- * terrain reste fige jusqu'a « Actualiser », y compris apres un redemarrage : les voxels sont sauvegardes (deflates)
- * avec l'etat du module. Le terrain et les positions suivies partent par le canal dedie
+ * terrain reste fige jusqu'a « Actualiser », y compris apres un redemarrage : les sections non vides sont sauvegardees
+ * (format creux, deflate) avec l'etat du module. Le terrain et les positions suivies partent par le canal dedie
  * ({@code terrain.AreaTerrainNetwork}) aux seuls clients abonnes ({@link AreaFeed}) ; l'etat synchronise du module
  * reste petit.
  * <p>
  * <b>Etat synchronise</b> ({@link #writeSync}) :
  * <pre>
- * boolean A [+ 3 int], boolean B [+ 3 int], byte options, varint intervalle (s), varint resolution demandee
- * (0 = Auto), varint generation,
- * byte avancement (0-100, 255 = aucun scan)
+ * boolean A [+ 3 int], boolean B [+ 3 int], byte options, varint intervalle (s), varint resolution (palier),
+ * byte transparence (0-100 %), varint generation,
+ * byte avancement (0-100, 255 = aucun scan), varint n, n x utf bloc ignore (liste noire)
  * </pre>
  * Cote client, le miroir s'abonne au terrain a sa creation et se desabonne a son retrait (par le {@link Backend}).
  */
@@ -71,16 +84,29 @@ public final class AreaDisplayerModule extends HoloModule
     public static final int FLAG_ENTITIES = 4;
     /** Option : trainees des entites. */
     public static final int FLAG_ENTITY_TRAILS = 5;
+    /** Option : culling du rendu (une seule couche : seules les faces visibles de la camera sont dessinees). */
+    public static final int FLAG_CULLING = 6;
     /** Nombre d'options. */
-    public static final int FLAG_COUNT = 6;
-    /** Options par defaut : cadre, joueurs et leurs trainees, entites. */
+    public static final int FLAG_COUNT = 7;
+    /** Options par defaut : cadre, joueurs et leurs trainees, entites, culling. */
     private static final int DEFAULT_FLAGS = 1 << FLAG_FRAME | 1 << FLAG_PLAYERS | 1 << FLAG_PLAYER_TRAILS
-            | 1 << FLAG_ENTITIES;
+            | 1 << FLAG_ENTITIES | 1 << FLAG_CULLING;
+    /** Version du format des options sauvegardees (2 : bit Culling ; absente : Culling par defaut). */
+    private static final int FLAGS_FORMAT = 2;
 
     /** Bornes et defaut de l'intervalle de l'Auto Update, en secondes. */
     public static final int MIN_INTERVAL = 10;
     public static final int MAX_INTERVAL = 600;
     public static final int DEFAULT_INTERVAL = 60;
+    /** Bornes et defaut de la transparence du terrain, en pour cent (0 = opaque, 100 = invisible). */
+    public static final int MIN_TRANSPARENCY = 0;
+    public static final int MAX_TRANSPARENCY = 100;
+    public static final int DEFAULT_TRANSPARENCY = 31;
+    /** Blocs ignores au plus, et longueur maximale d'un id. */
+    public static final int MAX_BLOCKED = 128;
+    public static final int MAX_BLOCK_ID = 64;
+    /** Version du format des voxels sauvegardes (2 : sections non vides, cle + 2 bits par voxel). */
+    private static final int VOXELS_FORMAT = 2;
     /** Borne horizontale des coins (bord du monde). */
     public static final int MAX_HORIZONTAL = 30_000_000;
     /** Avancement synchronise quand aucun scan n'est en cours. */
@@ -120,10 +146,13 @@ public final class AreaDisplayerModule extends HoloModule
     private BlockPos cornerB;
     private int flags = DEFAULT_FLAGS;
     private int interval = DEFAULT_INTERVAL;
-    /** Resolution demandee : {@link AreaGrid#AUTO} ou un palier de {@link AreaGrid#LEVELS}. */
-    private int resolution = AreaGrid.AUTO;
+    private int transparency = DEFAULT_TRANSPARENCY;
+    /** Resolution : un palier de {@link AreaGrid#LEVELS}, appliquee strictement. */
+    private int resolution = AreaGrid.DEFAULT_STEP;
     private int generation;
     private int progress = NO_SCAN;
+    /** Liste noire : blocs ignores par le scan (comptes comme de l'air), dans l'ordre d'ajout. */
+    private final Set<ResourceLocation> blocked = new LinkedHashSet<>();
 
     // ---------------------------------------------------------------- deux cotes
 
@@ -137,17 +166,17 @@ public final class AreaDisplayerModule extends HoloModule
 
     // ---------------------------------------------------------------- serveur
 
-    private byte[] voxels;
+    private AreaVoxels voxels;
     private AreaScanner scanner;
     private final AreaFeed feed = new AreaFeed(this);
     private boolean fullScanRequested;
     private int autoTicks;
     private int progressTicks = PROGRESS_SYNC_TICKS;
     private ServerLevel lastLevel;
-    /** Voxels deflates (sauvegarde), recalcules seulement apres un changement. */
+    /** Voxels (format creux, deflates) pour la sauvegarde, recalcules seulement apres un changement. */
     private byte[] savedVoxels;
     private boolean voxelsChanged;
-    /** Voxels relus de la sauvegarde et zone qu'ils decrivent, en attente de la grille. */
+    /** Voxels relus de la sauvegarde (format creux) et zone qu'ils decrivent, en attente de la grille. */
     private byte[] loadedVoxels;
     private int[] loadedZone;
     /** Scan complet inacheve a la sauvegarde : relance au chargement (voxels partiels montres en attendant). */
@@ -243,15 +272,21 @@ public final class AreaDisplayerModule extends HoloModule
         if (cornerA != null) tag.putIntArray("a", new int[] {cornerA.getX(), cornerA.getY(), cornerA.getZ()});
         if (cornerB != null) tag.putIntArray("b", new int[] {cornerB.getX(), cornerB.getY(), cornerB.getZ()});
         tag.putInt("flags", flags);
+        tag.putInt("flagsFormat", FLAGS_FORMAT);
         tag.putInt("interval", interval);
+        tag.putInt("transparency", transparency);
         tag.putInt("resolution", resolution);
         tag.putInt("generation", generation);
+        ListTag list = new ListTag();
+        for (ResourceLocation id : blocked) list.add(StringTag.valueOf(id.toString()));
+        tag.put("blocked", list);
         if (grid == null) return;
         if (savedVoxels == null || voxelsChanged) {
-            savedVoxels = deflate(grid, voxels);
+            savedVoxels = deflate(voxels);
             voxelsChanged = false;
         }
         tag.putIntArray("zone", zoneOf(grid));
+        tag.putInt("voxelsFormat", VOXELS_FORMAT);
         tag.putByteArray("voxels", savedVoxels);
         tag.putBoolean("pending", fullScanRequested
                 || scanner != null && scanner.running() && scanner.mode() == AreaScanner.Mode.FULL);
@@ -264,13 +299,26 @@ public final class AreaDisplayerModule extends HoloModule
         cornerA = readCorner(tag, "a");
         cornerB = readCorner(tag, "b");
         flags = tag.contains("flags", Tag.TAG_INT) ? tag.getInt("flags") & (1 << FLAG_COUNT) - 1 : DEFAULT_FLAGS;
+        // Sauvegarde d'avant l'option Culling : valeur par defaut.
+        if (tag.getInt("flagsFormat") < FLAGS_FORMAT) flags |= DEFAULT_FLAGS & 1 << FLAG_CULLING;
         interval = tag.contains("interval", Tag.TAG_INT)
                 ? Mth.clamp(tag.getInt("interval"), MIN_INTERVAL, MAX_INTERVAL) : DEFAULT_INTERVAL;
-        resolution = AreaGrid.isLevel(tag.getInt("resolution")) ? tag.getInt("resolution") : AreaGrid.AUTO;
+        transparency = tag.contains("transparency", Tag.TAG_INT)
+                ? Mth.clamp(tag.getInt("transparency"), MIN_TRANSPARENCY, MAX_TRANSPARENCY) : DEFAULT_TRANSPARENCY;
+        // Ancienne valeur « Auto » (0) ou invalide : bloc par bloc.
+        resolution = AreaGrid.isLevel(tag.getInt("resolution")) ? tag.getInt("resolution") : AreaGrid.DEFAULT_STEP;
         generation = Math.max(0, tag.getInt("generation"));
+        blocked.clear();
+        ListTag list = tag.getList("blocked", Tag.TAG_STRING);
+        for (int i = 0; i < list.size() && blocked.size() < MAX_BLOCKED; i++) {
+            ResourceLocation id = parseBlock(list.getString(i));
+            if (id != null) blocked.add(id);
+        }
         int[] zone = tag.getIntArray("zone");
-        loadedZone = zone.length == 7 ? zone : null;
-        loadedVoxels = tag.contains("voxels", Tag.TAG_BYTE_ARRAY) ? tag.getByteArray("voxels") : null;
+        // Voxels d'un ancien format (dense) ignores : rescan complet.
+        boolean sparse = tag.getInt("voxelsFormat") == VOXELS_FORMAT;
+        loadedZone = zone.length == 7 && sparse ? zone : null;
+        loadedVoxels = sparse && tag.contains("voxels", Tag.TAG_BYTE_ARRAY) ? tag.getByteArray("voxels") : null;
         loadedPending = tag.getBoolean("pending");
     }
 
@@ -285,7 +333,7 @@ public final class AreaDisplayerModule extends HoloModule
     private static int[] zoneOf(AreaGrid grid)
     {
         return new int[] {grid.minX(), grid.minY(), grid.minZ(), grid.blocksX(), grid.blocksY(), grid.blocksZ(),
-                grid.requestedStep()};
+                grid.step()};
     }
 
     private static boolean sameZone(AreaGrid grid, int[] zone)
@@ -293,56 +341,44 @@ public final class AreaDisplayerModule extends HoloModule
         return Arrays.equals(zoneOf(grid), zone);
     }
 
-    /** Toutes les sections empaquetees (2 bits par voxel) puis deflatees. */
-    private static byte[] deflate(AreaGrid grid, byte[] voxels)
+    /** Sections non vides : nombre, puis cle et octets empaquetes (2 bits par voxel) de chacune, deflates. */
+    private static byte[] deflate(AreaVoxels voxels)
     {
-        Deflater deflater = new Deflater();
         byte[] packed = new byte[AreaGrid.PACKED_BYTES];
-        byte[] buffer = new byte[8192];
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        try {
-            for (int s = 0; s < grid.sections(); s++) {
-                grid.pack(voxels, s, packed);
-                deflater.setInput(packed);
-                while (!deflater.needsInput()) {
-                    int n = deflater.deflate(buffer);
-                    out.write(buffer, 0, n);
-                }
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (DataOutputStream out = new DataOutputStream(new DeflaterOutputStream(bytes))) {
+            out.writeInt(voxels.size());
+            for (long key : voxels.keys()) {
+                AreaGrid.pack(voxels.section(key), packed);
+                out.writeLong(key);
+                out.write(packed);
             }
-            deflater.finish();
-            while (!deflater.finished()) {
-                int n = deflater.deflate(buffer);
-                out.write(buffer, 0, n);
-            }
-        } finally {
-            deflater.end();
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
         }
-        return out.toByteArray();
+        return bytes.toByteArray();
     }
 
     /** Inverse de {@link #deflate} ; faux (voxels laisses vides) si les donnees sont invalides. */
-    private boolean inflate(byte[] data, byte[] target)
+    private boolean inflate(byte[] data, AreaVoxels target)
     {
-        Inflater inflater = new Inflater();
         byte[] packed = new byte[AreaGrid.PACKED_BYTES];
-        try {
-            inflater.setInput(data);
-            for (int s = 0; s < grid.sections(); s++) {
-                int read = 0;
-                while (read < packed.length) {
-                    int n = inflater.inflate(packed, read, packed.length - read);
-                    if (n == 0) throw new IOException("Tronque");
-                    read += n;
-                }
-                grid.unpack(packed, 0, s, target);
+        byte[] section = new byte[AreaGrid.SECTION_VOXELS];
+        try (DataInputStream in = new DataInputStream(new InflaterInputStream(new ByteArrayInputStream(data)))) {
+            int count = in.readInt();
+            if (count < 0 || count > grid.sections()) throw new IOException("Nombre de sections invalide");
+            for (int i = 0; i < count; i++) {
+                long key = in.readLong();
+                in.readFully(packed);
+                if (!grid.contains(key)) continue;
+                AreaGrid.unpack(packed, 0, section);
+                target.put(key, section);
             }
             return true;
-        } catch (DataFormatException | IOException e) {
+        } catch (IOException e) {
             HoloLib.LOGGER.warn("Voxels sauvegardes invalides pour l'Area Displayer {} : rescan", markerId());
-            Arrays.fill(target, AreaGrid.AIR);
+            target.clear();
             return false;
-        } finally {
-            inflater.end();
         }
     }
 
@@ -356,8 +392,11 @@ public final class AreaDisplayerModule extends HoloModule
         buf.writeByte(flags);
         buf.writeVarInt(interval);
         buf.writeVarInt(resolution);
+        buf.writeByte(transparency);
         buf.writeVarInt(generation);
         buf.writeByte(progress);
+        buf.writeVarInt(blocked.size());
+        for (ResourceLocation id : blocked) buf.writeUtf(id.toString(), MAX_BLOCK_ID);
     }
 
     @Override
@@ -368,9 +407,16 @@ public final class AreaDisplayerModule extends HoloModule
         flags = buf.readByte() & (1 << FLAG_COUNT) - 1;
         interval = Mth.clamp(buf.readVarInt(), MIN_INTERVAL, MAX_INTERVAL);
         int step = buf.readVarInt();
-        resolution = AreaGrid.isLevel(step) ? step : AreaGrid.AUTO;
+        resolution = AreaGrid.isLevel(step) ? step : AreaGrid.DEFAULT_STEP;
+        transparency = Mth.clamp(buf.readUnsignedByte(), MIN_TRANSPARENCY, MAX_TRANSPARENCY);
         generation = buf.readVarInt();
         progress = buf.readUnsignedByte();
+        blocked.clear();
+        int count = Math.min(buf.readVarInt(), MAX_BLOCKED);
+        for (int i = 0; i < count; i++) {
+            ResourceLocation id = parseBlock(buf.readUtf(MAX_BLOCK_ID));
+            if (id != null) blocked.add(id);
+        }
         revision++;
         rebuildGrid();
     }
@@ -406,8 +452,8 @@ public final class AreaDisplayerModule extends HoloModule
         grid = next;
         if (host().clientSide()) return;
         if (scanner != null) scanner.stop(lastLevel);
-        voxels = grid != null ? new byte[grid.voxels()] : null;
-        scanner = grid != null ? new AreaScanner(grid, voxels) : null;
+        voxels = grid != null ? new AreaVoxels() : null;
+        scanner = grid != null ? new AreaScanner(grid, voxels, ignoredBlocks()) : null;
         fullScanRequested = grid != null;
         savedVoxels = null;
         voxelsChanged = true;
@@ -438,7 +484,7 @@ public final class AreaDisplayerModule extends HoloModule
                 flag(FLAG_PLAYERS), flag(FLAG_ENTITIES));
     }
 
-    private void sectionChanged(int section)
+    private void sectionChanged(long section)
     {
         voxelsChanged = true;
         feed.sectionChanged(section);
@@ -501,8 +547,8 @@ public final class AreaDisplayerModule extends HoloModule
     }
 
     /**
-     * Serveur : resolution demandee, {@link AreaGrid#AUTO} ou un palier de {@link AreaGrid#LEVELS} (autre valeur
-     * ignoree) ; une nouvelle grille remet les voxels a zero et lance un scan complet.
+     * Serveur : resolution, un palier de {@link AreaGrid#LEVELS} (autre valeur ignoree), appliquee strictement ; une
+     * nouvelle grille remet les voxels a zero et lance un scan complet.
      */
     public void setResolution(int step)
     {
@@ -523,6 +569,59 @@ public final class AreaDisplayerModule extends HoloModule
         changed();
     }
 
+    /**
+     * Id de bloc lu depuis du texte (forme seulement, sans verifier qu'il existe : un mod retire ne casse rien),
+     * {@code null} si invalide ; sans namespace : {@code minecraft}.
+     */
+    public static ResourceLocation parseBlock(String text)
+    {
+        String id = text.trim().toLowerCase(java.util.Locale.ROOT);
+        if (id.isEmpty() || id.length() > MAX_BLOCK_ID) return null;
+        return ResourceLocation.tryParse(id.indexOf(':') < 0 ? "minecraft:" + id : id);
+    }
+
+    /** Vrai si {@code id} est un bloc enregistre qui peut etre ignore (pas l'air). */
+    public static boolean isBlock(ResourceLocation id)
+    {
+        if (id == null || !ForgeRegistries.BLOCKS.containsKey(id)) return false;
+        Block block = ForgeRegistries.BLOCKS.getValue(id);
+        return block != null && block != Blocks.AIR && block != Blocks.CAVE_AIR && block != Blocks.VOID_AIR;
+    }
+
+    /** Blocs de la liste noire resolus dans le registre (ids inconnus ignores). Serveur. */
+    private Set<Block> ignoredBlocks()
+    {
+        if (blocked.isEmpty()) return Collections.emptySet();
+        Set<Block> blocks = new HashSet<>();
+        for (ResourceLocation id : blocked) if (isBlock(id)) blocks.add(ForgeRegistries.BLOCKS.getValue(id));
+        return blocks;
+    }
+
+    /** Serveur : ajoute un bloc a la liste noire ; faux si invalide, deja present ou liste pleine. Rescan complet. */
+    public boolean addBlocked(String text)
+    {
+        ResourceLocation id = parseBlock(text);
+        if (!isBlock(id) || blocked.size() >= MAX_BLOCKED || !blocked.add(id)) return false;
+        blockedChanged();
+        return true;
+    }
+
+    /** Serveur : retire un bloc de la liste noire. Rescan complet. */
+    public void removeBlocked(String text)
+    {
+        ResourceLocation id = parseBlock(text);
+        if (id != null && blocked.remove(id)) blockedChanged();
+    }
+
+    private void blockedChanged()
+    {
+        if (scanner != null) {
+            scanner.setIgnored(ignoredBlocks());
+            fullScanRequested = true;
+        }
+        changed();
+    }
+
     /** Serveur : option {@code flag} ({@code FLAG_*}). */
     public void setFlag(int flag, boolean on)
     {
@@ -538,6 +637,15 @@ public final class AreaDisplayerModule extends HoloModule
         int value = Mth.clamp(seconds, MIN_INTERVAL, MAX_INTERVAL);
         if (value == interval) return;
         interval = value;
+        changed();
+    }
+
+    /** Serveur : transparence du terrain, en pour cent (bornee). */
+    public void setTransparency(int percent)
+    {
+        int value = Mth.clamp(percent, MIN_TRANSPARENCY, MAX_TRANSPARENCY);
+        if (value == transparency) return;
+        transparency = value;
         changed();
     }
 
@@ -562,10 +670,16 @@ public final class AreaDisplayerModule extends HoloModule
 
     public int interval() { return interval; }
 
-    /** Resolution demandee : {@link AreaGrid#AUTO} ou un palier (la resolution effective est {@code grid().step()}). */
+    /** Transparence du terrain, en pour cent (0 = opaque, 100 = invisible). */
+    public int transparency() { return transparency; }
+
+    /** Resolution : un palier de {@link AreaGrid#LEVELS} (toujours egale a {@code grid().step()}). */
     public int resolution() { return resolution; }
 
     public int generation() { return generation; }
+
+    /** Blocs ignores par le scan (liste noire), dans l'ordre d'ajout. */
+    public Set<ResourceLocation> blocked() { return Collections.unmodifiableSet(blocked); }
 
     /** Avancement du scan en cours (0 a 99), {@link #NO_SCAN} sans scan. */
     public int progress() { return progress; }

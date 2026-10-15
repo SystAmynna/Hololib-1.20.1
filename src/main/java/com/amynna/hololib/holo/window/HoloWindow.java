@@ -36,6 +36,10 @@ public class HoloWindow extends HoloObject implements HoloInteractible, HoloThem
     private final Set<HoloControl> intercepted = new HashSet<>();
     private HoloThemeSource themeSource = HoloThemeSource.CLIENT;
     private boolean staffTheme;
+    private float depthStep = DEFAULT_DEPTH_STEP;
+
+    /** Ecart de profondeur par defaut entre deux dessins successifs, en pixels (quasi imperceptible). */
+    public static final float DEFAULT_DEPTH_STEP = 0.02f;
 
     /**
      * @param transform  placement initial dans le repere de l'ancrage (copie)
@@ -61,6 +65,16 @@ public class HoloWindow extends HoloObject implements HoloInteractible, HoloThem
     public final int height() { return height; }
 
     public final float pixelScale() { return pixelScale; }
+
+    /** Ecart de profondeur entre deux dessins successifs, en pixels : le relief des widgets. */
+    public final float depthStep() { return depthStep; }
+
+    /** Regle le relief : 0 = tout a plat (risque de z-fighting), grand = widgets nettement detaches du fond. */
+    public final HoloWindow setDepthStep(float depthStep)
+    {
+        this.depthStep = Math.max(0f, depthStep);
+        return this;
+    }
 
     @Override
     public HoloThemeSource themeSource() { return themeSource; }

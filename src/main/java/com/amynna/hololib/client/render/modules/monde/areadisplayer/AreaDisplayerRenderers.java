@@ -13,6 +13,7 @@ public final class AreaDisplayerRenderers
 
     public static void register()
     {
+        AreaTileGpu.install();
         HoloObjectRenderers.register(AreaDisplayerCube.class, new AreaDisplayerCubeRenderer());
     }
 }

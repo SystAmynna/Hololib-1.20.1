@@ -37,6 +37,7 @@ public class HoloWidgetTextBox extends HoloWidget implements HoloTextInput
     private HoloColor editingBackground = HoloColor.secondary(0xA0).darker(0.84f);
     private HoloColor border = HoloColor.special(0xFF).darker(0.54f);
     private HoloColor editingBorder = HoloColor.action(0xFF).lighter(0.18f);
+    private HoloColor textColor = TEXT;
 
     /**
      * @param maxLength caracteres au plus
@@ -91,6 +92,13 @@ public class HoloWidgetTextBox extends HoloWidget implements HoloTextInput
         return this;
     }
 
+    /** Couleur du texte saisi (par defaut : special), par exemple rouge pour une saisie invalide. */
+    public HoloWidgetTextBox setTextColor(HoloColor color)
+    {
+        this.textColor = color;
+        return this;
+    }
+
     public HoloWidgetTextBox setColors(int background, int editingBackground, int border, int editingBorder)
     {
         return setColors(HoloColor.fixed(background), HoloColor.fixed(editingBackground), HoloColor.fixed(border),
@@ -141,7 +149,7 @@ public class HoloWidgetTextBox extends HoloWidget implements HoloTextInput
         int first = buffer.firstLine();
         int last = Math.min(buffer.lineCount(), first + buffer.visibleLines());
         for (int i = first; i < last; i++) {
-            canvas.text(buffer.lineText(i), PADDING, PADDING + 1f + (i - first) * LINE_HEIGHT, canvas.color(TEXT));
+            canvas.text(buffer.lineText(i), PADDING, PADDING + 1f + (i - first) * LINE_HEIGHT, canvas.color(textColor));
         }
         if (buffer.lineCount() > buffer.visibleLines()) {
             // Barre de defilement.
