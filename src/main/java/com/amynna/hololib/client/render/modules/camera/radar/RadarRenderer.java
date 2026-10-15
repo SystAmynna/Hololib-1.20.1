@@ -6,6 +6,7 @@ import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.client.modules.camera.radar.RadarClient;
 import com.amynna.hololib.client.modules.camera.radar.RadarScan;
 import com.amynna.hololib.client.render.outline.HoloOutlineMask;
+import com.amynna.hololib.client.render.levelview.HoloLevelViews;
 import com.amynna.hololib.client.render.world.WorldRenderContext;
 import com.amynna.hololib.client.render.world.WorldRenderer;
 import com.mojang.blaze3d.pipeline.RenderTarget;
@@ -75,7 +76,11 @@ final class RadarRenderer extends WorldRenderer<RadarScan>
     protected List<? extends RadarScan> instances() { return RadarClient.scan().active() ? ONE : NONE; }
 
     @Override
-    protected boolean shouldRender(RadarScan scan, Vec3 position, WorldRenderContext ctx) { return true; }
+    protected boolean shouldRender(RadarScan scan, Vec3 position, WorldRenderContext ctx)
+    {
+        // Effet personnel du joueur local : absent des vues secondaires.
+        return HoloLevelViews.current() == null;
+    }
 
     @Override
     protected int packedLight(RadarScan scan, Vec3 position, WorldRenderContext ctx)

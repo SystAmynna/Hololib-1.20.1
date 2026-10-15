@@ -4,6 +4,7 @@ import com.amynna.hololib.holo.theme.HoloThemes;
 import com.amynna.hololib.holo.theme.HoloColor;
 import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.client.modules.camera.targeting.TargetingClient;
+import com.amynna.hololib.client.render.levelview.HoloLevelViews;
 import com.amynna.hololib.client.render.outline.HoloOutlineMask;
 import com.amynna.hololib.client.render.outline.HoloOutlineShader;
 import com.amynna.hololib.client.render.world.WorldRenderContext;
@@ -49,6 +50,8 @@ final class TargetOutlineRenderer extends WorldRenderer<TargetOutlineRenderer.Ta
     @Override
     protected List<? extends Target> instances()
     {
+        // Effet personnel du joueur local : absent des vues secondaires.
+        if (HoloLevelViews.current() != null) return List.of();
         return TargetingClient.entity() != null || TargetingClient.block() != null ? one : List.of();
     }
 

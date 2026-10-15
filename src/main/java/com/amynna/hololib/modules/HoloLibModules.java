@@ -29,6 +29,8 @@ import com.amynna.hololib.modules.dimension.skycancel.SkyCancelModule;
 import com.amynna.hololib.modules.dimension.space.SpaceEnvironmentModule;
 import com.amynna.hololib.modules.monde.areaconfigurator.AreaConfiguratorModule;
 import com.amynna.hololib.modules.monde.areadisplayer.AreaDisplayerModule;
+import com.amynna.hololib.modules.monde.screen.ScreenModule;
+import com.amynna.hololib.modules.monde.screenconfigurator.ScreenConfiguratorModule;
 import com.amynna.hololib.modules.monde.spaceconfigurator.SpaceConfiguratorModule;
 import com.amynna.hololib.modules.monde.spacecontroller.SpaceControllerModule;
 import com.amynna.hololib.modules.monde.spacemap.SpaceMapModule;
@@ -57,6 +59,11 @@ public final class HoloLibModules
     public static final RegistryObject<HoloModuleType<AreaConfiguratorModule>> AREA_DISPLAYER_CONFIGURATOR =
             REGISTER.register("area_displayer_configurator",
                     () -> new HoloModuleType<>(HoloModuleTarget.POSITION, AreaConfiguratorModule::new));
+    public static final RegistryObject<HoloModuleType<ScreenModule>> SCREEN = REGISTER.register(
+            "screen", () -> new HoloModuleType<>(HoloModuleTarget.POSITION, ScreenModule::new));
+    public static final RegistryObject<HoloModuleType<ScreenConfiguratorModule>> SCREEN_CONFIGURATOR =
+            REGISTER.register("screen_configurator",
+                    () -> new HoloModuleType<>(HoloModuleTarget.POSITION, ScreenConfiguratorModule::new));
     public static final RegistryObject<HoloModuleType<SpacePilotModule>> SPACE_PILOT = REGISTER.register(
             "space_pilot", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, SpacePilotModule::new));
     public static final RegistryObject<HoloModuleType<SpaceKnowledgeModule>> SPACE_KNOWLEDGE = REGISTER.register(

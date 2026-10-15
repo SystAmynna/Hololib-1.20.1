@@ -4,14 +4,18 @@ import com.amynna.hololib.HoloLib;
 import com.amynna.hololib.client.render.cancel.RenderCancels;
 import com.amynna.hololib.client.render.cancel.SkyCancelFill;
 import com.amynna.hololib.client.render.hud.HudRenderPass;
+import com.amynna.hololib.client.render.levelview.HoloLevelView;
+import com.amynna.hololib.client.render.levelview.HoloLevelViews;
 import com.amynna.hololib.client.render.sky.SkyRenderPass;
 import com.amynna.hololib.client.render.sky.SkyRenderer;
 import com.amynna.hololib.client.render.view.ViewRenderPass;
 import com.amynna.hololib.client.render.world.WorldRenderPass;
 import com.amynna.hololib.holo.render.HoloRenderElement;
 import net.minecraft.client.Camera;
+import net.minecraft.client.Minecraft;
 import net.minecraft.util.Mth;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.CustomizeGuiOverlayEvent;
 import net.minecraftforge.client.event.RegisterGuiOverlaysEvent;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
@@ -39,6 +43,12 @@ import java.util.WeakHashMap;
  * ({@link ModBus}). Il releve aussi le FOV ({@code ComputeFov}) et le roulis ({@code ComputeCameraAngles}), et relaie
  * la couleur du brouillard aux renderers du ciel ({@code ComputeFogColor}), et applique les annulations du
  * RenderCanceler ({@code client.render.cancel} : debut de frame, ciel avec shaderpack, main, overlays du HUD).
+ * <p>
+ * Vues secondaires ({@code client.render.levelview}) : rendues en tout dernier au debut de la frame
+ * ({@code RenderTickEvent} START, {@code LOWEST}), avant le rendu principal. Pendant une vue, FOV et angles de la
+ * camera sont imposes, ainsi que la distance de vue (plan lointain, {@code RenderFog}), les passes du ciel et du monde
+ * s'executent, pas celle de la vue ; les statiques de la frame sont recalcules par le rendu principal qui suit. Leurs
+ * mesures sont ajoutees a l'ecran F3 ({@code CustomizeGuiOverlayEvent.DebugText}).
  * <p>
  * Toutes les passes recoivent la <b>rotation camera sans bobbing</b> et la <b>projection du monde bobbing compris</b>.
  * Sans shaderpack, vanilla met le bobbing dans la projection : la pose de {@code AFTER_SKY} est la rotation. Avec un
@@ -79,13 +89,40 @@ public final class RenderDispatcher
     public static void onComputeFov(ViewportEvent.ComputeFov event)
     {
         // Faux pour le FOV de la main (70 fixe) : seul celui du monde nous interesse.
-        if (event.usedConfiguredFov()) fov = (float) event.getFOV();
+        if (!event.usedConfiguredFov()) return;
+        if (HoloLevelViews.current() != null) {
+            event.setFOV(HoloLevelViews.cameraFov());
+            HoloLevelViews.applyViewDistance();
+        }
+        fov = (float) event.getFOV();
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onComputeCameraAngles(ViewportEvent.ComputeCameraAngles event)
     {
+        HoloLevelView view = HoloLevelViews.current();
+        if (view != null && !view.entityMode()) {
+            event.setYaw(view.yaw());
+            event.setPitch(view.pitch());
+            // Le roulis de la vue est deja sur la pile de rendu ; ajoute ici pour la rotation camera reconstruite.
+            roll = event.getRoll() + view.roll();
+            return;
+        }
         roll = event.getRoll();
+    }
+
+    /** Brouillard d'une vue secondaire a distance de vue reduite. */
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onRenderFog(ViewportEvent.RenderFog event)
+    {
+        if (HoloLevelViews.current() != null) HoloLevelViews.applyFog(event);
+    }
+
+    /** Mesures des vues secondaires dans l'ecran F3. */
+    @SubscribeEvent
+    public static void onDebugText(CustomizeGuiOverlayEvent.DebugText event)
+    {
+        if (Minecraft.getInstance().options.renderDebug) HoloLevelViews.debugLines(event.getLeft());
     }
 
     /**
@@ -140,6 +177,16 @@ public final class RenderDispatcher
         if (event.phase == TickEvent.Phase.START) RenderCancels.beginFrame();
     }
 
+    /**
+     * Vues secondaires, en dernier au debut de la frame : apres {@link #onRenderTick} et apres le picking de
+     * {@code HoloInteractions}, qui lit la camera principale (la vue la deplace jusqu'au rendu principal).
+     */
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onRenderTickViews(TickEvent.RenderTickEvent event)
+    {
+        if (event.phase == TickEvent.Phase.START) HoloLevelViews.renderFrame(event.renderTickTime);
+    }
+
     /** Main en premiere personne annulee (chaque main, aussi pour le rendu de la main d'Oculus). */
     @SubscribeEvent
     public static void onRenderHand(RenderHandEvent event)
@@ -167,6 +214,10 @@ public final class RenderDispatcher
             SkyRenderPass.render(HoloRenderers.sky(), event.getCamera(), event.getPartialTick(), CAMERA_ROTATION,
                     CAMERA_NORMAL, WORLD_PROJECTION, fov);
         }
+        else if (stage == RenderLevelStageEvent.Stage.AFTER_BLOCK_ENTITIES)
+        {
+            if (HoloLevelViews.current() != null) HoloLevelViews.fixViewport();
+        }
         else if (stage == RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS)
         {
             // Avec Oculus, les entites ne sont dessinees qu'au profiler "translucent", apres AFTER_ENTITIES.
@@ -187,6 +238,8 @@ public final class RenderDispatcher
                 WorldRenderPass.renderOverlay(HoloRenderers.world(), CAMERA_ROTATION, CAMERA_NORMAL, WORLD_PROJECTION,
                         event.getCamera(), event.getFrustum(), event.getPartialTick());
             }
+            // Vue secondaire : rien devant l'oeil (les objets de la vue appartiennent a la camera du joueur).
+            if (HoloLevelViews.current() != null) return;
             ViewRenderPass.render(HoloRenderers.view(), event.getCamera(), event.getPartialTick(), CAMERA_ROTATION,
                     CAMERA_NORMAL, WORLD_PROJECTION, fov);
         }
