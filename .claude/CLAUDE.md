@@ -74,6 +74,10 @@ com.amynna.hololib
 │   │                            AreaGrid (pas strict, sections / tuiles), AreaVoxels (stockage creux), AreaScanner (scan serveur etale), AreaFeed (abonnes) ;
 │   │                            terrain/ : canal dedie hololib:area_terrain (AreaTerrainNetwork, AreaTerrainPackets)
 │   ├── monde/areaconfigurator/  Area Displayer Configurator (marker, ops) : fenetre des reglages du Displayer du marker
+│   ├── monde/trigger*/          Modules Trigger (marker) : trigger/ code commun (TriggerCommands : execution des commandes,
+│   │                            TriggerOps : operateurs) ; triggerarea/ Trigger Area (zone de declenchement,
+│   │                            TriggerAreaZone) + triggerareaconfigurator/ (ops) ; triggerinterrupter/ Trigger
+│   │                            Interrupter (fenetre + TriggerButton) + triggerinterrupterconfigurator/ (ops)
 │   ├── dimension/skycancel/     Sky Cancel (dimension) ; camera/crosshaircancel/ : Crosshair Cancel (joueur) : demos
 │   │                            du RenderCanceler
 │   ├── camera/radar/            Radar (joueur) : reglages, fenetre Activer / Desactiver, Config, Quick Action
@@ -105,7 +109,8 @@ com.amynna.hololib
     │                            SpaceSoundController (sons du vaisseau), SpaceTextureClient (canal des textures),
     │                            SpaceTextureImport (selecteur de fichier, preparation de l'image importee) ;
     │                            areadisplayer/ : AreaTerrainClient (canal du terrain, vues, remaillage), AreaView,
-    │                            AreaMesher (maillage glouton) ; areaconfigurator/ : backend (op local)
+    │                            AreaMesher (maillage glouton) ; areaconfigurator/ : backend (op local) ;
+    │                            trigger/ : TriggerOpsClient (op local des deux Configurators Trigger)
     └── render/                  TOUS les renderers du mod (regle d'architecture)
         ├── package-info.java    doc detaillee : ordre de rendu, regles (source de verite)
         ├── RenderDispatcher.java seul abonne aux evenements de rendu, route vers les passes
@@ -132,6 +137,7 @@ com.amynna.hololib
         │                        monde/spacemap (SpaceMapCubeRenderer), monde/spaceconfigurator (SpaceHandleRenderer,
         │                        SpaceOrbitHandleRenderer, SpaceConfiguratorWindowRenderer : fenetre + apercu),
         │                        monde/areadisplayer (AreaDisplayerCubeRenderer : terrain, points, trainees, noms),
+        │                        monde/triggerarea (TriggerAreaZoneRenderer : cadre et faces de la zone),
         │                        camera/radar (RadarRenderer : WorldRenderer enregistre avant le ciblage, masque
         │                        HoloOutlineMask, RadarSphere, RadarShaders : shader hololib:radar_composite),
         │                        camera/targeting (TargetOutlineRenderer : contour vert, TargetLinkRenderer : segment),
@@ -512,6 +518,50 @@ ou synthetises) : toute ressource ajoutee y est creditee.
   « Ajouter », croix par ligne ; le Displayer la sauvegarde / synchronise, 128 ids au plus, `AreaScanner` compte ces
   blocs comme de l'air ; chaque changement = rescan complet), « Actualiser » ; actions 0-8 relayees a l'API du Displayer ; fenetre relue quand `revision()` du Displayer change ; `HEIGHT` calcule depuis
   la derniere ligne (un widget qui deborde n'est vise que sur sa partie interieure).
+
+### Modules Trigger (`modules/monde/trigger*`)
+
+- Quatre modules de marker (POSITION) qui executent des **commandes serveur**. Code commun `trigger/` :
+  `TriggerCommands.run` (permission **2** imposee a la source, sortie supprimee, une commande vide est ignoree, une
+  erreur ne remonte jamais au tick, budget de 256 executions par tick et par module ; `sanitize` : 256 caracteres, une
+  ligne). **Chaque declencheur est une liste de commandes** (16 au plus, executees dans l'ordre par `runAll`, toutes
+  meme si l'une echoue) : `List<String>` **immuable remplacee a chaque modification** (`TriggerCommands.with` /
+  `without` / `moved`, copie a l'ecriture : le tick lit la reference sans copie) ; sauvegarde en `ListTag`, une ancienne
+  sauvegarde (une chaine) devient une liste d'un element ; editeur commun `CommandListEditor` (entete « > Nom (n) »
+  replie par defaut, ouvert : champ + « + » (ou Entree), liste `HoloWidgetList` de lignes `HoloWidgetDragRow`
+  glissables avec un crayon (jaune / orange, role ACTION : selectionne la ligne et renvoie sa commande dans le
+  champ ; « + » ou Entree la remplace ensuite, au lieu d'ajouter ; la selection tombe si la liste change) et « x »)
+  et `CommandListGroup` (accordeon : **une liste ouverte a la fois**, la taille d'une fenetre
+  etant fixe ; etat local au client, onglet change = tout replie) ; `TriggerOps` (`OP_LEVEL` 2, `localOp()` cote client par `TriggerOpsClient`, `updateAccess` : acces des
+  fenetres reservees aux operateurs, comme l'Area Displayer Configurator). Les commandes voyagent dans l'etat
+  synchronise du module (aucun canal "ops seulement" n'existe) : les fenetres ops sont masquees aux autres, un client
+  modifie pourrait les lire.
+- `hololib:trigger_area` (marker, tous si « visible ») : `TriggerAreaZone` (`World`, `PUBLIC`, editable au World Editor :
+  translation, rotation, echelle **par axe** = demi-aretes en blocs, bornees a 128 ; `shown()` = option « visible »,
+  une session d'edition la montre toujours) ; etat : commandes `onEnter` / `onExit` / `onTick`, `visible` (defaut non),
+  `players` (oui), `living` (non, hors joueurs et porte-armures). Serveur, chaque tick : transform relu (aucune
+  poignee), centre de la boite de chaque entite teste dans le pave oriente (`HoloEditMath.rotation` inverse), 64
+  entites suivies au plus ; ordre : sorties, entrees, tick (entrees du tick comprises). **Source = l'entite** (`@s`,
+  sa position). Entite morte / dechargee / dans une autre dimension : oubliee **sans** commande de sortie ; au
+  rechargement du marker, l'entree se redeclenche.
+- `hololib:trigger_area_configurator` (marker, **ops**) : fenetre branchee sur la Trigger Area du meme marker
+  (`TriggerAreaModule.of`) : interrupteurs Zone visible / Joueurs / Entites vivantes / Est OP (seuls les joueurs
+  ops, niveau 2, declenchent la zone ; defaut non), puis trois listes de commandes (entree, sortie, tick) ; actions
+  0 ADD, 1 REMOVE / 7 EDIT (index + texte attendu, ignore si la ligne a change), 2 MOVE (kind, from, to), 3-6
+  interrupteurs ;
+  operateur verifie en premier.
+- `hololib:trigger_interrupter` (marker, tous) : `TriggerInterrupterWindow` (120 x 80, `EVERYONE`, `World`, editable) :
+  titre, `TriggerButton` (`HoloWidgetMultiButton` + `HoloScrollable` : clic gauche / droit / molette et molette),
+  texte du dessous facultatif (vide = non dessine, le bouton prend sa place : la taille d'une fenetre est fixe). Onze
+  listes de commandes : par clic OnClick / OnRelease / Clicked (**chaque tick tant que maintenu**, tick de l'appui compris) + cran
+  haut / cran bas. Actions `DOWN` / `UP` / `BEAT` (toutes les 10 ticks tant qu'un clic est tenu) / `SCROLL` : le serveur
+  verifie la source, la distance a la fenetre (32 blocs, meme niveau) et « OP requis » (defaut **oui**) ; les commandes
+  executees viennent de l'etat serveur, jamais d'une action. Un maintien qui se tait 40 ticks, un joueur deconnecte /
+  parti / eloigne / sans droit : relache d'office (commande OnRelease si joignable). **Source = le joueur** (`@s`).
+- `hololib:trigger_interrupter_configurator` (marker, **ops**) : fenetre (240 x 212) branchee sur le Trigger
+  Interrupter du meme marker : champs Titre / Bouton / Dessous, interrupteur OP requis, onglets Clic Gauche / Clic
+  Droit / Clic Molette (3 listes) et Molette (haut / bas) ; l'onglet est local au client ; actions 0 TEXT,
+  1 REQUIRE_OP, 2 ADD, 3 REMOVE, 4 MOVE, 5 EDIT (emplacement + index / texte attendu / from, to).
 
 ### Module Radar (`modules/camera/radar`, `client/modules/camera/radar`, `client/render/modules/camera/radar`)
 

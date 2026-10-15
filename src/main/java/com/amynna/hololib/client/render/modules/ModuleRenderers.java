@@ -13,6 +13,7 @@ import com.amynna.hololib.client.render.modules.monde.areadisplayer.AreaDisplaye
 import com.amynna.hololib.client.render.modules.monde.screen.ScreenRenderers;
 import com.amynna.hololib.client.render.modules.monde.spaceconfigurator.SpaceConfiguratorRenderers;
 import com.amynna.hololib.client.render.modules.monde.spacemap.SpaceMapRenderers;
+import com.amynna.hololib.client.render.modules.monde.triggerarea.TriggerAreaRenderers;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -37,6 +38,7 @@ public final class ModuleRenderers
             SpaceConfiguratorRenderers.register();
             AreaDisplayerRenderers.register();
             ScreenRenderers.register();
+            TriggerAreaRenderers.register();
             AttackGuardRenderers.register();
             RadarRenderers.register();                 // composition plein ecran du radar, par-dessus les precedents
             TargetingRenderers.register();             // apres le radar : contour de la cible au-dessus du sien

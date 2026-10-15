@@ -34,6 +34,10 @@ import com.amynna.hololib.modules.monde.screenconfigurator.ScreenConfiguratorMod
 import com.amynna.hololib.modules.monde.spaceconfigurator.SpaceConfiguratorModule;
 import com.amynna.hololib.modules.monde.spacecontroller.SpaceControllerModule;
 import com.amynna.hololib.modules.monde.spacemap.SpaceMapModule;
+import com.amynna.hololib.modules.monde.triggerarea.TriggerAreaModule;
+import com.amynna.hololib.modules.monde.triggerareaconfigurator.TriggerAreaConfiguratorModule;
+import com.amynna.hololib.modules.monde.triggerinterrupter.TriggerInterrupterModule;
+import com.amynna.hololib.modules.monde.triggerinterrupterconfigurator.TriggerInterrupterConfiguratorModule;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.RegistryObject;
 
@@ -64,6 +68,17 @@ public final class HoloLibModules
     public static final RegistryObject<HoloModuleType<ScreenConfiguratorModule>> SCREEN_CONFIGURATOR =
             REGISTER.register("screen_configurator",
                     () -> new HoloModuleType<>(HoloModuleTarget.POSITION, ScreenConfiguratorModule::new));
+    public static final RegistryObject<HoloModuleType<TriggerAreaModule>> TRIGGER_AREA = REGISTER.register(
+            "trigger_area", () -> new HoloModuleType<>(HoloModuleTarget.POSITION, TriggerAreaModule::new));
+    public static final RegistryObject<HoloModuleType<TriggerAreaConfiguratorModule>> TRIGGER_AREA_CONFIGURATOR =
+            REGISTER.register("trigger_area_configurator",
+                    () -> new HoloModuleType<>(HoloModuleTarget.POSITION, TriggerAreaConfiguratorModule::new));
+    public static final RegistryObject<HoloModuleType<TriggerInterrupterModule>> TRIGGER_INTERRUPTER =
+            REGISTER.register("trigger_interrupter",
+                    () -> new HoloModuleType<>(HoloModuleTarget.POSITION, TriggerInterrupterModule::new));
+    public static final RegistryObject<HoloModuleType<TriggerInterrupterConfiguratorModule>>
+            TRIGGER_INTERRUPTER_CONFIGURATOR = REGISTER.register("trigger_interrupter_configurator",
+                    () -> new HoloModuleType<>(HoloModuleTarget.POSITION, TriggerInterrupterConfiguratorModule::new));
     public static final RegistryObject<HoloModuleType<SpacePilotModule>> SPACE_PILOT = REGISTER.register(
             "space_pilot", () -> new HoloModuleType<>(HoloModuleTarget.PLAYER, SpacePilotModule::new));
     public static final RegistryObject<HoloModuleType<SpaceKnowledgeModule>> SPACE_KNOWLEDGE = REGISTER.register(
