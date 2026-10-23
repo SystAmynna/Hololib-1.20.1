@@ -522,7 +522,7 @@ ou synthetises) : toute ressource ajoutee y est creditee.
 ### Modules Trigger (`modules/monde/trigger*`)
 
 - Quatre modules de marker (POSITION) qui executent des **commandes serveur**. Code commun `trigger/` :
-  `TriggerCommands.run` (permission **2** imposee a la source, sortie supprimee, une commande vide est ignoree, une
+  `TriggerCommands.run` (permission **2** imposee a la source (comme un command block, la source reste le declencheur : `@s`), sortie supprimee, une commande vide est ignoree, une
   erreur ne remonte jamais au tick, budget de 256 executions par tick et par module ; `sanitize` : 256 caracteres, une
   ligne). **Chaque declencheur est une liste de commandes** (16 au plus, executees dans l'ordre par `runAll`, toutes
   meme si l'une echoue) : `List<String>` **immuable remplacee a chaque modification** (`TriggerCommands.with` /
@@ -532,8 +532,9 @@ ou synthetises) : toute ressource ajoutee y est creditee.
   glissables avec un crayon (jaune / orange, role ACTION : selectionne la ligne et renvoie sa commande dans le
   champ ; « + » ou Entree la remplace ensuite, au lieu d'ajouter ; la selection tombe si la liste change) et « x »)
   et `CommandListGroup` (accordeon : **une liste ouverte a la fois**, la taille d'une fenetre
-  etant fixe ; etat local au client, onglet change = tout replie) ; `TriggerOps` (`OP_LEVEL` 2, `localOp()` cote client par `TriggerOpsClient`, `updateAccess` : acces des
-  fenetres reservees aux operateurs, comme l'Area Displayer Configurator). Les commandes voyagent dans l'etat
+  etant fixe ; etat local au client, onglet change = tout replie) ; `TriggerOps` (`CONFIG_LEVEL` 4 : seuls les OP niveau 4 voient et utilisent les deux Configurators, verifie par le
+  serveur en premier, car les commandes s'executent sans les droits du declencheur ; `OP_LEVEL` 2 : regles d'usage
+  « OP requis » / « Est OP » ; `localOp()` cote client par `TriggerOpsClient`, `updateAccess` : acces des fenetres). Les commandes voyagent dans l'etat
   synchronise du module (aucun canal "ops seulement" n'existe) : les fenetres ops sont masquees aux autres, un client
   modifie pourrait les lire.
 - `hololib:trigger_area` (marker, tous si « visible ») : `TriggerAreaZone` (`World`, `PUBLIC`, editable au World Editor :
@@ -544,7 +545,7 @@ ou synthetises) : toute ressource ajoutee y est creditee.
   entites suivies au plus ; ordre : sorties, entrees, tick (entrees du tick comprises). **Source = l'entite** (`@s`,
   sa position). Entite morte / dechargee / dans une autre dimension : oubliee **sans** commande de sortie ; au
   rechargement du marker, l'entree se redeclenche.
-- `hololib:trigger_area_configurator` (marker, **ops**) : fenetre branchee sur la Trigger Area du meme marker
+- `hololib:trigger_area_configurator` (marker, **OP niveau 4**) : fenetre branchee sur la Trigger Area du meme marker
   (`TriggerAreaModule.of`) : interrupteurs Zone visible / Joueurs / Entites vivantes / Est OP (seuls les joueurs
   ops, niveau 2, declenchent la zone ; defaut non), puis trois listes de commandes (entree, sortie, tick) ; actions
   0 ADD, 1 REMOVE / 7 EDIT (index + texte attendu, ignore si la ligne a change), 2 MOVE (kind, from, to), 3-6
@@ -558,7 +559,7 @@ ou synthetises) : toute ressource ajoutee y est creditee.
   verifie la source, la distance a la fenetre (32 blocs, meme niveau) et « OP requis » (defaut **oui**) ; les commandes
   executees viennent de l'etat serveur, jamais d'une action. Un maintien qui se tait 40 ticks, un joueur deconnecte /
   parti / eloigne / sans droit : relache d'office (commande OnRelease si joignable). **Source = le joueur** (`@s`).
-- `hololib:trigger_interrupter_configurator` (marker, **ops**) : fenetre (240 x 212) branchee sur le Trigger
+- `hololib:trigger_interrupter_configurator` (marker, **OP niveau 4**) : fenetre (240 x 212) branchee sur le Trigger
   Interrupter du meme marker : champs Titre / Bouton / Dessous, interrupteur OP requis, onglets Clic Gauche / Clic
   Droit / Clic Molette (3 listes) et Molette (haut / bas) ; l'onglet est local au client ; actions 0 TEXT,
   1 REQUIRE_OP, 2 ADD, 3 REMOVE, 4 MOVE, 5 EDIT (emplacement + index / texte attendu / from, to).

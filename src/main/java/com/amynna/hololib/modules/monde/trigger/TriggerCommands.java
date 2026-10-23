@@ -10,8 +10,10 @@ import java.util.List;
 
 /**
  * Execution des commandes des modules Trigger (Trigger Area, Trigger Interrupter), cote serveur. Une commande vide
- * (ou blanche) est ignoree. Elle s'execute avec la <b>permission {@value #PERMISSION}</b> imposee a la source (une
- * entite ou un joueur n'a pas ce droit par lui-meme) et sa sortie est supprimee ; une erreur de syntaxe ou
+ * (ou blanche) est ignoree. La source reste le declencheur (joueur ou entite : {@code @s}) mais s'execute avec la
+ * <b>permission {@value #PERMISSION}</b> imposee, comme un command block, quels que soient ses droits ; sa sortie est
+ * supprimee. Les commandes ne sont donc ecrites que par les operateurs de niveau {@value TriggerOps#CONFIG_LEVEL}
+ * (fenetres des Configurators) ; une erreur de syntaxe ou
  * d'execution ne remonte jamais au tick.
  * <p>
  * Un declencheur porte une <b>liste</b> de commandes, executees dans l'ordre ({@link #runAll}), au plus

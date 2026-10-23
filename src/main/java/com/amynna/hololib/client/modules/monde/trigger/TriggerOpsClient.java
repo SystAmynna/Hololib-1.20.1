@@ -28,6 +28,6 @@ public final class TriggerOpsClient implements TriggerOps.Backend
     public boolean localOp()
     {
         Minecraft mc = Minecraft.getInstance();
-        return mc.player != null && mc.player.hasPermissions(TriggerOps.OP_LEVEL);
+        return mc.player != null && mc.player.hasPermissions(TriggerOps.CONFIG_LEVEL);
     }
 }

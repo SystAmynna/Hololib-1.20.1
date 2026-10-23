@@ -18,7 +18,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * Module {@code hololib:trigger_interrupter_configurator} (memoire de position, marker), reserve aux operateurs :
+ * Module {@code hololib:trigger_interrupter_configurator} (memoire de position, marker), reserve aux operateurs de niveau {@value TriggerOps#CONFIG_LEVEL} :
  * reglages du Trigger Interrupter <b>du meme marker</b> ({@link TriggerInterrupterModule#of}, deux cotes ; sans lui :
  * « Trigger Interrupter requis sur ce marker », rien d'editable). Il ne porte aucun etat : le Trigger Interrupter reste
  * la seule autorite, modifie par son API serveur ; la fenetre ({@link TriggerInterrupterConfiguratorWindow}) relit son
@@ -98,7 +98,7 @@ public final class TriggerInterrupterConfiguratorModule extends HoloModule
     @Override
     public void handleAction(ServerPlayer player, HoloObject source, FriendlyByteBuf buf)
     {
-        if (!player.hasPermissions(TriggerOps.OP_LEVEL)) return;
+        if (!player.hasPermissions(TriggerOps.CONFIG_LEVEL)) return;
         if (source == null || source != window) return;
         TriggerInterrupterModule interrupter = TriggerInterrupterModule.of(this);
         if (interrupter == null) {

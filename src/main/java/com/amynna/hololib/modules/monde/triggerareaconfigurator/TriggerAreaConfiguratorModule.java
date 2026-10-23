@@ -18,7 +18,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * Module {@code hololib:trigger_area_configurator} (memoire de position, marker), reserve aux operateurs : reglages de
+ * Module {@code hololib:trigger_area_configurator} (memoire de position, marker), reserve aux operateurs de niveau {@value TriggerOps#CONFIG_LEVEL} : reglages de
  * la Trigger Area <b>du meme marker</b> ({@link TriggerAreaModule#of}, deux cotes ; sans Trigger Area : « Trigger Area
  * requise sur ce marker », rien d'editable). Il ne porte aucun etat : la Trigger Area reste la seule autorite, modifiee
  * par son API serveur ; la fenetre ({@link TriggerAreaConfiguratorWindow}) relit son etat quand son compteur de
@@ -99,7 +99,7 @@ public final class TriggerAreaConfiguratorModule extends HoloModule
     @Override
     public void handleAction(ServerPlayer player, HoloObject source, FriendlyByteBuf buf)
     {
-        if (!player.hasPermissions(TriggerOps.OP_LEVEL)) return;
+        if (!player.hasPermissions(TriggerOps.CONFIG_LEVEL)) return;
         if (source == null || source != window) return;
         TriggerAreaModule area = TriggerAreaModule.of(this);
         if (area == null) {
